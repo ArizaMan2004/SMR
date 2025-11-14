@@ -30,6 +30,26 @@ interface ExchangeRates {
     error: string | null;
 }
 
+// --- UTILIDAD: Función para convertir minutos decimales a formato mm:ss ---
+const formatTimeInMinutes = (totalMinutes: number): string => {
+    if (totalMinutes < 0) return "00:00";
+    
+    // Obtener la parte entera de los minutos
+    const minutes = Math.floor(totalMinutes);
+    
+    // Obtener los segundos restantes (la parte decimal * 60)
+    const secondsDecimal = (totalMinutes - minutes) * 60;
+    // Redondear a un entero (o usar Math.round si prefieres)
+    const seconds = Math.round(secondsDecimal);
+
+    // Formatear a mm:ss con padding de cero
+    const formattedMinutes = String(minutes).padStart(2, '0');
+    const formattedSeconds = String(seconds).padStart(2, '0');
+
+    return `${formattedMinutes}:${formattedSeconds}`;
+};
+
+
 // --- Componente de Visualización de Resultados en Multidivisa ---
 interface MultiCurrencyResultProps {
     usdAmount: number | null;
@@ -41,7 +61,6 @@ const MultiCurrencyResult: React.FC<MultiCurrencyResultProps> = ({ usdAmount, ra
     if (usdAmount === null || usdAmount <= 0) return null;
 
     const bsAmount = rates.usdRate ? usdAmount * rates.usdRate : null;
-    // Cálculo de EUR usando tasa cruzada (USD a Bs, luego Bs a EUR)
     const eurAmount = rates.usdRate && rates.eurRate ? (usdAmount * rates.usdRate) / rates.eurRate : null;
 
     return (
@@ -170,7 +189,6 @@ const LaserCutsCalculator: React.FC<LaserCutsCalculatorProps> = ({ rates }) => {
         let totalTimeInMinutes = 0;
 
         tiempos.forEach(t => {
-            // Asegura que los valores sean números positivos
             const minutes = Math.max(0, t.minutes || 0);
             const seconds = Math.max(0, t.seconds || 0);
 
@@ -272,14 +290,15 @@ const LaserCutsCalculator: React.FC<LaserCutsCalculatorProps> = ({ rates }) => {
                 <Plus className="w-4 h-4 mr-2" /> Añadir Otro Tiempo de Corte 
             </Button>
             
-            {/* NUEVO/MEJORADO: Mostrar el tiempo total de corte */}
+            {/* MEJORA: Mostrar el tiempo total de corte en formato mm:ss */}
             {resultado?.totalMinutes !== undefined && resultado.totalMinutes > 0 && (
                  <div className="p-4 bg-blue-50/50 dark:bg-blue-900/20 rounded-md">
                     <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
                         Tiempo Total de Corte: 
                         <strong className="ml-2 text-xl text-blue-600 dark:text-blue-400">
-                            {resultado.totalMinutes.toFixed(3)} minutos
+                            {formatTimeInMinutes(resultado.totalMinutes)}
                         </strong>
+                        <span className="text-sm text-muted-foreground ml-1">(mm:ss)</span>
                     </p>
                  </div>
             )}
