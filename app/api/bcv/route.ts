@@ -15,23 +15,40 @@ export async function GET() {
     }
 
     const data = await res.json();
+    
+    // Extracción de datos (Current)
     const usd = data?.current?.usd;
+    const eur = data?.current?.eur; // <-- AÑADIDO: Tasa del Euro
     const date = data?.current?.date;
 
+    // Validación de USD
     if (!usd) {
       return NextResponse.json(
         { error: "No se encontró el valor de USD en la respuesta" },
         { status: 404 }
       );
     }
-
+    
+    // Extracción de cambios porcentuales
     const previousUsd = data?.previous?.usd ?? null;
-    const change = data?.changePercentage?.usd ?? null;
+    const changeUsd = data?.changePercentage?.usd ?? null;
+    const previousEur = data?.previous?.eur ?? null; // <-- AÑADIDO
+    const changeEur = data?.changePercentage?.eur ?? null; // <-- AÑADIDO
 
     return NextResponse.json({
-      rate: Number(usd),
-      previous: Number(previousUsd),
-      changePercentage: Number(change),
+      // Tasas USD
+      rate: Number(usd), // Manteniendo 'rate' por compatibilidad
+      usdRate: Number(usd), 
+      previous: previousUsd ? Number(previousUsd) : null,
+      changePercentage: changeUsd ? Number(changeUsd) : null,
+      changePercentageUsd: changeUsd ? Number(changeUsd) : null,
+      
+      // Tasas EUR
+      eurRate: eur ? Number(eur) : null, 
+      previousEur: previousEur ? Number(previousEur) : null,
+      changePercentageEur: changeEur ? Number(changeEur) : null,
+      
+      // Metadatos
       date,
       lastUpdated: new Date(),
     });

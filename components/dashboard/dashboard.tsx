@@ -24,12 +24,15 @@ import { type PagoTransaction } from "@/components/orden/PaymentHistoryView"
 
 // NUEVO: Importación de la vista de tareas
 import TasksView from "@/components/dashboard/tasks-view"
+// 🔑 NUEVA IMPORTACIÓN: CalculatorView
+import CalculatorView from "@/components/dashboard/CalculatorView" // <-- AÑADIDO
 
 // Iconos
 // 🔑 Se añaden Image, Handshake, Stamp y otros íconos
 import { 
     Plus, DollarSign, Users, Upload, Trash2, LogOut, Image, Handshake, Stamp, 
-    CheckCircle, FileText, Package, BarChart, Activity, ClipboardList 
+    CheckCircle, FileText, Package, BarChart, Activity, ClipboardList,
+    Calculator // <-- AÑADIDO
 } from "lucide-react" 
 
 // Tipos y Servicios 
@@ -50,15 +53,15 @@ import { generateOrderPDF, type PDFOptions } from "@/lib/services/pdf-generator"
 
 
 // --- TIPOS ---
-// ✅ CORRECCIÓN: Eliminadas las vistas de products, sales, statistics, reports
-type ActiveView = "orders" | "clients" | "tasks" 
+// ✅ CORRECCIÓN: Añadida la nueva vista 'calculator'
+type ActiveView = "orders" | "clients" | "tasks" | "calculator" // <-- MODIFICADO
 type OrdenEditable = OrdenServicio | null
 
 
 export default function Dashboard() {
-    const { user, logout } = useAuth()
+    const { user, logout } = useAuth() // Asumiendo que 'useAuth' existe
     // 🔑 CORRECCIÓN: Inicialización de 'ordenes' como array vacío
-    const [ordenes, setOrdenes] = useState<OrdenServicio[]>([]) 
+    const [ordenes, setOrdenes] = useState<OrdenServicio[]>([]) // Usar tu tipo real de órdenes
     const [currentBcvRate, setCurrentBcvRate] = useState<number>(() => getBCVRate().rate || 0); 
     // ✅ CORRECCIÓN: 'orders' sigue siendo el default, pero el tipo ya no incluye las eliminadas
     const [activeView, setActiveView] = useState<ActiveView>("orders") 
@@ -67,15 +70,15 @@ export default function Dashboard() {
     const [ordenToModify, setOrdenToModify] = useState<OrdenEditable>(null) 
     const currentUserId = user?.uid || "mock-user-admin-123"
     
-    // 🔑 ESTADOS PARA LOGO, FIRMA Y SELLO
+    // Estados para Logo, Firma y Sello (Ajustar a tu implementación)
     const [pdfLogoBase64, setPdfLogoBase64] = useState<string | undefined>(undefined); 
     const [firmaBase64, setFirmaBase64State] = useState<string | undefined>(undefined); 
     const [selloBase64, setSelloBase64State] = useState<string | undefined>(undefined); 
 
     // --- LÓGICA DE DATOS Y EFECTOS ---
     useEffect(() => {
-        // La condición sigue siendo válida, solo comprueba las vistas que sí existen
-        if (!user || (activeView !== "orders" && activeView !== "clients" && activeView !== "tasks")) return
+        // Incluir la nueva vista en la condición del efecto
+        if (!user || (activeView !== "orders" && activeView !== "clients" && activeView !== "tasks" && activeView !== "calculator")) return // <-- MODIFICADO
         
         // 🔑 CARGA INICIAL DE ASSETS (Logo, Firma y Sello)
         getLogoBase64().then(setPdfLogoBase64);
@@ -247,11 +250,12 @@ export default function Dashboard() {
         logout();
     }
     
-    // ✅ CORRECCIÓN: Eliminados los navItems de products, sales, statistics, reports
+    // ✅ CORRECCIÓN: Añadida la vista 'calculator' al menú de navegación
     const navItems = [
       { id: 'tasks', label: 'Mis Tareas', icon: <CheckCircle className="w-5 h-5" /> }, 
       { id: 'orders', label: 'Órdenes de Trabajo', icon: <FileText className="w-5 h-5" /> }, 
       { id: 'clients', label: 'Clientes y Cobranza', icon: <Users className="w-5 h-5" /> }, 
+      { id: 'calculator', label: 'Calculadora', icon: <Calculator className="w-5 h-5" /> }, // <-- AÑADIDO
     ];
     
 
@@ -273,6 +277,11 @@ export default function Dashboard() {
           </header>
           
           <main className="flex-1 overflow-y-auto">
+              
+              {/* VISTA: CALCULADORA <-- AÑADIDO */}
+              {activeView === "calculator" && (
+                  <CalculatorView />
+              )}
               
               {/* VISTA: MIS TAREAS */}
               {activeView === "tasks" && (
@@ -434,8 +443,6 @@ export default function Dashboard() {
                 </div>
               </div>
             )}
-            
-            {/* ✅ CORRECCIÓN: ELIMINADO el bloque de renderizado condicional para ProductsView, SalesView, StatisticsView, y ReportsView */}
             
           </main>
         </div>
