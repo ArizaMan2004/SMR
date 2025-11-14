@@ -43,39 +43,44 @@ export interface ServiciosSolicitados {
 export interface PaymentLog {
     montoUSD: number;
     fechaRegistro: string; // ISO String para el registro
-    metodo: 'Transferencia' | 'Efectivo' | 'Pago Móvil' | 'Punto de Venta' | 'Otro';
-    referencia?: string;
-    registradoPor: string; // ID del usuario que registra el pago
+    metodo: 'Transferencia' | 'Efectivo' | 'Pago Móvil' | 'Tarjeta Débito/Crédito' | 'Otro';
+    referencia: string; // Número de referencia/lote
+    bancoOrigen?: string;
+    bancoDestino?: string;
 }
 
-// --- Interfaz de Ítem de Cobro / Tarea ---
-
-// 🔑 DEFINICIÓN DE TIPOS UNIFICADOS
-export type TipoServicio = 'CORTE_LASER' | 'IMPRESION' | 'ROTULACION' | 'AVISO_CORPOREO' | 'OTROS';
-export type UnidadItem = 'm2' | 'und' | 'tiempo';
+// --- Tipos de Servicio y Unidades ---
+export type TipoServicio = 'IMPRESION' | 'CORTE_LASER' | 'ROTULACION' | 'AVISO_CORPOREO' | 'OTROS';
+export type UnidadItem = 'm2' | 'metros' | 'unidades' | 'horas' | 'piezas';
 
 
+// --- Interfaz de Ítem de la Orden (el producto o servicio individual) ---
 export interface ItemOrden {
     nombre: string;
-    // 🔑 TIPO DE SERVICIO CORREGIDO:
     tipoServicio: TipoServicio;
-    unidad: UnidadItem;
     cantidad: number;
-    precioUnitario: number; // Precio por m2, unidad, o minuto
-    
-    // Campos opcionales según la unidad de medida
-    medidaXCm?: number;
-    medidaYCm?: number;
-    tiempoCorte?: string; // Usado si unidad es 'tiempo'
-    
-    // 🔑 NUEVOS CAMPOS AÑADIDOS para los detalles de material
-    materialDeImpresion?: string; // Ej: "Vinil Brillante"
-    materialDetalleCorte?: string; // Ej: "Acrilico 3mm Negro"
+    unidad: UnidadItem;
+    largo?: number; // Medida en la unidad especificada
+    ancho?: number; // Medida en la unidad especificada
+    tiempoEstimadoMinutos?: number; // Solo para corte láser
 
-    material?: string; // Campo antiguo/genérico (mantengo el campo original por si acaso)
+    // Impresión
+    materialDeImpresion?: string; // Tipo de material (Vinil, Lona, Papel, etc.)
+
+    // Corte Láser
+    materialDetalleCorte?: string; // Tipo de material (Acrilico, MDF, etc.)
+    grosorCorte?: number; // Grosor en mm
+    materialPropio?: 'Propio' | 'Intermediario'; // Campo antiguo/genérico (mantengo el campo original por si acaso)
     impresionMaterialPropio?: 'Propio' | 'Intermediario';
 
     empleadoAsignado?: string; 
+    
+    // Precios
+    precioUnitario: number; // Precio base (ej. por m2, por unidad)
+    subtotal: number;
+
+    // ✅ CORRECCIÓN: Referencias a archivos/imágenes
+    imagenes?: string[]; // URLs de las imágenes o referencias de archivos
 }
 
 // Se mantiene para compatibilidad, si se usa en order-utils.ts
@@ -110,10 +115,13 @@ export interface OrdenServicio {
     totalBS: number; // Total calculado (en Bolívares)
     
     // CAMPOS DE PAGO ACTUALIZADOS
-    montoPagadoUSD: number; // Se convierte en la suma de los abonos
-    estadoPago: EstadoPago; // Determinado por la comparación de totalUSD vs montoPagadoUSD
-    registroPagos: PaymentLog[]; // Historial de abonos
+    montoPagadoUSD: number; // Se convierte en totalUSD si está 'PAGADO', o el monto abonado
+    estadoPago: EstadoPago;
+    historialPagos: PaymentLog[]; // Registro de abonos
     
-    // Estado de la orden (Progreso)
+    // CAMPOS DE ESTADO DE LA ORDEN
     estado: EstadoOrden; 
+    
+    // Fechas de seguimiento
+    fechaFinalizacion?: string; // ISO String
 }

@@ -10,17 +10,18 @@ import {
   query,
   orderBy,
   where,
+  getDoc, // 👈 NECESARIO: Importar getDoc para leer el documento
   getFirestore,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import type { OrdenServicio, EstadoOrden, EstadoPago, PaymentLog } from "@/lib/types/orden";
+import { db } from "@/lib/firebase"; // Asegúrate de que esta ruta a tu instancia de db sea correcta
+import type { OrdenServicio, EstadoOrden, EstadoPago, PaymentLog, ItemOrden } from "@/lib/types/orden"; // 👈 NECESARIO: Importar ItemOrden
 
 /**
  * 🔹 Crea una nueva orden en Firestore
  */
 export async function createOrden(data: OrdenServicio) {
   try {
-    const colRef = collection(db, "ordenes"); // Asegúrate de que este nombre coincida con tu colección real
+    const colRef = collection(db, "ordenes"); 
     const docRef = await addDoc(colRef, {
       ...data,
       fecha: data.fecha || new Date().toISOString(),
@@ -42,26 +43,20 @@ export function subscribeToOrdenes(
 ) {
   try {
     const colRef = collection(db, "ordenes");
-
-    // ⚠️ Si tus órdenes NO tienen un campo de usuario, elimina el filtro "where"
-    const q = query(
-      colRef,
-      // where("registradoPorUserId", "==", userId), // ← descomenta solo si guardas este campo
-      orderBy("fecha", "desc")
-    );
+    // Puedes ajustar el query si necesitas filtrar por usuario o algún otro criterio
+    const q = query(colRef, orderBy("fecha", "desc")); 
 
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const data = snapshot.docs.map((doc) => ({
+        const ordenes = snapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         })) as OrdenServicio[];
-
-        callback(data);
+        callback(ordenes);
       },
       (error) => {
-        console.error("Error en la suscripción de órdenes:", error);
+        console.error("Error al escuchar órdenes:", error);
         callback([], error);
       }
     );
@@ -111,13 +106,74 @@ export async function updateOrdenPaymentLog(
 ) {
   try {
     const docRef = doc(db, "ordenes", ordenId);
-    await updateDoc(docRef, {
+    await updateDoc(docRef, { 
       estadoPago: nuevoEstadoPago,
-      montoPagadoUSD,
-      registroPagos: historialPagos,
+      montoPagadoUSD: montoPagadoUSD,
+      historialPagos: historialPagos,
     });
-    console.log("💰 Pago actualizado para orden:", ordenId);
+    console.log("💲 Pago actualizado:", ordenId);
   } catch (error) {
     console.error("❌ Error al actualizar el pago:", error);
+  }
+}
+
+
+// =========================================================================
+// ✅ NUEVA FUNCIÓN PARA ACTUALIZAR IMÁGENES DEL ÍTEM (Cloudinary)
+// =========================================================================
+
+/**
+ * 🔹 Encuentra y actualiza el array 'imagenes' de un ítem específico dentro de la orden.
+ * * @param ordenId ID del documento de la orden.
+ * @param itemNombre El nombre del ítem (se usa como identificador, **NOTA**: usar un ID único por ítem es más seguro).
+ * @param newImages El array completo de URLs de imágenes (incluyendo la URL recién subida).
+ */
+export async function updateItemImagesInOrden(
+  ordenId: string, 
+  itemNombre: string, 
+  newImages: string[]
+) {
+  try {
+    const docRef = doc(db, "ordenes", ordenId);
+    
+    // 1. OBTENER el documento actual de la orden
+    const docSnap = await getDoc(docRef);
+
+    if (!docSnap.exists()) {
+      throw new Error(`Documento de orden con ID ${ordenId} no encontrado.`);
+    }
+
+    // 2. Obtener el array de ítems y buscar el ítem a actualizar
+    const ordenData = docSnap.data() as OrdenServicio;
+    let items: ItemOrden[] = ordenData.items || [];
+    let itemIndex = items.findIndex(item => item.nombre === itemNombre);
+
+    if (itemIndex === -1) {
+      // NOTA: Si usaras un ID único en lugar del nombre, este error es menos probable.
+      throw new Error(`Ítem con nombre '${itemNombre}' no encontrado en la orden ${ordenId}.`);
+    }
+
+    // 3. Modificar el array de ítems (creando una copia inmutable)
+    const updatedItems = items.map((item, index) => {
+      if (index === itemIndex) {
+        // Clonar el ítem y actualizar solo el campo 'imagenes'
+        return { 
+          ...item, 
+          imagenes: newImages 
+        };
+      }
+      return item;
+    });
+
+    // 4. GUARDAR el array de items modificado en Firestore
+    await updateDoc(docRef, { 
+      items: updatedItems 
+    });
+
+    console.log(`✅ Imágenes del ítem '${itemNombre}' actualizadas en orden ${ordenId}.`);
+  } catch (error) {
+    console.error("❌ Error al actualizar las imágenes del ítem:", error);
+    // Propagar el error para que el modal lo pueda capturar y mostrar
+    throw new Error("Fallo al guardar la URL en la base de datos: " + (error as Error).message);
   }
 }
