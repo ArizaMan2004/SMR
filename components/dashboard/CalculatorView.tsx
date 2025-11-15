@@ -7,21 +7,22 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { 
-    Calculator as CalcIcon, 
-    Ruler, 
-    DollarSign, 
+import {
+    Calculator as CalcIcon,
+    Ruler,
+    DollarSign,
     Timer,
-    ArrowRight, 
-    Euro, 
-    Trash2, 
-    Plus,    
-    Loader2 
+    ArrowRight,
+    Euro,
+    Trash2,
+    Plus,
+    Loader2,
+    Repeat2 // Nuevo ícono para la inversión de sentido
 } from "lucide-react";
 // Importar el servicio BCV para obtener las tasas (Asumiendo que existe en la ruta lib)
-import { fetchBCVRateFromAPI } from "@/lib/bcv-service"; 
+import { fetchBCVRateFromAPI } from "@/lib/bcv-service";
 
-// --- Tipado para las tasas de cambio ---
+// --- Tipado para las tasas de cambio (sin cambios) ---
 interface ExchangeRates {
     usdRate: number | null; // Tasa Bs por 1 USD
     eurRate: number | null; // Tasa Bs por 1 EUR
@@ -29,10 +30,10 @@ interface ExchangeRates {
     error: string | null;
 }
 
-// --- UTILIDAD: Función para convertir minutos decimales a formato mm:ss ---
+// --- UTILIDAD: Función para convertir minutos decimales a formato mm:ss (sin cambios) ---
 const formatTimeInMinutes = (totalMinutes: number): string => {
     if (totalMinutes < 0) return "00:00";
-    
+
     const minutes = Math.floor(totalMinutes);
     const secondsDecimal = (totalMinutes - minutes) * 60;
     const seconds = Math.round(secondsDecimal);
@@ -43,19 +44,30 @@ const formatTimeInMinutes = (totalMinutes: number): string => {
     return `${formattedMinutes}:${formattedSeconds}`;
 };
 
-// --- UTILIDAD: Función para formatear Bolívares a estilo VENEZOLANO (1.234.567,89) ---
+// --- UTILIDAD: Función para formatear Bolívares a estilo VENEZOLANO (1.234.567,89) (sin cambios) ---
 const formatCurrencyBs = (amount: number | null): string => {
     if (amount === null || isNaN(amount)) return "0,00";
-    
+
     // Usar Intl.NumberFormat para formatear al estándar es-VE (español de Venezuela)
-    return new Intl.NumberFormat('es-VE', { 
-        minimumFractionDigits: 2, 
-        maximumFractionDigits: 2 
+    return new Intl.NumberFormat('es-VE', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }).format(amount);
+};
+
+// --- UTILIDAD: Función para formatear Divisas (USD/EUR) ---
+const formatCurrencyForeign = (amount: number | null): string => {
+    if (amount === null || isNaN(amount)) return "0.00";
+
+    // Usar Intl.NumberFormat para formatear a un estándar con punto decimal
+    return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
     }).format(amount);
 };
 
 
-// --- Componente de Visualización de Resultados en Multidivisa ---
+// --- Componente de Visualización de Resultados en Multidivisa (sin cambios) ---
 interface MultiCurrencyResultProps {
     usdAmount: number | null;
     rates: ExchangeRates;
@@ -67,14 +79,14 @@ const MultiCurrencyResult: React.FC<MultiCurrencyResultProps> = ({ usdAmount, ra
 
     // Tasa de Bolívares (Bs) PRINCIPAL (usando la tasa del Dólar para el cobro)
     const bsAmount_usdRate = rates.usdRate ? usdAmount * rates.usdRate : null;
-    
+
     // Tasa de Bolívares (Bs) SECUNDARIA (usando la tasa del Euro para referencia)
     const bsAmount_euroRate = rates.eurRate ? usdAmount * rates.eurRate : null;
 
     return (
         <div className="mt-4 p-4 border rounded-md bg-green-50 dark:bg-green-900/20 space-y-2">
             <h4 className="font-semibold text-lg">{title}:</h4>
-            
+
             {/* Monto principal en USD (Mantenemos formato USD con punto decimal) */}
             <div className="flex justify-between items-center">
                 <span className="text-xl font-bold text-green-600 dark:text-green-400">
@@ -92,7 +104,7 @@ const MultiCurrencyResult: React.FC<MultiCurrencyResultProps> = ({ usdAmount, ra
                     </strong>
                 </div>
             )}
-            
+
             {/* Resultado Secundario en Bolívares (Referencia con Tasa Euro) - FORMATO BS */}
             {bsAmount_euroRate !== null && (
                 <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
@@ -100,7 +112,7 @@ const MultiCurrencyResult: React.FC<MultiCurrencyResultProps> = ({ usdAmount, ra
                     <strong className="text-sm">Bs {formatCurrencyBs(bsAmount_euroRate)}</strong>
                 </div>
             )}
-            
+
             {rates.loading && <p className="text-xs text-yellow-600 mt-2">Cargando tasas BCV...</p>}
             {rates.error && <p className="text-xs text-red-600 mt-2">Error en tasas BCV.</p>}
         </div>
@@ -108,7 +120,7 @@ const MultiCurrencyResult: React.FC<MultiCurrencyResultProps> = ({ usdAmount, ra
 };
 
 
-// --- Tipado para una medición individual ---
+// --- Tipado para una medición individual (sin cambios) ---
 interface Measurement {
     id: number; // Para una clave única en el renderizado
     cmAlto: number;
@@ -116,7 +128,7 @@ interface Measurement {
     precioDolar: number; // Precio por m² (USD)
 }
 
-// --- CÁLCULO 1: COSTO POR METRO CUADRADO (MODIFICADO PARA MÚLTIPLES ENTRADAS) ---
+// --- CÁLCULO 1: COSTO POR METRO CUADRADO (sin cambios) ---
 interface MetroCuadradoCalculatorProps {
     rates: ExchangeRates;
 }
@@ -149,14 +161,14 @@ const MetroCuadradoCalculator: React.FC<MetroCuadradoCalculatorProps> = ({ rates
     }, [calcularInstantaneo]);
 
     // --- MANEJO DE ESTADO PARA LAS MEDICIONES ---
-    
+
     const addMeasurementEntry = () => {
         setMediciones([...mediciones, { id: Date.now(), cmAlto: 0, cmAncho: 0, precioDolar: 0 }]);
     };
 
     const updateMeasurementEntry = (id: number, field: keyof Omit<Measurement, 'id'>, value: number) => {
-        const newMediciones = mediciones.map(m => 
-            m.id === id 
+        const newMediciones = mediciones.map(m =>
+            m.id === id
                 ? { ...m, [field]: value >= 0 ? value : 0 }
                 : m
         );
@@ -168,8 +180,8 @@ const MetroCuadradoCalculator: React.FC<MetroCuadradoCalculatorProps> = ({ rates
         // Si no quedan mediciones, añadir una vacía para mantener la interfaz
         setMediciones(newMediciones.length > 0 ? newMediciones : [{ id: Date.now(), cmAlto: 0, cmAncho: 0, precioDolar: 0 }]);
     };
-    
-    // Función de utilidad para mostrar el costo individual 
+
+    // Función de utilidad para mostrar el costo individual
     const getIndividualCost = (m: Measurement): string | null => {
         if (m.cmAlto > 0 && m.cmAncho > 0 && m.precioDolar > 0) {
             const altoEnMetros = m.cmAlto / 100;
@@ -186,55 +198,55 @@ const MetroCuadradoCalculator: React.FC<MetroCuadradoCalculatorProps> = ({ rates
             <p className="text-sm text-muted-foreground">
                 Fórmula de Costo Individual: (Alto en cm / 100) × (Ancho en cm / 100) × Precio/m² (USD)
             </p>
-            
+
             {mediciones.map((m, index) => (
                 <div key={m.id} className="border p-4 rounded-lg space-y-4 shadow-sm relative">
                     <div className="flex justify-between items-start">
                         <h4 className="text-base font-bold text-primary">Medición #{index + 1}</h4>
                         {mediciones.length > 1 && (
-                             <Button 
+                             <Button
                                 variant="destructive"
-                                size="icon" 
+                                size="icon"
                                 onClick={() => removeMeasurementEntry(m.id)}
                                 title="Eliminar esta medición"
                                 className="flex-shrink-0 w-8 h-8"
                             >
-                                <Trash2 className="w-4 h-4" /> 
+                                <Trash2 className="w-4 h-4" />
                             </Button>
                         )}
                     </div>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         {/* Input para Alto (cm) */}
                         <div className="space-y-2">
                             <label htmlFor={`alto-cm-${m.id}`} className="text-sm font-medium block">Alto (cm)</label>
-                            <Input 
+                            <Input
                                 id={`alto-cm-${m.id}`}
-                                type="number" 
-                                value={m.cmAlto} 
-                                onChange={(e) => updateMeasurementEntry(m.id, 'cmAlto', parseFloat(e.target.value) || 0)} 
+                                type="number"
+                                value={m.cmAlto}
+                                onChange={(e) => updateMeasurementEntry(m.id, 'cmAlto', parseFloat(e.target.value) || 0)}
                                 placeholder="ej. 50"
                             />
                         </div>
                         {/* Input para Ancho (cm) */}
                         <div className="space-y-2">
                             <label htmlFor={`ancho-cm-${m.id}`} className="text-sm font-medium block">Ancho (cm)</label>
-                            <Input 
+                            <Input
                                 id={`ancho-cm-${m.id}`}
-                                type="number" 
-                                value={m.cmAncho} 
-                                onChange={(e) => updateMeasurementEntry(m.id, 'cmAncho', parseFloat(e.target.value) || 0)} 
+                                type="number"
+                                value={m.cmAncho}
+                                onChange={(e) => updateMeasurementEntry(m.id, 'cmAncho', parseFloat(e.target.value) || 0)}
                                 placeholder="ej. 80"
                             />
                         </div>
                         {/* Input para Precio por m² */}
                         <div className="space-y-2">
                             <label htmlFor={`precio-m2-${m.id}`} className="text-sm font-medium block">Precio por m² (USD)</label>
-                            <Input 
+                            <Input
                                 id={`precio-m2-${m.id}`}
-                                type="number" 
-                                value={m.precioDolar} 
-                                onChange={(e) => updateMeasurementEntry(m.id, 'precioDolar', parseFloat(e.target.value) || 0)} 
+                                type="number"
+                                value={m.precioDolar}
+                                onChange={(e) => updateMeasurementEntry(m.id, 'precioDolar', parseFloat(e.target.value) || 0)}
                                 placeholder="ej. 25.00"
                             />
                         </div>
@@ -248,28 +260,28 @@ const MetroCuadradoCalculator: React.FC<MetroCuadradoCalculatorProps> = ({ rates
                     )}
                 </div>
             ))}
-            
-            <Button 
+
+            <Button
                 variant="secondary"
-                onClick={addMeasurementEntry} 
+                onClick={addMeasurementEntry}
                 className="w-full mt-4"
                 title="Añadir otra dimensión/cálculo"
             >
-                <Plus className="w-4 h-4 mr-2" /> Añadir Otra Medición 
+                <Plus className="w-4 h-4 mr-2" /> Añadir Otra Medición
             </Button>
 
 
-            <MultiCurrencyResult 
-                usdAmount={resultadoTotal} 
-                rates={rates} 
-                title="Costo Total Estimado Acumulado" 
+            <MultiCurrencyResult
+                usdAmount={resultadoTotal}
+                rates={rates}
+                title="Costo Total Estimado Acumulado"
             />
         </CardContent>
     );
 };
 
 
-// --- CÁLCULO 2: CORTES LÁSER POR TIEMPO ---
+// --- CÁLCULO 2: CORTES LÁSER POR TIEMPO (sin cambios) ---
 interface LaserCutsCalculatorProps {
     rates: ExchangeRates;
 }
@@ -278,7 +290,7 @@ const LaserCutsCalculator: React.FC<LaserCutsCalculatorProps> = ({ rates }) => {
     const [tiempos, setTiempos] = useState<Array<{ minutes: number; seconds: number }>>([
         { minutes: 0, seconds: 0 }
     ]);
-    const COSTO_POR_MINUTO = 0.80; 
+    const COSTO_POR_MINUTO = 0.80;
     const [resultado, setResultado] = useState<{ totalMinutes: number; totalCost: number } | null>(null);
 
     const calcularInstantaneo = useCallback(() => {
@@ -319,7 +331,7 @@ const LaserCutsCalculator: React.FC<LaserCutsCalculatorProps> = ({ rates }) => {
         };
         setTiempos(newTiempos);
     };
-    
+
     const removeTimeEntry = (index: number) => {
         const newTiempos = tiempos.filter((_, i) => i !== index);
         setTiempos(newTiempos.length > 0 ? newTiempos : [{ minutes: 0, seconds: 0 }]);
@@ -331,7 +343,7 @@ const LaserCutsCalculator: React.FC<LaserCutsCalculatorProps> = ({ rates }) => {
             <p className="text-sm text-muted-foreground">
                 Costo del corte láser: ${COSTO_POR_MINUTO.toFixed(2)} por minuto.
             </p>
-            
+
             {tiempos.map((t, index) => (
                 <div key={index} className="flex items-end space-x-2 border-b pb-3">
                     <div className="flex-1 space-y-1">
@@ -340,11 +352,11 @@ const LaserCutsCalculator: React.FC<LaserCutsCalculatorProps> = ({ rates }) => {
                             {/* Etiqueta para Minutos */}
                             <div className="flex-1 space-y-1">
                                 <label htmlFor={`min-${index}`} className="text-sm font-medium block">Minutos</label>
-                                <Input 
+                                <Input
                                     id={`min-${index}`}
-                                    type="number" 
-                                    value={t.minutes} 
-                                    onChange={(e) => updateTimeEntry(index, 'minutes', parseFloat(e.target.value) || 0)} 
+                                    type="number"
+                                    value={t.minutes}
+                                    onChange={(e) => updateTimeEntry(index, 'minutes', parseFloat(e.target.value) || 0)}
                                     placeholder="0"
                                     className="w-full"
                                 />
@@ -352,11 +364,11 @@ const LaserCutsCalculator: React.FC<LaserCutsCalculatorProps> = ({ rates }) => {
                             {/* Etiqueta para Segundos */}
                             <div className="flex-1 space-y-1">
                                 <label htmlFor={`sec-${index}`} className="text-sm font-medium block">Segundos</label>
-                                <Input 
+                                <Input
                                     id={`sec-${index}`}
-                                    type="number" 
-                                    value={t.seconds} 
-                                    onChange={(e) => updateTimeEntry(index, 'seconds', parseFloat(e.target.value) || 0)} 
+                                    type="number"
+                                    value={t.seconds}
+                                    onChange={(e) => updateTimeEntry(index, 'seconds', parseFloat(e.target.value) || 0)}
                                     placeholder="0"
                                     className="w-full"
                                 />
@@ -364,33 +376,33 @@ const LaserCutsCalculator: React.FC<LaserCutsCalculatorProps> = ({ rates }) => {
                         </div>
                     </div>
                     {tiempos.length > 1 && (
-                        <Button 
+                        <Button
                             variant="destructive"
-                            size="icon" 
+                            size="icon"
                             onClick={() => removeTimeEntry(index)}
                             title="Eliminar este corte"
                             className="flex-shrink-0 mb-0.5"
                         >
-                            <Trash2 className="w-4 h-4" /> 
+                            <Trash2 className="w-4 h-4" />
                         </Button>
                     )}
                 </div>
             ))}
-            
-            <Button 
+
+            <Button
                 variant="secondary"
-                onClick={addTimeEntry} 
+                onClick={addTimeEntry}
                 className="w-full mt-2"
                 title="Añadir un nuevo corte/tiempo"
             >
-                <Plus className="w-4 h-4 mr-2" /> Añadir Otro Tiempo de Corte 
+                <Plus className="w-4 h-4 mr-2" /> Añadir Otro Tiempo de Corte
             </Button>
-            
+
             {/* MEJORA: Mostrar el tiempo total de corte en formato mm:ss */}
             {resultado?.totalMinutes !== undefined && resultado.totalMinutes > 0 && (
                  <div className="p-4 bg-blue-50/50 dark:bg-blue-900/20 rounded-md">
                     <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-                        Tiempo Total de Corte: 
+                        Tiempo Total de Corte:
                         <strong className="ml-2 text-xl text-blue-600 dark:text-blue-400">
                             {formatTimeInMinutes(resultado.totalMinutes)}
                         </strong>
@@ -399,69 +411,100 @@ const LaserCutsCalculator: React.FC<LaserCutsCalculatorProps> = ({ rates }) => {
                  </div>
             )}
 
-            <MultiCurrencyResult 
-                usdAmount={resultado ? resultado.totalCost : null} 
-                rates={rates} 
-                title="Costo Total de Cortes Estimado" 
+            <MultiCurrencyResult
+                usdAmount={resultado ? resultado.totalCost : null}
+                rates={rates}
+                title="Costo Total de Cortes Estimado"
             />
         </CardContent>
     );
 };
 
 
-// --- CÁLCULO 3: CONVERSOR DE DIVISAS ---
+// --- CÁLCULO 3: CONVERSOR DE DIVISAS (MODIFICADO) ---
 const CurrencyConverterCalculator: React.FC<{ rates: ExchangeRates }> = ({ rates }) => {
     const { usdRate, eurRate, loading, error } = rates;
-    const [amount, setAmount] = useState<number>(1);
-    const [isUsdToBs, setIsUsdToBs] = useState(true); 
-    const [resultBs, setResultBs] = useState<number | null>(null);
+    
+    // El monto que el usuario ingresa
+    const [inputAmount, setInputAmount] = useState<number>(1); 
+    // Dirección: true = Divisa a Bs | false = Bs a Divisa
+    const [isForeignToBs, setIsForeignToBs] = useState(true); 
+    // La divisa seleccionada para la conversión (USD o EUR)
+    const [selectedCurrency, setSelectedCurrency] = useState<'USD' | 'EUR'>('USD'); 
+    
+    // Resultado del cálculo (será Bs si isForeignToBs es true, o USD/EUR si es false)
+    const [result, setResult] = useState<number | null>(null);
 
-    const handleCalculate = useCallback((currentUsdRate: number | null, currentEurRate: number | null, currentAmount: number, currentMode: boolean) => {
-        let rate = 0;
+    const currentRate = selectedCurrency === 'USD' ? usdRate : eurRate;
+    const otherRateAvailable = selectedCurrency === 'USD' ? (eurRate !== null) : (usdRate !== null);
 
-        if (currentMode && currentUsdRate) {
-            rate = currentUsdRate;
-        } else if (!currentMode && currentEurRate) {
-            rate = currentEurRate;
-        } else {
-            setResultBs(null);
+
+    const handleCalculate = useCallback((amount: number, foreignToBs: boolean, rate: number | null) => {
+        if (rate === null || amount <= 0) {
+            setResult(null);
             return;
         }
 
-        const calculatedBs = currentAmount * rate;
-        setResultBs(calculatedBs);
+        let calculatedResult: number;
+
+        if (foreignToBs) {
+            // Conversión: USD/EUR a Bs (Multiplicación)
+            calculatedResult = amount * rate;
+        } else {
+            // Conversión: Bs a USD/EUR (División)
+            // Se comprueba el tipo de conversión para el cálculo
+            calculatedResult = amount / rate;
+        }
+
+        setResult(calculatedResult);
     }, []);
 
-    const toggleMode = () => {
-        const newMode = !isUsdToBs;
-        setIsUsdToBs(newMode);
-        handleCalculate(usdRate, eurRate, amount, newMode);
+    // Calcula cada vez que el monto, las tasas o la dirección/moneda cambian
+    useEffect(() => {
+        handleCalculate(inputAmount, isForeignToBs, currentRate);
+    }, [inputAmount, currentRate, isForeignToBs, handleCalculate]);
+
+    // Función para cambiar entre USD y EUR (manteniendo la dirección)
+    const toggleCurrency = () => {
+        const newCurrency = selectedCurrency === 'USD' ? 'EUR' : 'USD';
+        setSelectedCurrency(newCurrency);
+        // Recalculará automáticamente gracias al useEffect
+    };
+    
+    // Función para cambiar la dirección (Divisa a Bs | Bs a Divisa)
+    const toggleDirection = () => {
+        const newDirection = !isForeignToBs;
+        setIsForeignToBs(newDirection);
+        // Recalculará automáticamente gracias al useEffect
     };
 
-    useEffect(() => {
-        handleCalculate(usdRate, eurRate, amount, isUsdToBs);
-    }, [amount, usdRate, eurRate, isUsdToBs, handleCalculate]);
-
-
-    const currentRate = isUsdToBs ? usdRate : eurRate;
-    const currentCurrency = isUsdToBs ? 'USD' : 'EUR';
-    const otherRateAvailable = isUsdToBs ? (eurRate !== null) : (usdRate !== null);
+    // --- Variables de Visualización ---
+    const fromCurrency = isForeignToBs ? selectedCurrency : 'Bs';
+    const toCurrency = isForeignToBs ? 'Bs' : selectedCurrency;
+    const fromLabel = isForeignToBs ? `Monto (${fromCurrency})` : `Monto (${fromCurrency})`;
+    const toLabel = `Resultado (${toCurrency})`;
 
     // Formatear la tasa de cambio (USD/EUR a Bs)
     const formattedRate = currentRate !== null ? formatCurrencyBs(currentRate) : "N/A";
+    
+    // Formatear el resultado
+    const formattedResult = isForeignToBs 
+        ? formatCurrencyBs(result) 
+        : formatCurrencyForeign(result);
+
 
     return (
         <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-                Convierte Dólares/Euros a Bolívares (Bs) usando la tasa BCV actual.
+                Convierte entre Bolívares (Bs) y Divisas ({selectedCurrency}) usando la tasa BCV actual.
             </p>
-            
+
             {loading && (
                  <div className="p-4 bg-yellow-50/50 rounded-md text-sm text-yellow-700 flex items-center">
                     <Loader2 className="w-4 h-4 mr-2 animate-spin"/>Cargando tasas de cambio...
                 </div>
             )}
-            
+
             {error && (
                 <div className="p-4 bg-red-50/50 rounded-md text-sm text-red-700">{error}</div>
             )}
@@ -469,49 +512,62 @@ const CurrencyConverterCalculator: React.FC<{ rates: ExchangeRates }> = ({ rates
             {currentRate && !loading && (
                 <>
                     <div className="flex justify-between items-center bg-gray-100 dark:bg-gray-800 p-3 rounded-md">
-                        <span className="text-sm font-semibold">Tasa Actual ({currentCurrency}):</span>
+                        <span className="text-sm font-semibold">Tasa BCV ({selectedCurrency} a Bs):</span>
                         <span className="text-lg font-bold text-primary">
                             Bs {formattedRate}
                         </span>
                     </div>
 
                     <div className="flex gap-2 items-center">
-                        {/* Etiqueta para Monto a Convertir */}
+                        {/* Input para Monto Inicial */}
                         <div className="flex-1 space-y-2">
-                            <label htmlFor="monto-convertir" className="text-sm font-medium block">Monto ({currentCurrency})</label>
-                            <Input 
-                                id="monto-convertir"
-                                type="number" 
-                                value={amount} 
-                                onChange={(e) => setAmount(parseFloat(e.target.value) || 0)} 
+                            <label htmlFor="monto-input" className="text-sm font-medium block">
+                                {fromLabel}
+                            </label>
+                            <Input
+                                id="monto-input"
+                                type="number"
+                                value={inputAmount}
+                                onChange={(e) => setInputAmount(parseFloat(e.target.value) || 0)}
                                 placeholder="1.00"
                                 className="text-lg font-semibold"
                             />
                         </div>
 
-                        <ArrowRight className="w-5 h-5 mt-7 text-muted-foreground flex-shrink-0" />
-                        
-                        {/* Etiqueta para Resultado - FORMATO BS */}
+                        {/* Botón para cambiar dirección */}
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={toggleDirection}
+                            title={`Cambiar dirección: ${fromCurrency} a ${toCurrency}`}
+                            className="flex-shrink-0 mt-7"
+                        >
+                            <Repeat2 className="w-4 h-4" />
+                        </Button>
+
+                        {/* Input para Resultado */}
                         <div className="flex-1 space-y-2">
-                            <label htmlFor="resultado-bs" className="text-sm font-medium block">Resultado (Bs)</label>
-                            <Input 
-                                id="resultado-bs"
-                                type="text" 
-                                value={formatCurrencyBs(resultBs)} 
+                            <label htmlFor="resultado-output" className="text-sm font-medium block">
+                                {toLabel}
+                            </label>
+                            <Input
+                                id="resultado-output"
+                                type="text"
+                                value={formattedResult}
                                 readOnly
                                 className="text-lg font-semibold bg-primary/10 border-primary"
                             />
                         </div>
                     </div>
-                    
+
                     {otherRateAvailable && (
                         <Button
                             variant="outline"
-                            onClick={toggleMode}
+                            onClick={toggleCurrency}
                             className="w-full mt-2 gap-2"
                         >
                             <Euro className="w-4 h-4" />
-                            {isUsdToBs ? `Cambiar a EUR a Bs` : `Cambiar a USD a Bs`}
+                            {selectedCurrency === 'USD' ? `Cambiar a EUR` : `Cambiar a USD`}
                         </Button>
                     )}
                 </>
@@ -521,27 +577,27 @@ const CurrencyConverterCalculator: React.FC<{ rates: ExchangeRates }> = ({ rates
 };
 
 
-// --- COMPONENTE PRINCIPAL (VISTA) ---
+// --- COMPONENTE PRINCIPAL (VISTA) (sin cambios) ---
 
 const CalculatorView: React.FC = () => {
-    const [activeTab, setActiveTab] = useState("currency"); 
-    const [rates, setRates] = useState<ExchangeRates>({ 
-        usdRate: null, 
-        eurRate: null, 
-        loading: true, 
-        error: null 
+    const [activeTab, setActiveTab] = useState("currency");
+    const [rates, setRates] = useState<ExchangeRates>({
+        usdRate: null,
+        eurRate: null,
+        loading: true,
+        error: null
     });
 
     useEffect(() => {
         const loadRates = async () => {
             try {
                 setRates(r => ({ ...r, loading: true, error: null }));
-                
+
                 const data = await fetchBCVRateFromAPI();
-                
+
                 // Asegurar que las propiedades existan o usar un fallback
                 const currentUsdRate = (data as any).usdRate ?? (data as any).rate ?? null;
-                const currentEurRate = (data as any).eurRate ?? null; 
+                const currentEurRate = (data as any).eurRate ?? null;
 
                 setRates({
                     // Aseguramos que se conviertan a número flotante antes de guardar
@@ -565,14 +621,14 @@ const CalculatorView: React.FC = () => {
                 <Card>
                     <CardHeader>
                         <CardTitle className="flex items-center text-3xl font-bold">
-                            <CalcIcon className="w-7 h-7 mr-3 text-primary" /> 
+                            <CalcIcon className="w-7 h-7 mr-3 text-primary" />
                             Calculadora de Producción
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
                         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                            <TabsList className="grid w-full grid-cols-3"> 
-                                <TabsTrigger value="currency" className="flex items-center"><DollarSign className="w-4 h-4 mr-1"/> Divisas</TabsTrigger> 
+                            <TabsList className="grid w-full grid-cols-3">
+                                <TabsTrigger value="currency" className="flex items-center"><DollarSign className="w-4 h-4 mr-1"/> Divisas</TabsTrigger>
                                 <TabsTrigger value="area" className="flex items-center"><Ruler className="w-4 h-4 mr-1"/> Costo m²</TabsTrigger>
                                 <TabsTrigger value="laser" className="flex items-center"><Timer className="w-4 h-4 mr-1"/> Corte Láser</TabsTrigger>
                             </TabsList>
@@ -580,15 +636,15 @@ const CalculatorView: React.FC = () => {
                             <TabsContent value="currency">
                                 <CurrencyConverterCalculator rates={rates} />
                             </TabsContent>
-                            
+
                             <TabsContent value="area">
                                 <MetroCuadradoCalculator rates={rates} />
                             </TabsContent>
-                            
+
                             <TabsContent value="laser">
                                 <LaserCutsCalculator rates={rates} />
                             </TabsContent>
-                            
+
                         </Tabs>
                     </CardContent>
                 </Card>
