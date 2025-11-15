@@ -127,7 +127,7 @@ const emptySpacerCell = {
     margin: [0, 8, 0, 8],
 };
 
-const emptyRows = [[emptySpacerCell, "", "", ""], [emptySpacerCell, "", "", ""]];
+const emptyRows = [[emptySpacerCell, "", ""], [emptySpacerCell, "", ""]];
 
 const customTableLayout = {
     hLineWidth: function (i: number, node: any) {
@@ -239,10 +239,9 @@ const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: 
 ]);
 
 
-// --- FUNCIÓN 1: GENERACIÓN DE ORDEN DE SERVICIO PDF (ORIGINAL) ---
+// --- FUNCIÓN 1: GENERACIÓN DE ORDEN DE SERVICIO PDF (SIN CAMBIOS EN EL TÍTULO) ---
 /**
  * 🔹 Genera el documento PDF de la orden de servicio.
- * ESTA FUNCIÓN SE MANTIENE COMPLETAMENTE ORIGINAL (Solo se usa el helper de carga corregido).
  */
 export async function generateOrderPDF(
   orden: OrdenServicio,
@@ -311,7 +310,7 @@ export async function generateOrderPDF(
       },
 
       {
-        text: "PRESUPUESTO",
+        text: "PRESUPUESTO", // Título ya es "PRESUPUESTO"
         style: "title",
         alignment: "center",
         margin: [0, 0, 0, 10],
@@ -330,7 +329,8 @@ export async function generateOrderPDF(
         style: "itemsTable",
         table: {
           headerRows: 1,
-          widths: [60, "*", 100, 70],
+          // Ancho de Cantidad: 55
+          widths: [55, "*", 100, 70],
           body: [
             [
               { text: "Cantidad", style: "tableHeader", alignment: "left" },
@@ -399,7 +399,7 @@ export async function generateOrderPDF(
 
       tableHeader: { bold: true, fontSize: 10, color: "black", fillColor: "#EEEEEE" },
       itemsTable: { margin: [0, 5, 0, 5] },
-      itemText: { fontSize: 9 },
+      itemText: { fontSize: 9, bold: true }, 
       itemTotal: { fontSize: 9, bold: true },
 
       finalTotalLabelBig: { fontSize: 13, bold: true, color: "#000000", alignment: "right" },
@@ -422,7 +422,7 @@ export async function generateOrderPDF(
 }
 
 
-// --- FUNCIÓN 2: GENERACIÓN DE PRESUPUESTO PDF (CORREGIDA Y SIMPLIFICADA) ---
+// --- FUNCIÓN 2: GENERACIÓN DE PRESUPUESTO PDF (TÍTULO MODIFICADO) ---
 /**
  * 🔹 Genera el documento PDF del presupuesto con la tabla corregida y interfaces simplificadas.
  */
@@ -439,11 +439,10 @@ export async function generateBudgetPDF(
     const totalUSD = budgetData.totalUSD;
     const totalVES = totalUSD * bcvRate;
     
-    // Se usa la interfaz BudgetItem simplificada
+    // Se usa la interfaz BudgetItem simplificada. Se elimina item.precioUnitarioUSD
     const itemRows = budgetData.items.map((item) => ([
         { text: item.cantidad, alignment: "left", style: "itemText" },
         { text: item.descripcion, style: "itemText" },
-        { text: formatCurrency(item.precioUnitarioUSD), alignment: "right", style: "itemText" },
         { text: formatCurrency(item.totalUSD), alignment: "right", style: "itemTotal" },
     ]));
     
@@ -468,7 +467,8 @@ export async function generateBudgetPDF(
             },
 
             {
-                text: budgetData.titulo.toUpperCase(), 
+                // 🛠️ Cambiado de budgetData.titulo.toUpperCase() a "PRESUPUESTO"
+                text: "PRESUPUESTO", 
                 style: "title",
                 alignment: "center",
                 margin: [0, 0, 0, 10],
@@ -485,12 +485,13 @@ export async function generateBudgetPDF(
                 style: "itemsTable",
                 table: {
                     headerRows: 1,
-                    widths: [60, "*", 80, 70], 
+                    // Ancho de Cantidad: 55
+                    widths: [55, "*", 70], 
                     body: [
                         [
                             { text: "Cantidad", style: "tableHeader", alignment: "left" },
                             { text: "Descripción", style: "tableHeader" },
-                            { text: "Precio Unit. (USD)", style: "tableHeader", alignment: "right" }, 
+                            // Se eliminó la columna "Precio Unit. (USD)"
                             { text: "Total (USD)", style: "tableHeader", alignment: "right" }, 
                         ],
                         ...itemRows,
@@ -500,10 +501,10 @@ export async function generateBudgetPDF(
                                 text: "TOTAL",
                                 style: "finalTotalLabelBig",
                                 alignment: "right",
-                                colSpan: 3,
+                                // colSpan ajustado a 2 para abarcar Cantidad y Descripción
+                                colSpan: 2, 
                             },
-                            {},
-                            {},
+                            {}, 
                             { text: formatCurrency(totalUSD), style: "finalTotalValueBig", alignment: "right" },
                         ],
                     ],
@@ -558,7 +559,7 @@ export async function generateBudgetPDF(
 
             tableHeader: { bold: true, fontSize: 10, color: "black", fillColor: "#EEEEEE" },
             itemsTable: { margin: [0, 5, 0, 5] },
-            itemText: { fontSize: 9 },
+            itemText: { fontSize: 9, bold: true }, 
             itemTotal: { fontSize: 9, bold: true },
 
             finalTotalLabelBig: { fontSize: 13, bold: true, color: "#000000", alignment: "right" },
