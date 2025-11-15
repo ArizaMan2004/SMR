@@ -10,13 +10,12 @@ import { Button } from "@/components/ui/button";
 import { 
     Calculator as CalcIcon, 
     Ruler, 
-    Zap, 
     DollarSign, 
     Timer,
     ArrowRight, 
     Euro, 
-    Trash2, 
-    Plus,
+    Trash2, // Asegurado para el nuevo MetroCuadradoCalculator
+    Plus,    // Asegurado para el nuevo MetroCuadradoCalculator
     Loader2 
 } from "lucide-react";
 // Importar el servicio BCV para obtener las tasas
@@ -50,7 +49,7 @@ const formatTimeInMinutes = (totalMinutes: number): string => {
 };
 
 
-// --- Componente de Visualización de Resultados en Multidivisa (MODIFICADO) ---
+// --- Componente de Visualización de Resultados en Multidivisa ---
 interface MultiCurrencyResultProps {
     usdAmount: number | null;
     rates: ExchangeRates;
@@ -104,79 +103,163 @@ const MultiCurrencyResult: React.FC<MultiCurrencyResultProps> = ({ usdAmount, ra
 };
 
 
-// --- CÁLCULO 1: COSTO POR METRO CUADRADO ---
+// --- Tipado para una medición individual ---
+interface Measurement {
+    id: number; // Para una clave única en el renderizado
+    cmAlto: number;
+    cmAncho: number;
+    precioDolar: number; // Precio por m² (USD)
+}
+
+// --- CÁLCULO 1: COSTO POR METRO CUADRADO (MODIFICADO PARA MÚLTIPLES ENTRADAS) ---
 interface MetroCuadradoCalculatorProps {
     rates: ExchangeRates;
 }
 
 const MetroCuadradoCalculator: React.FC<MetroCuadradoCalculatorProps> = ({ rates }) => {
-    const [cmAlto, setCmAlto] = useState<number>(0);
-    const [cmAncho, setCmAncho] = useState<number>(0);
-    const [precioDolar, setPrecioDolar] = useState<number>(0);
-    const [resultado, setResultado] = useState<number | null>(null);
+    // Inicializar el estado con una medición por defecto
+    const [mediciones, setMediciones] = useState<Measurement[]>([
+        { id: Date.now(), cmAlto: 0, cmAncho: 0, precioDolar: 0 }
+    ]);
+    const [resultadoTotal, setResultadoTotal] = useState<number | null>(null);
 
     const calcularInstantaneo = useCallback(() => {
-        if (cmAlto <= 0 || cmAncho <= 0 || precioDolar <= 0) {
-            setResultado(null);
-            return;
-        }
+        let costoTotalAcumulado = 0;
+        let algunaMedicionValida = false;
 
-        const altoEnMetros = cmAlto / 100;
-        const anchoEnMetros = cmAncho / 100;
-        const costoTotal = altoEnMetros * anchoEnMetros * precioDolar;
-        
-        setResultado(costoTotal);
-    }, [cmAlto, cmAncho, precioDolar]);
+        mediciones.forEach(m => {
+            if (m.cmAlto > 0 && m.cmAncho > 0 && m.precioDolar > 0) {
+                const altoEnMetros = m.cmAlto / 100;
+                const anchoEnMetros = m.cmAncho / 100;
+                const costoIndividual = altoEnMetros * anchoEnMetros * m.precioDolar;
+                costoTotalAcumulado += costoIndividual;
+                algunaMedicionValida = true;
+            }
+        });
+
+        setResultadoTotal(algunaMedicionValida ? costoTotalAcumulado : null);
+    }, [mediciones]);
 
     useEffect(() => {
         calcularInstantaneo();
     }, [calcularInstantaneo]);
 
+    // --- MANEJO DE ESTADO PARA LAS MEDICIONES ---
+    
+    const addMeasurementEntry = () => {
+        // Usamos Date.now() para generar un ID único para la key
+        setMediciones([...mediciones, { id: Date.now(), cmAlto: 0, cmAncho: 0, precioDolar: 0 }]);
+    };
+
+    const updateMeasurementEntry = (id: number, field: keyof Omit<Measurement, 'id'>, value: number) => {
+        const newMediciones = mediciones.map(m => 
+            m.id === id 
+                ? { ...m, [field]: value >= 0 ? value : 0 }
+                : m
+        );
+        setMediciones(newMediciones);
+    };
+
+    const removeMeasurementEntry = (id: number) => {
+        const newMediciones = mediciones.filter(m => m.id !== id);
+        // Si no quedan mediciones, añadir una vacía para mantener la interfaz
+        setMediciones(newMediciones.length > 0 ? newMediciones : [{ id: Date.now(), cmAlto: 0, cmAncho: 0, precioDolar: 0 }]);
+    };
+    
+    // Función de utilidad para mostrar el costo individual 
+    const getIndividualCost = (m: Measurement): string | null => {
+        if (m.cmAlto > 0 && m.cmAncho > 0 && m.precioDolar > 0) {
+            const altoEnMetros = m.cmAlto / 100;
+            const anchoEnMetros = m.cmAncho / 100;
+            const cost = altoEnMetros * anchoEnMetros * m.precioDolar;
+            return `$${cost.toFixed(2)} USD`;
+        }
+        return null;
+    };
+
+
     return (
         <CardContent className="space-y-6">
             <p className="text-sm text-muted-foreground">
-                Cálculo: (Alto en cm / 100) × (Ancho en cm / 100) × Precio/m² (USD)
+                Fórmula de Costo Individual: (Alto en cm / 100) × (Ancho en cm / 100) × Precio/m² (USD)
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Etiqueta para Alto (cm) */}
-                <div className="space-y-2">
-                    <label htmlFor="alto-cm" className="text-sm font-medium block">Alto (cm)</label>
-                    <Input 
-                        id="alto-cm"
-                        type="number" 
-                        value={cmAlto} 
-                        onChange={(e) => setCmAlto(parseFloat(e.target.value) || 0)} 
-                        placeholder="ej. 50"
-                    />
+            
+            {mediciones.map((m, index) => (
+                <div key={m.id} className="border p-4 rounded-lg space-y-4 shadow-sm relative">
+                    <div className="flex justify-between items-start">
+                        <h4 className="text-base font-bold text-primary">Medición #{index + 1}</h4>
+                        {mediciones.length > 1 && (
+                             <Button 
+                                variant="destructive"
+                                size="icon" 
+                                onClick={() => removeMeasurementEntry(m.id)}
+                                title="Eliminar esta medición"
+                                className="flex-shrink-0 w-8 h-8"
+                            >
+                                <Trash2 className="w-4 h-4" /> 
+                            </Button>
+                        )}
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* Input para Alto (cm) */}
+                        <div className="space-y-2">
+                            <label htmlFor={`alto-cm-${m.id}`} className="text-sm font-medium block">Alto (cm)</label>
+                            <Input 
+                                id={`alto-cm-${m.id}`}
+                                type="number" 
+                                value={m.cmAlto} 
+                                onChange={(e) => updateMeasurementEntry(m.id, 'cmAlto', parseFloat(e.target.value) || 0)} 
+                                placeholder="ej. 50"
+                            />
+                        </div>
+                        {/* Input para Ancho (cm) */}
+                        <div className="space-y-2">
+                            <label htmlFor={`ancho-cm-${m.id}`} className="text-sm font-medium block">Ancho (cm)</label>
+                            <Input 
+                                id={`ancho-cm-${m.id}`}
+                                type="number" 
+                                value={m.cmAncho} 
+                                onChange={(e) => updateMeasurementEntry(m.id, 'cmAncho', parseFloat(e.target.value) || 0)} 
+                                placeholder="ej. 80"
+                            />
+                        </div>
+                        {/* Input para Precio por m² */}
+                        <div className="space-y-2">
+                            <label htmlFor={`precio-m2-${m.id}`} className="text-sm font-medium block">Precio por m² (USD)</label>
+                            <Input 
+                                id={`precio-m2-${m.id}`}
+                                type="number" 
+                                value={m.precioDolar} 
+                                onChange={(e) => updateMeasurementEntry(m.id, 'precioDolar', parseFloat(e.target.value) || 0)} 
+                                placeholder="ej. 25.00"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Mostrar costo individual (Opcional, pero útil) */}
+                    {getIndividualCost(m) && (
+                        <div className="text-right text-sm font-medium text-green-700 dark:text-green-300 pt-2 border-t">
+                            Costo Individual: <strong>{getIndividualCost(m)}</strong>
+                        </div>
+                    )}
                 </div>
-                {/* Etiqueta para Ancho (cm) */}
-                <div className="space-y-2">
-                    <label htmlFor="ancho-cm" className="text-sm font-medium block">Ancho (cm)</label>
-                    <Input 
-                        id="ancho-cm"
-                        type="number" 
-                        value={cmAncho} 
-                        onChange={(e) => setCmAncho(parseFloat(e.target.value) || 0)} 
-                        placeholder="ej. 80"
-                    />
-                </div>
-                {/* Etiqueta para Precio por m² */}
-                <div className="space-y-2">
-                    <label htmlFor="precio-m2" className="text-sm font-medium block">Precio por m² (USD)</label>
-                    <Input 
-                        id="precio-m2"
-                        type="number" 
-                        value={precioDolar} 
-                        onChange={(e) => setPrecioDolar(parseFloat(e.target.value) || 0)} 
-                        placeholder="ej. 25.00"
-                    />
-                </div>
-            </div>
+            ))}
+            
+            <Button 
+                variant="secondary"
+                onClick={addMeasurementEntry} 
+                className="w-full mt-4"
+                title="Añadir otra dimensión/cálculo"
+            >
+                <Plus className="w-4 h-4 mr-2" /> Añadir Otra Medición 
+            </Button>
+
 
             <MultiCurrencyResult 
-                usdAmount={resultado} 
+                usdAmount={resultadoTotal} 
                 rates={rates} 
-                title="Costo Total Estimado del Material" 
+                title="Costo Total Estimado Acumulado" 
             />
         </CardContent>
     );
