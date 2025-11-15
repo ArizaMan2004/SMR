@@ -50,7 +50,7 @@ const formatTimeInMinutes = (totalMinutes: number): string => {
 };
 
 
-// --- Componente de Visualización de Resultados en Multidivisa ---
+// --- Componente de Visualización de Resultados en Multidivisa (MODIFICADO) ---
 interface MultiCurrencyResultProps {
     usdAmount: number | null;
     rates: ExchangeRates;
@@ -60,13 +60,18 @@ interface MultiCurrencyResultProps {
 const MultiCurrencyResult: React.FC<MultiCurrencyResultProps> = ({ usdAmount, rates, title }) => {
     if (usdAmount === null || usdAmount <= 0) return null;
 
-    const bsAmount = rates.usdRate ? usdAmount * rates.usdRate : null;
-    const eurAmount = rates.usdRate && rates.eurRate ? (usdAmount * rates.usdRate) / rates.eurRate : null;
+    // Tasa de Bolívares (Bs) PRINCIPAL (usando la tasa del Euro para el cobro)
+    // Se multiplica el monto en USD por la tasa del Euro/Bs
+    const bsAmount_euroRate = rates.eurRate ? usdAmount * rates.eurRate : null;
+    
+    // Tasa de Bolívares (Bs) SECUNDARIA (usando la tasa del Dólar para referencia)
+    const bsAmount_usdRate = rates.usdRate ? usdAmount * rates.usdRate : null;
 
     return (
         <div className="mt-4 p-4 border rounded-md bg-green-50 dark:bg-green-900/20 space-y-2">
             <h4 className="font-semibold text-lg">{title}:</h4>
             
+            {/* Monto principal en USD */}
             <div className="flex justify-between items-center">
                 <span className="text-xl font-bold text-green-600 dark:text-green-400">
                     ${usdAmount.toFixed(2)} USD
@@ -74,16 +79,21 @@ const MultiCurrencyResult: React.FC<MultiCurrencyResultProps> = ({ usdAmount, ra
                 <DollarSign className="w-5 h-5 text-green-600 dark:text-green-400" />
             </div>
 
-            {bsAmount !== null && (
-                <div className="flex justify-between text-sm text-gray-700 dark:text-gray-300 border-t pt-1">
-                    <span>Equivalente en Bolívares (Bs):</span>
-                    <strong className="text-primary font-bold">Bs {bsAmount.toFixed(2)}</strong>
+            {/* Resultado Principal en Bolívares (Cobro con Tasa Euro) */}
+            {bsAmount_euroRate !== null && (
+                <div className="flex justify-between text-base font-bold text-primary border-t pt-2">
+                    <span className="font-bold">Total a Cobrar en Bolívares (Tasa EUR):</span>
+                    <strong className="text-2xl font-extrabold text-blue-600 dark:text-blue-400">
+                        Bs {bsAmount_euroRate.toFixed(2)}
+                    </strong>
                 </div>
             )}
-             {eurAmount !== null && (
-                <div className="flex justify-between text-sm text-gray-700 dark:text-gray-300">
-                    <span>Equivalente en Euros (€):</span>
-                    <strong className="text-primary font-bold">€ {eurAmount.toFixed(2)}</strong>
+            
+            {/* Resultado Secundario en Bolívares (Referencia con Tasa Dólar) */}
+            {bsAmount_usdRate !== null && (
+                <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
+                    <span>(Referencia Tasa BCV USD):</span>
+                    <strong className="text-sm">Bs {bsAmount_usdRate.toFixed(2)}</strong>
                 </div>
             )}
             
