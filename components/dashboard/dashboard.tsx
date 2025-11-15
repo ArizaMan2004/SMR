@@ -303,7 +303,7 @@ export default function Dashboard() {
               {activeView === "old_calculator" && (
                 <div className="p-4 lg:p-8 overflow-y-auto">
                     <div className="max-w-7xl mx-auto space-y-8">
-                        <h2 className="text-3xl font-bold">Calculadora de Pruebas (Vista Original)</h2>
+                        <h2 className="text-3xl font-bold">Calculadora de Produccion</h2>
                         <CalculatorView /> 
                     </div>
                 </div>
@@ -324,7 +324,7 @@ export default function Dashboard() {
                 <div className="max-w-7xl mx-auto">
                   
                   <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-3xl font-bold">Gestión de Órdenes</h2>
+                    <h2 className="text-3xl font-bold">Gestión de Órdenes de Servicio</h2>
                   </div>
                   
                   {/* BCV Rate Widget - A ancho completo */}

@@ -421,7 +421,7 @@ const LaserCutsCalculator: React.FC<LaserCutsCalculatorProps> = ({ rates }) => {
 };
 
 
-// --- CÁLCULO 3: CONVERSOR DE DIVISAS (MODIFICADO) ---
+// --- CÁLCULO 3: CONVERSOR DE DIVISAS (CORREGIDO) ---
 const CurrencyConverterCalculator: React.FC<{ rates: ExchangeRates }> = ({ rates }) => {
     const { usdRate, eurRate, loading, error } = rates;
     
@@ -452,7 +452,6 @@ const CurrencyConverterCalculator: React.FC<{ rates: ExchangeRates }> = ({ rates
             calculatedResult = amount * rate;
         } else {
             // Conversión: Bs a USD/EUR (División)
-            // Se comprueba el tipo de conversión para el cálculo
             calculatedResult = amount / rate;
         }
 
@@ -473,9 +472,16 @@ const CurrencyConverterCalculator: React.FC<{ rates: ExchangeRates }> = ({ rates
     
     // Función para cambiar la dirección (Divisa a Bs | Bs a Divisa)
     const toggleDirection = () => {
+        // --- LÓGICA DE INTERCAMBIO DE VALORES AÑADIDA/CORREGIDA ---
         const newDirection = !isForeignToBs;
+
+        // Si hay un resultado válido y positivo, lo usamos como nuevo input.
+        // Si no, mantenemos el input actual (inputAmount).
+        const newInputValue = (result !== null && result > 0) ? result : inputAmount;
+
         setIsForeignToBs(newDirection);
-        // Recalculará automáticamente gracias al useEffect
+        setInputAmount(newInputValue);
+        // Recalculación automática vía useEffect
     };
 
     // --- Variables de Visualización ---
