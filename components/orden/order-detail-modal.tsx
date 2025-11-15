@@ -7,18 +7,14 @@ import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/utils/order-utils";
-import { generateOrderPDF } from "@/lib/services/pdf-generator";
-// 🔑 CORRECCIÓN: Se añaden las funciones para obtener la firma y el sello
-import { getLogoBase64, getFirmaBase64, getSelloBase64 } from "@/lib/logo-service";
 import { type OrdenServicio } from "@/lib/types/orden";
-import { X, FileDown, User, Package } from "lucide-react";
+import { X, User, Package } from "lucide-react";
 import type React from "react";
 
 interface OrderDetailModalProps {
   open: boolean;
   onClose: () => void;
   orden: OrdenServicio | null;
-  smrLogoBase64: string | undefined;
   bcvRate: number;
 }
 
@@ -76,59 +72,12 @@ const getItemSubtotal = (item: any) => {
   return subtotal;
 };
 
-/**
- * 🔹 Genera el PDF asegurando que el logo, la firma y el sello estén disponibles.
- */
-const handleDownloadPDF = async (
-  orden: OrdenServicio,
-  smrLogoBase64: string | undefined,
-  bcvRate: number
-) => {
-  if (!orden) return;
-
-  try {
-    let logoBase64 = smrLogoBase64;
-
-    if (!logoBase64) {
-      console.warn("⚠️ Logo no presente en memoria, cargando desde logo-service...");
-      // Asumo que esta función existe y es asíncrona
-      logoBase64 = await getLogoBase64(); 
-    }
-
-    if (!logoBase64) {
-      alert("No se pudo cargar el logo. Verifica que /public/smr-logo.png exista.");
-      return;
-    }
-    
-    // 🔑 CORRECCIÓN: Obtener la firma y el sello de localStorage
-    const firmaBase64 = getFirmaBase64(); 
-    const selloBase64 = getSelloBase64();
-
-    console.log("✅ Generando PDF con datos:", {
-      ordenId: orden.id,
-      bcvRate,
-      hasFirma: !!firmaBase64, 
-      hasSello: !!selloBase64, 
-      logoBase64Preview: logoBase64.substring(0, 50) + "...",
-    });
-
-    // 🔑 CORRECCIÓN: Pasar firma y sello en las opciones para pdf-generator.ts
-    generateOrderPDF(orden, logoBase64, { 
-        bcvRate: bcvRate,
-        firmaBase64: firmaBase64,
-        selloBase64: selloBase64,
-    }); 
-  } catch (error) {
-    console.error("Error al generar PDF:", error);
-    alert("Ocurrió un error al generar el PDF. Revisa la consola para más detalles.");
-  }
-};
+// ⚠️ Se eliminó la función handleDownloadPDF
 
 export function OrderDetailModal({
   open,
   onClose,
   orden,
-  smrLogoBase64,
   bcvRate,
 }: OrderDetailModalProps) {
   if (!orden) return null;
@@ -375,15 +324,9 @@ export function OrderDetailModal({
           </Card>
         </div>
 
-        {/* FOOTER */}
+        {/* FOOTER - ⚠️ Se eliminó el botón de descarga del PDF */}
         <div className="flex justify-end p-4 border-t flex-shrink-0">
-          <Button
-            className="gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/50"
-            onClick={() => handleDownloadPDF(orden, smrLogoBase64, bcvRate)}
-          >
-            <FileDown className="w-4 h-4" />
-            Descargar Presupuesto PDF
-          </Button>
+            {/* El footer ahora está vacío */}
         </div>
       </DialogContent>
     </Dialog>

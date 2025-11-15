@@ -4,6 +4,55 @@
 import type { OrdenServicio } from "@/lib/types/orden";
 import { formatCurrency, formatDate } from "@/lib/utils/order-utils";
 
+// --- HELPER PARA CARGA DINÁMICA DE PDFMAKE (FIX ROBUSTO) ---
+async function loadPdfDependencies() {
+    if (typeof window === 'undefined') {
+        return null; 
+    }
+    
+    // Carga dinámica de las librerías
+    const [pdfMakeImport, pdfFontsImport] = await Promise.all([
+        import('pdfmake/build/pdfmake'),
+        import('pdfmake/build/vfs_fonts'),
+    ]);
+
+    // Obtener los objetos principales (verificando .default)
+    const pdfMake = pdfMakeImport.default || pdfMakeImport;
+    const pdfFontsModule = pdfFontsImport.default || pdfFontsImport;
+
+    let vfsObject = null;
+
+    // Lógica robusta para encontrar el objeto VFS
+    if (pdfFontsModule && pdfFontsModule.pdfMake && pdfFontsModule.pdfMake.vfs) {
+        vfsObject = pdfFontsModule.pdfMake.vfs;
+    } 
+    else if (pdfFontsModule && Object.keys(pdfFontsModule).some(key => key.endsWith('.ttf'))) {
+        vfsObject = pdfFontsModule;
+    }
+    else if (pdfFontsModule && pdfFontsModule.vfs) {
+        vfsObject = pdfFontsModule.vfs;
+    }
+    
+    if (vfsObject) {
+        pdfMake.vfs = vfsObject;
+    } else {
+        console.error("Error: Estructura de pdfFonts/vfs_fonts no encontrada. No se pudo inicializar pdfmake.vfs.");
+        return null;
+    }
+    
+    // Configuración de fuentes (mantenida del original)
+    pdfMake.fonts = {
+        Roboto: {
+            normal: "Roboto-Regular.ttf",
+            bold: "Roboto-Medium.ttf",
+            italics: "Roboto-Italic.ttf",
+            bolditalics: "Roboto-MediumItalics.ttf",
+        },
+    };
+    
+    return pdfMake;
+}
+
 // --- CONSTANTES ---
 const PRECIO_LASER_POR_MINUTO = 0.8;
 const NOTAS_LEGALES = [
@@ -14,12 +63,32 @@ const NOTAS_LEGALES = [
 const FALLBACK_LOGO_PRINCIPAL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYGD4DwAChwGAf60MhQAAAABJRU5ErkJggg==";
 
-// --- INTERFACES ---
+// --- INTERFACES GLOBALES ---
 export interface PDFOptions {
   bcvRate?: number;
   firmaBase64?: string;
   selloBase64?: string;
 }
+
+// 🔑 INTERFACES SIMPLIFICADAS PARA PRESUPUESTO
+interface BudgetItem {
+    descripcion: string;
+    cantidad: number;
+    precioUnitarioUSD: number; 
+    totalUSD: number;
+}
+
+interface BudgetData {
+    titulo: string;
+    clienteNombre: string;
+    clienteCedula?: string;
+    items: BudgetItem[];
+    totalUSD: number;
+    fechaCreacion: string;
+}
+
+
+// --- FUNCIONES Y LÓGICA DE CÁLCULO ORIGINALES ---
 
 /**
  * 🔹 Calcula el subtotal de un ítem (Lógica para Corte Láser).
@@ -50,34 +119,144 @@ const calculateItemSubtotal = (item: any): number => {
   return 0;
 };
 
+
+// --- LÓGICA DE TABLAS ORIGINAL (Reutilizada) ---
+
+const emptySpacerCell = {
+    text: " ",
+    margin: [0, 8, 0, 8],
+};
+
+const emptyRows = [[emptySpacerCell, "", "", ""], [emptySpacerCell, "", "", ""]];
+
+const customTableLayout = {
+    hLineWidth: function (i: number, node: any) {
+        return i === 0 || i === node.table.body.length ? 1 : 1;
+    },
+    vLineWidth: function (i: number, node: any) {
+        return i === 0 || i === node.table.widths.length ? 1 : 1;
+    },
+    hLineColor: function (i: number, node: any) {
+        return "black";
+    },
+    vLineColor: function (i: number, node: any) {
+        return "black";
+    },
+    fillColor: function (i: number, node: any) {
+        return i === 0 ? "#EEEEEE" : null;
+    },
+    paddingLeft: function (i: number, node: any) {
+        return 8;
+    },
+    paddingRight: function (i: number, node: any) {
+        return 8;
+    },
+    paddingTop: function (i: number, node: any) {
+        return 6;
+    },
+    paddingBottom: function (i: number, node: any) {
+        return 6;
+    },
+};
+
+
+// --- BLOQUE DE FIRMA Y SELLO ORIGINAL (Reutilizado) ---
+const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: string | undefined) => ([
+    {
+        text: "SIN MAS QUE HACER REFERENCIA...",
+        style: "farewellText",
+        alignment: "center",
+        margin: [0, 20, 0, 30], 
+    },
+    {
+        columns: [
+            { width: "*", text: "" },
+            { width: "*", text: "" },
+            
+            {
+                width: 250, 
+                alignment: "center",
+                
+                columns: [
+                    {
+                        width: 150, 
+                        alignment: "center",
+                        stack: [
+                            firmaBase64
+                                ? {
+                                    image: firmaBase64,
+                                    width: 120,
+                                    height: 40,
+                                    alignment: "center",
+                                    margin: [0, 0, 0, 0],
+                                }
+                                : { text: " ", margin: [0, 0, 0, 0] }, 
+                            {
+                                canvas: [
+                                    {
+                                        type: "line",
+                                        x1: 0,
+                                        y1: 0,
+                                        x2: 120,
+                                        y2: 0,
+                                        lineWidth: 1,
+                                        lineColor: "black",
+                                    },
+                                ],
+                                margin: [0, 2, 0, 0],
+                            },
+                            { text: "JOSUE LEAL", style: "contactName", margin: [0, 5, 0, 0] },
+                            { text: `C.I: 19448046`, style: "contactInfo" },
+                            { text: `Cel. 04246118494`, style: "contactInfo" },
+                        ],
+                    },
+
+                    {
+                        width: "*",
+                        alignment: "right",
+                        stack: [
+                            ...(selloBase64
+                                ? [
+                                    {
+                                        image: selloBase64,
+                                        width: 150,
+                                        height: 150,
+                                        alignment: "right",
+                                        margin: [0, 5, 0, 0],
+                                    },
+                                ]
+                                : []),
+                        ],
+                    },
+                ],
+                columnGap: 10,
+            },
+            
+            { width: "*", text: "" },
+        ],
+        margin: [0, 0, 0, 0],
+    },
+]);
+
+
+// --- FUNCIÓN 1: GENERACIÓN DE ORDEN DE SERVICIO PDF (ORIGINAL) ---
 /**
  * 🔹 Genera el documento PDF de la orden de servicio.
+ * ESTA FUNCIÓN SE MANTIENE COMPLETAMENTE ORIGINAL (Solo se usa el helper de carga corregido).
  */
 export async function generateOrderPDF(
   orden: OrdenServicio,
   SMRLogoBase64: string,
   options: PDFOptions = {}
 ) {
-  const pdfMakeModule = await import("pdfmake/build/pdfmake");
-  const pdfFontsModule = await import("pdfmake/build/vfs_fonts");
-
-  const pdfMake = pdfMakeModule.default ? pdfMakeModule.default : pdfMakeModule;
-  pdfMake.vfs = (pdfFontsModule as any).default || pdfFontsModule;
-  pdfMake.fonts = {
-    Roboto: {
-      normal: "Roboto-Regular.ttf",
-      bold: "Roboto-Medium.ttf",
-      italics: "Roboto-Italic.ttf",
-      bolditalics: "Roboto-MediumItalics.ttf",
-    },
-  };
+  const pdfMake = await loadPdfDependencies();
+  if (!pdfMake) return;
 
   const { bcvRate = 1, firmaBase64, selloBase64 } = options;
 
   const totalUSD = orden.totalUSD;
   const totalVES = totalUSD * bcvRate;
-
-  // ... [LÓGICA DE TABLAS (itemRows, emptySpacerCell, emptyRows, customTableLayout) SE MANTIENE] ...
+    
   const itemRows = orden.items.map((item) => {
     const itemAny = item as any;
     const subtotal = calculateItemSubtotal(itemAny);
@@ -109,136 +288,9 @@ export async function generateOrderPDF(
     ];
   });
 
-  const emptySpacerCell = {
-    text: " ",
-    margin: [0, 8, 0, 8],
-  };
 
-  const emptyRows = [[emptySpacerCell, "", "", ""], [emptySpacerCell, "", "", ""]];
+  const signatureBlockContent = getSignatureBlockContent(firmaBase64, selloBase64);
 
-  const customTableLayout = {
-    hLineWidth: function (i: number, node: any) {
-      return i === 0 || i === node.table.body.length ? 1 : 1;
-    },
-    vLineWidth: function (i: number, node: any) {
-      return i === 0 || i === node.table.widths.length ? 1 : 1;
-    },
-    hLineColor: function (i: number, node: any) {
-      return "black";
-    },
-    vLineColor: function (i: number, node: any) {
-      return "black";
-    },
-    fillColor: function (i: number, node: any) {
-      return i === 0 ? "#EEEEEE" : null;
-    },
-    paddingLeft: function (i: number, node: any) {
-      return 8;
-    },
-    paddingRight: function (i: number, node: any) {
-      return 8;
-    },
-    paddingTop: function (i: number, node: any) {
-      return 6;
-    },
-    paddingBottom: function (i: number, node: any) {
-      return 6;
-    },
-  };
-  // ... [FIN DE LÓGICA DE TABLAS] ...
-
-
-  // 🔑 LÓGICA REESTRUCTURADA PARA LA FIRMA Y EL SELLO (Lado a lado, centrado, con línea ABAJO)
-  const signatureBlockContent = [
-    {
-      text: "SIN MAS QUE HACER REFERENCIA...",
-      style: "farewellText",
-      alignment: "center",
-      margin: [0, 20, 0, 30], // Margen inferior aumentado para separar de la firma/sello
-    },
-    {
-      // Usamos columns para colocar la firma y el sello lado a lado y centrar el conjunto
-      columns: [
-        // Columna 1: Espaciador Izquierdo para centrar
-        { width: "*", text: "" },
-              { width: "*", text: "" },
-                
-        // Columna 2: Contenedor Principal (Firma y Sello Lado a Lado)
-        {
-          width: 250, // Ancho fijo para el contenedor principal (ajusta este valor si es necesario)
-          alignment: "center",
-          
-          columns: [
-            // Subcolumna A: Firma (Izquierda)
-            {
-              width: 150, // Ancho fijo para la firma
-              alignment: "center",
-              stack: [
-                // 1. Imagen de la firma (si existe)
-                firmaBase64
-                  ? {
-                      image: firmaBase64,
-                      width: 120,
-                      height: 40,
-                      alignment: "center",
-                      margin: [0, 0, 0, 0],
-                    }
-                  : { text: " ", margin: [0, 0, 0, 0] }, // Espacio si no hay firma
- // 3. LÍNEA DE FIRMA (ABajo del texto)
-                {
-                  canvas: [
-                    {
-                      type: "line",
-                      x1: 0,
-                      y1: 0,
-                      x2: 120,
-                      y2: 0,
-                      lineWidth: 1,
-                      lineColor: "black",
-                    },
-                  ],
-                  // El margen superior empuja la línea un poco hacia abajo del texto
-                  margin: [0, 2, 0, 0], 
-                },
-                // 2. Información de Contacto (Texto)
-                { text: "JOSUE LEAL", style: "contactName", margin: [0, 5, 0, 0] },
-                { text: `C.I: 19448046`, style: "contactInfo" },
-                { text: `Cel. 04246118494`, style: "contactInfo" },
-
-               
-              ],
-            },
-
-            // Subcolumna B: Sello (Derecha)
-            {
-              width: "*", // Ocupa el espacio restante en esta columna
-              alignment: "right",
-              stack: [
-                ...(selloBase64
-                  ? [
-                      {
-                        image: selloBase64,
-                        width: 150,
-                        height: 150,
-                        alignment: "right",
-                        margin: [0, 5, 0, 0],
-                      },
-                    ]
-                  : []),
-              ],
-            },
-          ],
-          columnGap: 10, // Espacio entre firma y sello
-        },
-        
-        // Columna 3: Espaciador Derecho para centrar
-        { width: "*", text: "" },
-      ],
-      margin: [0, 0, 0, 0],
-    },
-  ];
-
-  // ... [El resto de docDefinition se mantiene] ...
   const docDefinition = {
     pageSize: "LETTER",
     content: [
@@ -337,7 +389,6 @@ export async function generateOrderPDF(
         alignment: "left",
       },
 
-      // 🔑 Insertamos el bloque de firma y sello centrado y reestructurado
       ...signatureBlockContent,
     ],
 
@@ -368,4 +419,164 @@ export async function generateOrderPDF(
   };
 
   pdfMake.createPdf(docDefinition).open();
+}
+
+
+// --- FUNCIÓN 2: GENERACIÓN DE PRESUPUESTO PDF (CORREGIDA Y SIMPLIFICADA) ---
+/**
+ * 🔹 Genera el documento PDF del presupuesto con la tabla corregida y interfaces simplificadas.
+ */
+export async function generateBudgetPDF( 
+    budgetData: BudgetData,
+    SMRLogoBase64: string,
+    options: PDFOptions = {}
+) {
+    const pdfMake = await loadPdfDependencies();
+    if (!pdfMake) return; 
+    
+    const { bcvRate = 1, firmaBase64, selloBase64 } = options;
+    
+    const totalUSD = budgetData.totalUSD;
+    const totalVES = totalUSD * bcvRate;
+    
+    // Se usa la interfaz BudgetItem simplificada
+    const itemRows = budgetData.items.map((item) => ([
+        { text: item.cantidad, alignment: "left", style: "itemText" },
+        { text: item.descripcion, style: "itemText" },
+        { text: formatCurrency(item.precioUnitarioUSD), alignment: "right", style: "itemText" },
+        { text: formatCurrency(item.totalUSD), alignment: "right", style: "itemTotal" },
+    ]));
+    
+    const signatureBlockContent = getSignatureBlockContent(firmaBase64, selloBase64);
+    
+    // Se usa la interfaz BudgetData simplificada (sin subtotal, sin nota)
+    const docDefinition = {
+        pageSize: "LETTER",
+        content: [
+            {
+                text: `${budgetData.fechaCreacion}`, 
+                style: "dateInfo",
+                alignment: "right",
+                margin: [0, 0, 0, 5],
+            },
+
+            {
+                image: SMRLogoBase64 || FALLBACK_LOGO_PRINCIPAL,
+                width: 150,
+                alignment: "left",
+                margin: [0, 0, 0, 10],
+            },
+
+            {
+                text: budgetData.titulo.toUpperCase(), 
+                style: "title",
+                alignment: "center",
+                margin: [0, 0, 0, 10],
+            },
+
+            {
+                text: `Cliente: ${budgetData.clienteNombre || budgetData.clienteCedula || "N/A"}`,
+                style: "clientInfo",
+                alignment: "left",
+                margin: [0, 0, 0, 15],
+            },
+
+            {
+                style: "itemsTable",
+                table: {
+                    headerRows: 1,
+                    widths: [60, "*", 80, 70], 
+                    body: [
+                        [
+                            { text: "Cantidad", style: "tableHeader", alignment: "left" },
+                            { text: "Descripción", style: "tableHeader" },
+                            { text: "Precio Unit. (USD)", style: "tableHeader", alignment: "right" }, 
+                            { text: "Total (USD)", style: "tableHeader", alignment: "right" }, 
+                        ],
+                        ...itemRows,
+                        ...emptyRows,
+                        [
+                            {
+                                text: "TOTAL",
+                                style: "finalTotalLabelBig",
+                                alignment: "right",
+                                colSpan: 3,
+                            },
+                            {},
+                            {},
+                            { text: formatCurrency(totalUSD), style: "finalTotalValueBig", alignment: "right" },
+                        ],
+                    ],
+                },
+                layout: customTableLayout,
+                margin: [0, 5, 0, 15],
+            },
+            
+            // Sección de Totales en Bs
+            {
+                columns: [
+                    {
+                        width: "50%",
+                        text: `Tasa BCV Referencial: 1 USD = ${formatCurrency(bcvRate)} VES`,
+                        style: "bcvRate",
+                        margin: [0, 0, 0, 10],
+                    },
+                    {
+                        width: "50%",
+                        alignment: "right",
+                        text: `Total en Bolívares: ${formatCurrency(totalVES)} VES`,
+                        style: "totalVesRef",
+                        margin: [0, 0, 0, 10],
+                    },
+                ],
+                columnGap: 10,
+                margin: [0, 0, 0, 15],
+            },
+
+            // Notas Legales
+            {
+                stack: [
+                    { text: "NOTA:", style: "notesHeader", margin: [0, 0, 0, 5] },
+                    {
+                        ul: NOTAS_LEGALES,
+                        fontSize: 9,
+                        margin: [5, 0, 0, 20],
+                    },
+                ],
+                alignment: "left",
+            },
+
+            // Bloque de Firma y Sello
+            ...signatureBlockContent,
+        ],
+
+        // ESTILOS REUTILIZADOS DEL CÓDIGO ORIGINAL
+        styles: {
+            title: { fontSize: 16, bold: true, color: "#333333" },
+            clientInfo: { fontSize: 10, bold: true, color: "#333333" },
+            dateInfo: { fontSize: 10, color: "#333333" },
+
+            tableHeader: { bold: true, fontSize: 10, color: "black", fillColor: "#EEEEEE" },
+            itemsTable: { margin: [0, 5, 0, 5] },
+            itemText: { fontSize: 9 },
+            itemTotal: { fontSize: 9, bold: true },
+
+            finalTotalLabelBig: { fontSize: 13, bold: true, color: "#000000", alignment: "right" },
+            finalTotalValueBig: { fontSize: 14, bold: true, color: "#007bff", alignment: "right" },
+
+            bcvRate: { fontSize: 9, bold: false, color: "#666666" },
+            totalVesRef: { fontSize: 11, bold: false, color: "#666666" },
+
+            notesHeader: { fontSize: 11, bold: true, color: "#333333" },
+            farewellText: { fontSize: 9, italics: true, color: "#333333" },
+            contactName: { fontSize: 10, bold: true, color: "#333333", margin: [0, 5, 0, 0] },
+            contactInfo: { fontSize: 9, color: "#666666" },
+        },
+        defaultStyle: {
+            font: "Roboto",
+        },
+    };
+
+    // Usamos .open() para mostrar el PDF en una nueva pestaña.
+    pdfMake.createPdf(docDefinition).open();
 }

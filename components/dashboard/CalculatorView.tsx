@@ -14,11 +14,11 @@ import {
     Timer,
     ArrowRight, 
     Euro, 
-    Trash2, // Asegurado para el nuevo MetroCuadradoCalculator
-    Plus,    // Asegurado para el nuevo MetroCuadradoCalculator
+    Trash2, 
+    Plus,    
     Loader2 
 } from "lucide-react";
-// Importar el servicio BCV para obtener las tasas
+// Importar el servicio BCV para obtener las tasas (Asumiendo que existe en la ruta lib)
 import { fetchBCVRateFromAPI } from "@/lib/bcv-service"; 
 
 // --- Tipado para las tasas de cambio ---
@@ -33,19 +33,25 @@ interface ExchangeRates {
 const formatTimeInMinutes = (totalMinutes: number): string => {
     if (totalMinutes < 0) return "00:00";
     
-    // Obtener la parte entera de los minutos
     const minutes = Math.floor(totalMinutes);
-    
-    // Obtener los segundos restantes (la parte decimal * 60)
     const secondsDecimal = (totalMinutes - minutes) * 60;
-    // Redondear a un entero (o usar Math.round si prefieres)
     const seconds = Math.round(secondsDecimal);
 
-    // Formatear a mm:ss con padding de cero
     const formattedMinutes = String(minutes).padStart(2, '0');
     const formattedSeconds = String(seconds).padStart(2, '0');
 
     return `${formattedMinutes}:${formattedSeconds}`;
+};
+
+// --- UTILIDAD: Función para formatear Bolívares a estilo VENEZOLANO (1.234.567,89) ---
+const formatCurrencyBs = (amount: number | null): string => {
+    if (amount === null || isNaN(amount)) return "0,00";
+    
+    // Usar Intl.NumberFormat para formatear al estándar es-VE (español de Venezuela)
+    return new Intl.NumberFormat('es-VE', { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+    }).format(amount);
 };
 
 
@@ -59,18 +65,17 @@ interface MultiCurrencyResultProps {
 const MultiCurrencyResult: React.FC<MultiCurrencyResultProps> = ({ usdAmount, rates, title }) => {
     if (usdAmount === null || usdAmount <= 0) return null;
 
-    // Tasa de Bolívares (Bs) PRINCIPAL (usando la tasa del Euro para el cobro)
-    // Se multiplica el monto en USD por la tasa del Euro/Bs
-    const bsAmount_euroRate = rates.eurRate ? usdAmount * rates.eurRate : null;
-    
-    // Tasa de Bolívares (Bs) SECUNDARIA (usando la tasa del Dólar para referencia)
+    // Tasa de Bolívares (Bs) PRINCIPAL (usando la tasa del Dólar para el cobro)
     const bsAmount_usdRate = rates.usdRate ? usdAmount * rates.usdRate : null;
+    
+    // Tasa de Bolívares (Bs) SECUNDARIA (usando la tasa del Euro para referencia)
+    const bsAmount_euroRate = rates.eurRate ? usdAmount * rates.eurRate : null;
 
     return (
         <div className="mt-4 p-4 border rounded-md bg-green-50 dark:bg-green-900/20 space-y-2">
             <h4 className="font-semibold text-lg">{title}:</h4>
             
-            {/* Monto principal en USD */}
+            {/* Monto principal en USD (Mantenemos formato USD con punto decimal) */}
             <div className="flex justify-between items-center">
                 <span className="text-xl font-bold text-green-600 dark:text-green-400">
                     ${usdAmount.toFixed(2)} USD
@@ -78,21 +83,21 @@ const MultiCurrencyResult: React.FC<MultiCurrencyResultProps> = ({ usdAmount, ra
                 <DollarSign className="w-5 h-5 text-green-600 dark:text-green-400" />
             </div>
 
-            {/* Resultado Principal en Bolívares (Cobro con Tasa Euro) */}
-            {bsAmount_euroRate !== null && (
+            {/* Resultado Principal en Bolívares (Cobro con Tasa Dólar) - FORMATO BS */}
+            {bsAmount_usdRate !== null && (
                 <div className="flex justify-between text-base font-bold text-primary border-t pt-2">
-                    <span className="font-bold">Total a Cobrar en Bolívares (Tasa EUR):</span>
+                    <span className="font-bold">Total a Cobrar en Bolívares (Tasa USD):</span>
                     <strong className="text-2xl font-extrabold text-blue-600 dark:text-blue-400">
-                        Bs {bsAmount_euroRate.toFixed(2)}
+                        Bs {formatCurrencyBs(bsAmount_usdRate)}
                     </strong>
                 </div>
             )}
             
-            {/* Resultado Secundario en Bolívares (Referencia con Tasa Dólar) */}
-            {bsAmount_usdRate !== null && (
+            {/* Resultado Secundario en Bolívares (Referencia con Tasa Euro) - FORMATO BS */}
+            {bsAmount_euroRate !== null && (
                 <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-                    <span>(Referencia Tasa BCV USD):</span>
-                    <strong className="text-sm">Bs {bsAmount_usdRate.toFixed(2)}</strong>
+                    <span>(Referencia Tasa BCV EUR):</span>
+                    <strong className="text-sm">Bs {formatCurrencyBs(bsAmount_euroRate)}</strong>
                 </div>
             )}
             
@@ -117,7 +122,6 @@ interface MetroCuadradoCalculatorProps {
 }
 
 const MetroCuadradoCalculator: React.FC<MetroCuadradoCalculatorProps> = ({ rates }) => {
-    // Inicializar el estado con una medición por defecto
     const [mediciones, setMediciones] = useState<Measurement[]>([
         { id: Date.now(), cmAlto: 0, cmAncho: 0, precioDolar: 0 }
     ]);
@@ -147,7 +151,6 @@ const MetroCuadradoCalculator: React.FC<MetroCuadradoCalculatorProps> = ({ rates
     // --- MANEJO DE ESTADO PARA LAS MEDICIONES ---
     
     const addMeasurementEntry = () => {
-        // Usamos Date.now() para generar un ID único para la key
         setMediciones([...mediciones, { id: Date.now(), cmAlto: 0, cmAncho: 0, precioDolar: 0 }]);
     };
 
@@ -444,6 +447,9 @@ const CurrencyConverterCalculator: React.FC<{ rates: ExchangeRates }> = ({ rates
     const currentCurrency = isUsdToBs ? 'USD' : 'EUR';
     const otherRateAvailable = isUsdToBs ? (eurRate !== null) : (usdRate !== null);
 
+    // Formatear la tasa de cambio (USD/EUR a Bs)
+    const formattedRate = currentRate !== null ? formatCurrencyBs(currentRate) : "N/A";
+
     return (
         <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
@@ -465,7 +471,7 @@ const CurrencyConverterCalculator: React.FC<{ rates: ExchangeRates }> = ({ rates
                     <div className="flex justify-between items-center bg-gray-100 dark:bg-gray-800 p-3 rounded-md">
                         <span className="text-sm font-semibold">Tasa Actual ({currentCurrency}):</span>
                         <span className="text-lg font-bold text-primary">
-                            Bs {currentRate.toFixed(2)}
+                            Bs {formattedRate}
                         </span>
                     </div>
 
@@ -485,13 +491,13 @@ const CurrencyConverterCalculator: React.FC<{ rates: ExchangeRates }> = ({ rates
 
                         <ArrowRight className="w-5 h-5 mt-7 text-muted-foreground flex-shrink-0" />
                         
-                        {/* Etiqueta para Resultado */}
+                        {/* Etiqueta para Resultado - FORMATO BS */}
                         <div className="flex-1 space-y-2">
                             <label htmlFor="resultado-bs" className="text-sm font-medium block">Resultado (Bs)</label>
                             <Input 
                                 id="resultado-bs"
                                 type="text" 
-                                value={resultBs !== null ? resultBs.toFixed(2) : "Calculando..."} 
+                                value={formatCurrencyBs(resultBs)} 
                                 readOnly
                                 className="text-lg font-semibold bg-primary/10 border-primary"
                             />
@@ -530,17 +536,17 @@ const CalculatorView: React.FC = () => {
         const loadRates = async () => {
             try {
                 setRates(r => ({ ...r, loading: true, error: null }));
-                // @ts-ignore
+                
                 const data = await fetchBCVRateFromAPI();
                 
-                // @ts-ignore
-                const currentUsdRate = data.usdRate ?? data.rate;
-                // @ts-ignore
-                const currentEurRate = data.eurRate ?? null; 
+                // Asegurar que las propiedades existan o usar un fallback
+                const currentUsdRate = (data as any).usdRate ?? (data as any).rate ?? null;
+                const currentEurRate = (data as any).eurRate ?? null; 
 
                 setRates({
-                    usdRate: currentUsdRate,
-                    eurRate: currentEurRate,
+                    // Aseguramos que se conviertan a número flotante antes de guardar
+                    usdRate: currentUsdRate !== null ? parseFloat(currentUsdRate) : null,
+                    eurRate: currentEurRate !== null ? parseFloat(currentEurRate) : null,
                     loading: false,
                     error: null,
                 });

@@ -8,7 +8,9 @@ import React from 'react';
 // --- Importaciones de UI ---
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-// ... otras importaciones de UI ...
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Separator } from "@/components/ui/separator"
+
 
 // Componentes de Vistas y Layout
 import Sidebar from "@/components/dashboard/sidebar"
@@ -19,68 +21,62 @@ import { BCVRateWidget } from "@/components/orden/bvc-rate-widget"
 // VISTAS DE PAGO
 import { ClientsAndPaymentsView } from "@/components/dashboard/ClientsAndPaymentsView"
 import { PaymentEditModal } from "@/components/dashboard/PaymentEditModal" 
-// 🔑 Importamos el tipo de PagoTransaction para manejar la lógica localmente
 import { type PagoTransaction } from "@/components/orden/PaymentHistoryView" 
 
 // NUEVO: Importación de la vista de tareas
 import TasksView from "@/components/dashboard/tasks-view"
-// 🔑 NUEVA IMPORTACIÓN: CalculatorView
-import CalculatorView from "@/components/dashboard/CalculatorView" // <-- AÑADIDO
+// 🔑 MODIFICACIÓN: Importamos la nueva vista de Presupuestos
+import BudgetEntryView from "@/components/dashboard/BudgetEntryView" 
+// ✅ RE-IMPORTACIÓN: Importamos la vista original de la Calculadora (Ajusta la ruta si es necesario)
+import CalculatorView from "@/components/dashboard/CalculatorView" 
 
 // Iconos
-// 🔑 Se añaden Image, Handshake, Stamp y otros íconos
 import { 
     Plus, DollarSign, Users, Upload, Trash2, LogOut, Image, Handshake, Stamp, 
     CheckCircle, FileText, Package, BarChart, Activity, ClipboardList,
-    Calculator // <-- AÑADIDO
+    Calculator 
 } from "lucide-react" 
 
 // Tipos y Servicios 
 import { type OrdenServicio, EstadoOrden, EstadoPago, type PaymentLog } from "@/lib/types/orden"
 import { subscribeToOrdenes, deleteOrden, updateOrdenStatus, createOrden, updateOrdenPaymentLog } from "@/lib/services/ordenes-service"
 import { getBCVRate } from "@/lib/bcv-service"
-// 🔑 ACTUALIZACIÓN DE IMPORTS DE LOGO-SERVICE
 import { 
     getLogoBase64, setLogoBase64, 
     getFirmaBase64, setFirmaBase64, 
-    getSelloBase64, setSelloBase64      
+    getSelloBase64, setSelloBase64      
 } from "@/lib/logo-service" 
 
-// 🔑 NUEVAS IMPORTACIONES PARA PDF
 import { generateOrderPDF, type PDFOptions } from "@/lib/services/pdf-generator"; 
 
-// Vistas Placeholder (ELIMINADAS: ProductsView, SalesView, StatisticsView, ReportsView)
-
-
 // --- TIPOS ---
-// ✅ CORRECCIÓN: Añadida la nueva vista 'calculator'
-type ActiveView = "orders" | "clients" | "tasks" | "calculator" // <-- MODIFICADO
+// 💡 CAMBIO 1: Se añade 'old_calculator' para separar las vistas en la navegación
+type ActiveView = "orders" | "clients" | "tasks" | "calculator" | "old_calculator" 
 type OrdenEditable = OrdenServicio | null
 
 
 export default function Dashboard() {
-    const { user, logout } = useAuth() // Asumiendo que 'useAuth' existe
-    // 🔑 CORRECCIÓN: Inicialización de 'ordenes' como array vacío
-    const [ordenes, setOrdenes] = useState<OrdenServicio[]>([]) // Usar tu tipo real de órdenes
+    const { user, logout } = useAuth() 
+    const [ordenes, setOrdenes] = useState<OrdenServicio[]>([]) 
     const [currentBcvRate, setCurrentBcvRate] = useState<number>(() => getBCVRate().rate || 0); 
-    // ✅ CORRECCIÓN: 'orders' sigue siendo el default, pero el tipo ya no incluye las eliminadas
     const [activeView, setActiveView] = useState<ActiveView>("orders") 
     const [isModalOpen, setIsModalOpen] = useState(false) 
     const [isPaymentModalOpen, setIsPaymentModal] = useState(false) 
     const [ordenToModify, setOrdenToModify] = useState<OrdenEditable>(null) 
     const currentUserId = user?.uid || "mock-user-admin-123"
     
-    // Estados para Logo, Firma y Sello (Ajustar a tu implementación)
+    // Estados para Logo, Firma y Sello
     const [pdfLogoBase64, setPdfLogoBase64] = useState<string | undefined>(undefined); 
     const [firmaBase64, setFirmaBase64State] = useState<string | undefined>(undefined); 
     const [selloBase64, setSelloBase64State] = useState<string | undefined>(undefined); 
 
     // --- LÓGICA DE DATOS Y EFECTOS ---
     useEffect(() => {
-        // Incluir la nueva vista en la condición del efecto
-        if (!user || (activeView !== "orders" && activeView !== "clients" && activeView !== "tasks" && activeView !== "calculator")) return // <-- MODIFICADO
+        // 💡 CAMBIO 2: Se incluye 'old_calculator' en la lista para asegurar que el efecto corra 
+        // y cargue el BCV Rate y los assets de PDF, que son necesarios para ambas vistas.
+        if (!user || (activeView !== "orders" && activeView !== "clients" && activeView !== "tasks" && activeView !== "calculator" && activeView !== "old_calculator")) return 
         
-        // 🔑 CARGA INICIAL DE ASSETS (Logo, Firma y Sello)
+        getBCVRate().rate ? setCurrentBcvRate(getBCVRate().rate) : null;
         getLogoBase64().then(setPdfLogoBase64);
         setFirmaBase64State(getFirmaBase64()); 
         setSelloBase64State(getSelloBase64()); 
@@ -90,7 +86,6 @@ export default function Dashboard() {
             (ordenesData, error) => {
                 if (error) {
                     console.error("Error en la suscripción de órdenes:", error);
-                    // Aseguramos que sea un array en caso de error
                     setOrdenes([]); 
                     return;
                 }
@@ -222,7 +217,7 @@ export default function Dashboard() {
         }
     };
     
-    // 🔑 FUNCIÓN PARA GENERAR EL PDF 
+    // 🔑 FUNCIÓN PARA GENERAR EL PDF
     const handleGeneratePDF = (orden: OrdenServicio) => {
         if (!pdfLogoBase64) {
             console.error("El logo Base64 no está cargado.");
@@ -232,7 +227,6 @@ export default function Dashboard() {
 
         const pdfOptions: PDFOptions = {
             bcvRate: currentBcvRate,
-            // 🔑 PASAMOS LOS NUEVOS ASSETS
             firmaBase64: firmaBase64, 
             selloBase64: selloBase64, 
         };
@@ -250,12 +244,15 @@ export default function Dashboard() {
         logout();
     }
     
-    // ✅ CORRECCIÓN: Añadida la vista 'calculator' al menú de navegación
+    // Definición del menú de navegación.
     const navItems = [
-      { id: 'tasks', label: 'Mis Tareas', icon: <CheckCircle className="w-5 h-5" /> }, 
-      { id: 'orders', label: 'Órdenes de Trabajo', icon: <FileText className="w-5 h-5" /> }, 
+      { id: 'orders', label: 'Órdenes de Servicio', icon: <FileText className="w-5 h-5" /> }, 
+      { id: 'tasks', label: 'Mis Tareas', icon: <CheckCircle className="w-5 h-5" /> },
       { id: 'clients', label: 'Clientes y Cobranza', icon: <Users className="w-5 h-5" /> }, 
-      { id: 'calculator', label: 'Calculadora', icon: <Calculator className="w-5 h-5" /> }, // <-- AÑADIDO
+      // 💡 CAMBIO 3: 'Presupuestos' ahora es solo para el nuevo componente
+      { id: 'calculator', label: 'Presupuestos', icon: <Calculator className="w-5 h-5" /> }, 
+      // 💡 CAMBIO 3: Se añade un nuevo ítem de navegación para la vista original
+      { id: 'old_calculator', label: 'Calculadora', icon: <Calculator className="w-5 h-5" /> }, 
     ];
     
 
@@ -278,9 +275,38 @@ export default function Dashboard() {
           
           <main className="flex-1 overflow-y-auto">
               
-              {/* VISTA: CALCULADORA <-- AÑADIDO */}
+              {/* 🎯 SECCIÓN PRESUPUESTOS (NUEVA VISTA) - Únicamente BudgetEntryView */}
+              {/* 💡 CAMBIO 4: Este bloque ahora solo renderiza BudgetEntryView */}
               {activeView === "calculator" && (
-                  <CalculatorView />
+                <div className="p-4 lg:p-8 overflow-y-auto">
+                    <div className="max-w-7xl mx-auto space-y-8">
+                        
+                        <h2 className="text-3xl font-bold">Generador de Presupuestos</h2>
+                        <BudgetEntryView 
+                            currentBcvRate={currentBcvRate}
+                            pdfLogoBase64={pdfLogoBase64}
+                            handleLogoUpload={handleLogoUpload}
+                            handleClearLogo={handleClearLogo}
+                            firmaBase64={firmaBase64}
+                            handleFirmaUpload={handleFirmaUpload}
+                            handleClearFirma={handleClearFirma}
+                            selloBase64={selloBase64}
+                            handleSelloUpload={handleSelloUpload}
+                            handleClearSello={handleClearSello}
+                        />
+                    </div>
+                </div>
+              )}
+              
+              {/* 🎯 SECCIÓN CALCULADORA ORIGINAL - Únicamente CalculatorView */}
+              {/* 💡 CAMBIO 4: Nuevo bloque para la calculadora original */}
+              {activeView === "old_calculator" && (
+                <div className="p-4 lg:p-8 overflow-y-auto">
+                    <div className="max-w-7xl mx-auto space-y-8">
+                        <h2 className="text-3xl font-bold">Calculadora de Pruebas (Vista Original)</h2>
+                        <CalculatorView /> 
+                    </div>
+                </div>
               )}
               
               {/* VISTA: MIS TAREAS */}
@@ -306,95 +332,12 @@ export default function Dashboard() {
                       <BCVRateWidget initialRate={currentBcvRate} onRateChange={setCurrentBcvRate} />
                   </div>
                   
-                  {/* GRUPO DE BOTONES: LOGO, FIRMA Y SELLO */}
-                  <div className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0 sm:space-x-4">
+                  {/* Contenedor de solo el botón Nueva Orden */}
+                  <div className="mb-8 flex justify-end">
                       
-                      {/* Contenedor de Assets */}
-                      <div className="flex flex-wrap gap-4">
-                          
-                          {/* 1. Botones de Logo PDF */}
-                          <div className="flex items-center space-x-2 p-2 border rounded-lg bg-white dark:bg-gray-800 shadow-sm">
-                              <p className="font-medium text-sm text-muted-foreground mr-2 hidden sm:block">Logo:</p>
-                              <input
-                                  type="file"
-                                  accept="image/png, image/jpeg, image/svg+xml"
-                                  id="pdf-logo-upload"
-                                  className="hidden"
-                                  onChange={handleLogoUpload}
-                              />
-                              <Button 
-                                  variant={pdfLogoBase64 ? 'default' : 'secondary'}
-                                  size="sm"
-                                  onClick={() => document.getElementById('pdf-logo-upload')?.click()}
-                                  title={pdfLogoBase64 ? 'Cambiar Logo PDF' : 'Añadir Logo PDF'}
-                              >
-                                  <Image className="w-4 h-4 mr-2"/> 
-                                  {pdfLogoBase64 ? 'Logo OK' : 'Logo PDF'}
-                              </Button>
-                              {pdfLogoBase64 && (
-                                  <Button variant="destructive" size="icon" onClick={handleClearLogo} title="Eliminar logo PDF">
-                                      <Trash2 className="w-4 h-4" />
-                                  </Button>
-                              )}
-                          </div>
-                          
-                          {/* 2. Botones de Firma PDF */}
-                          <div className="flex items-center space-x-2 p-2 border rounded-lg bg-white dark:bg-gray-800 shadow-sm">
-                              <p className="font-medium text-sm text-muted-foreground mr-2 hidden sm:block">Firma:</p>
-                              <input
-                                  type="file"
-                                  accept="image/png, image/jpeg"
-                                  id="pdf-firma-upload"
-                                  className="hidden"
-                                  onChange={handleFirmaUpload}
-                              />
-                              <Button 
-                                  variant={firmaBase64 ? 'default' : 'secondary'}
-                                  size="sm"
-                                  onClick={() => document.getElementById('pdf-firma-upload')?.click()}
-                                  title={firmaBase64 ? 'Cambiar Firma PDF' : 'Añadir Firma PDF'}
-                              >
-                                  <Handshake className="w-4 h-4 mr-2"/> 
-                                  {firmaBase64 ? 'Firma OK' : 'Añadir Firma'}
-                              </Button>
-                              {firmaBase64 && (
-                                  <Button variant="destructive" size="icon" onClick={handleClearFirma} title="Eliminar Firma PDF">
-                                      <Trash2 className="w-4 h-4" />
-                                  </Button>
-                              )}
-                          </div>
-                          
-                          {/* 3. Botones de Sello PDF */}
-                          <div className="flex items-center space-x-2 p-2 border rounded-lg bg-white dark:bg-gray-800 shadow-sm">
-                              <p className="font-medium text-sm text-muted-foreground mr-2 hidden sm:block">Sello:</p>
-                              <input
-                                  type="file"
-                                  accept="image/png, image/jpeg"
-                                  id="pdf-sello-upload"
-                                  className="hidden"
-                                  onChange={handleSelloUpload}
-                              />
-                              <Button 
-                                  variant={selloBase64 ? 'default' : 'secondary'}
-                                  size="sm"
-                                  onClick={() => document.getElementById('pdf-sello-upload')?.click()}
-                                  title={selloBase64 ? 'Cambiar Sello PDF' : 'Añadir Sello PDF'}
-                              >
-                                  <Stamp className="w-4 h-4 mr-2"/> 
-                                  {selloBase64 ? 'Sello OK' : 'Añadir Sello'}
-                              </Button>
-                              {selloBase64 && (
-                                  <Button variant="destructive" size="icon" onClick={handleClearSello} title="Eliminar Sello PDF">
-                                      <Trash2 className="w-4 h-4" />
-                                  </Button>
-                              )}
-                          </div>
-                      </div>
-
-                      {/* Botón de Nueva Orden (CORREGIDO) */}
+                      {/* Botón de Nueva Orden */}
                       <Dialog open={isModalOpen && !ordenToModify} onOpenChange={setIsModalOpen}>
                         <DialogTrigger asChild>
-                            {/* 🔑 FIX: Envolver el contenido del Button en un <span> */}
                             <Button className="h-10 px-4 py-2 flex-shrink-0" size="sm">
                               <span className="flex items-center">
                                   <Plus className="w-5 h-5 mr-2" /> Nueva Orden
@@ -416,7 +359,7 @@ export default function Dashboard() {
                         </DialogContent>
                       </Dialog>
                   </div>
-                  {/* Fin Contenedor de Botones */}
+                  {/* Fin Contenedor del Botón */}
                   
                   <OrdersTable
                     ordenes={ordenes}
@@ -447,10 +390,9 @@ export default function Dashboard() {
           </main>
         </div>
         
-        {/* MODAL DE EDICIÓN DE ORDEN (se mantiene) */}
+        {/* MODAL DE EDICIÓN DE ORDEN */}
         <Dialog open={isModalOpen && !!ordenToModify} onOpenChange={(open) => {setIsModalOpen(open); if(!open) setOrdenToModify(null);}}>
             {ordenToModify && (
-                // FIX DE RESPONSIVIDAD Y SCROLL (Editar Orden)
                 <DialogContent className="max-w-6xl w-[95vw] h-full max-h-[95vh] sm:max-h-[95vh] sm:max-w-4xl lg:max-w-6xl p-6 sm:p-8 flex flex-col">
                     <DialogHeader className="flex-shrink-0">
                         <DialogTitle className="text-2xl font-bold">Editar Orden de Servicio #{ordenToModify.ordenNumero}</DialogTitle>
@@ -465,7 +407,7 @@ export default function Dashboard() {
             )}
         </Dialog>
 
-        {/* MODAL DE EDICIÓN DE PAGO (se mantiene) */}
+        {/* MODAL DE EDICIÓN DE PAGO */}
         {ordenToModify && (
           <PaymentEditModal
             isOpen={isPaymentModalOpen}
