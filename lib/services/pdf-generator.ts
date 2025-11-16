@@ -127,7 +127,8 @@ const emptySpacerCell = {
     margin: [0, 8, 0, 8],
 };
 
-const emptyRows = [[emptySpacerCell, "", ""], [emptySpacerCell, "", ""]];
+// 🛠️ AJUSTADO: Se asegura que haya 4 celdas para coincidir con el número de columnas de ambas tablas.
+const emptyRows = [[emptySpacerCell, "", "", ""], [emptySpacerCell, "", "", ""]];
 
 const customTableLayout = {
     hLineWidth: function (i: number, node: any) {
@@ -239,7 +240,7 @@ const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: 
 ]);
 
 
-// --- FUNCIÓN 1: GENERACIÓN DE ORDEN DE SERVICIO PDF (SIN CAMBIOS EN EL TÍTULO) ---
+// --- FUNCIÓN 1: GENERACIÓN DE ORDEN DE SERVICIO PDF (ANCHO DE CANTIDAD A 55) ---
 /**
  * 🔹 Genera el documento PDF de la orden de servicio.
  */
@@ -310,7 +311,7 @@ export async function generateOrderPDF(
       },
 
       {
-        text: "PRESUPUESTO", // Título ya es "PRESUPUESTO"
+        text: "PRESUPUESTO",
         style: "title",
         alignment: "center",
         margin: [0, 0, 0, 10],
@@ -422,7 +423,7 @@ export async function generateOrderPDF(
 }
 
 
-// --- FUNCIÓN 2: GENERACIÓN DE PRESUPUESTO PDF (TÍTULO MODIFICADO) ---
+// --- FUNCIÓN 2: GENERACIÓN DE PRESUPUESTO PDF (RE-AÑADIDO PRECIO UNITARIO Y TÍTULO FIJO) ---
 /**
  * 🔹 Genera el documento PDF del presupuesto con la tabla corregida y interfaces simplificadas.
  */
@@ -439,10 +440,11 @@ export async function generateBudgetPDF(
     const totalUSD = budgetData.totalUSD;
     const totalVES = totalUSD * bcvRate;
     
-    // Se usa la interfaz BudgetItem simplificada. Se elimina item.precioUnitarioUSD
+    // 🛠️ Re-añadido item.precioUnitarioUSD a la fila de ítems.
     const itemRows = budgetData.items.map((item) => ([
         { text: item.cantidad, alignment: "left", style: "itemText" },
         { text: item.descripcion, style: "itemText" },
+        { text: formatCurrency(item.precioUnitarioUSD), alignment: "right", style: "itemText" },
         { text: formatCurrency(item.totalUSD), alignment: "right", style: "itemTotal" },
     ]));
     
@@ -467,7 +469,7 @@ export async function generateBudgetPDF(
             },
 
             {
-                // 🛠️ Cambiado de budgetData.titulo.toUpperCase() a "PRESUPUESTO"
+                // Título fijo como "PRESUPUESTO"
                 text: "PRESUPUESTO", 
                 style: "title",
                 alignment: "center",
@@ -485,13 +487,14 @@ export async function generateBudgetPDF(
                 style: "itemsTable",
                 table: {
                     headerRows: 1,
-                    // Ancho de Cantidad: 55
-                    widths: [55, "*", 70], 
+                    // 🛠️ Ajustado: Ahora son 4 columnas. 55 para Cantidad, * para Desc., 70 para Precio Unit., 70 para Total.
+                    widths: [55, "*", 70, 70], 
                     body: [
                         [
                             { text: "Cantidad", style: "tableHeader", alignment: "left" },
                             { text: "Descripción", style: "tableHeader" },
-                            // Se eliminó la columna "Precio Unit. (USD)"
+                            // 🛠️ Re-añadido el encabezado.
+                            { text: "Precio Unit. (USD)", style: "tableHeader", alignment: "right" }, 
                             { text: "Total (USD)", style: "tableHeader", alignment: "right" }, 
                         ],
                         ...itemRows,
@@ -501,10 +504,11 @@ export async function generateBudgetPDF(
                                 text: "TOTAL",
                                 style: "finalTotalLabelBig",
                                 alignment: "right",
-                                // colSpan ajustado a 2 para abarcar Cantidad y Descripción
-                                colSpan: 2, 
+                                // 🛠️ Ajustado: colSpan vuelve a 3 para abarcar Cantidad, Descripción y Precio Unit.
+                                colSpan: 3, 
                             },
-                            {}, 
+                            {}, // Celda vacía (colSpan 3)
+                            {}, // Celda vacía (colSpan 3)
                             { text: formatCurrency(totalUSD), style: "finalTotalValueBig", alignment: "right" },
                         ],
                     ],
