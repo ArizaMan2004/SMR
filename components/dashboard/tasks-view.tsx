@@ -1,10 +1,9 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CheckCircle2, Circle, ChevronRight } from 'lucide-react'
+import { LayoutGrid, Users, CalendarClock } from 'lucide-react'
 import { type OrdenServicio, type ItemOrden, type TipoServicio } from "@/lib/types/orden"
 import TaskCard from "@/components/dashboard/task-card"
 import TaskDetailModal from "@/components/dashboard/task-detail-modal"
@@ -14,93 +13,82 @@ interface TasksViewProps {
 }
 
 export default function TasksView({ ordenes }: TasksViewProps) {
-  const [selectedEmpleado, setSelectedEmpleado] = useState("")
+  // Ahora seleccionamos AREA (Tipo de Servicio), no empleado
+  const [selectedArea, setSelectedArea] = useState<string>("")
   const [selectedTask, setSelectedTask] = useState<{ item: ItemOrden; orden: OrdenServicio } | null>(null)
   const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set())
 
-  // 🔑 MOVIDO AQUÍ: Funciones utilitarias para que estén disponibles antes de los useMemo
+  // --- UTILS ---
 
-  // Genera un ID único para la tarea basado en la orden y el índice del ítem
   const getTaskId = (orden: OrdenServicio, itemIndex: number) => {
     return `${orden.id}-${itemIndex}`
   }
 
-  const getTipoServicioLabel = (tipo: TipoServicio) => {
-    const labels: Record<TipoServicio, string> = {
+  // 🏷️ MAPEO DE ÁREAS (Aquí definimos "Producción" para Aviso Corpóreo)
+  const getAreaLabel = (tipo: string) => {
+    const labels: Record<string, string> = {
       CORTE_LASER: "Corte Láser",
       IMPRESION: "Impresión",
       ROTULACION: "Rotulación",
-      AVISO_CORPOREO: "Aviso Corporeo",
-      OTROS: "Otros"
+      AVISO_CORPOREO: "Producción", // 👈 Cambio solicitado
+      INSTALACION: "Instalación",
+      DISENO: "Diseño",
+      OTROS: "Otros Servicios"
     }
     return labels[tipo] || tipo
   }
 
-  // Extraer lista única de empleados (quienes tienen tareas asignadas)
-  const empleados = useMemo(() => {
-    const empleadosSet = new Set<string>()
+  // --- MEMOS ---
+
+  // 1. Obtener lista única de ÁREAS disponibles basándonos en las órdenes activas
+  const areasDisponibles = useMemo(() => {
+    const areasSet = new Set<string>()
     ordenes.forEach(orden => {
-      // ✅ FIX: Asegurar que orden.items existe y es un array
       if (Array.isArray(orden.items)) { 
         orden.items.forEach(item => {
-          // Usamos 'item.empleadoAsignado' tal como está en tu código
-          if (item.empleadoAsignado) {
-            empleadosSet.add(item.empleadoAsignado)
+          // Usamos el tipoServicio como identificador del Área
+          if (item.tipoServicio) {
+            areasSet.add(item.tipoServicio)
+          } else {
+            areasSet.add("OTROS")
           }
         })
       }
     })
-    return Array.from(empleadosSet).sort()
+    return Array.from(areasSet).sort()
   }, [ordenes])
 
-  // Filtrar y ORDENAR tareas por empleado seleccionado
+  // 2. Filtrar tareas por el ÁREA seleccionada
   const tareasFiltradas = useMemo(() => {
-    // Si no hay empleado seleccionado, devolvemos un array vacío
-    if (!selectedEmpleado) return []
+    if (!selectedArea) return []
 
     const tareas: Array<{ item: ItemOrden; orden: OrdenServicio; index: number }> = []
+    
     ordenes.forEach(orden => {
-      // ✅ FIX: Asegurar que orden.items existe y es un array
       if (Array.isArray(orden.items)) {
         orden.items.forEach((item, index) => {
-          // Filtramos solo las tareas asignadas al empleado seleccionado
-          if (item.empleadoAsignado === selectedEmpleado) {
+          const areaItem = item.tipoServicio || "OTROS"
+          
+          // Filtramos si el tipo coincide con el área seleccionada
+          if (areaItem === selectedArea) {
             tareas.push({ item, orden, index })
           }
         })
       }
     })
     
-    // 💡 LÓGICA DE ORDENACIÓN POR FECHA DE ENTREGA ESTIMADA (ASCENDENTE)
-    // Esto prioriza las tareas con fecha más próxima y envía las tareas sin fecha al final.
+    // Ordenar por fecha de entrega (Urgencia)
     tareas.sort((a, b) => {
-        // Convertir fecha a timestamp. Si no existe, usar Infinity para enviarla al final.
         const dateA = a.orden.fechaEntregaEstimada ? new Date(a.orden.fechaEntregaEstimada).getTime() : Infinity;
         const dateB = b.orden.fechaEntregaEstimada ? new Date(b.orden.fechaEntregaEstimada).getTime() : Infinity;
-        
         return dateA - dateB; 
     });
 
     return tareas
-  }, [ordenes, selectedEmpleado])
+  }, [ordenes, selectedArea])
 
-  // Agrupar tareas por tipo de servicio
-  const tareasAgrupadas = useMemo(() => {
-    const grupos: Record<string, Array<{ item: ItemOrden; orden: OrdenServicio; index: number }>> = {}
-    tareasFiltradas.forEach(tarea => {
-      // Usamos el tipo de servicio o "OTROS" como fallback
-      const tipo = tarea.item.tipoServicio || "OTROS"
-      if (!grupos[tipo]) {
-        grupos[tipo] = []
-      }
-      grupos[tipo].push(tarea)
-    })
-    return grupos
-  }, [tareasFiltradas])
-
-  // Contar tareas completadas
+  // 3. Contar completadas
   const contadorCompletadas = useMemo(() => {
-    // 🔑 AHORA getTaskId está disponible
     const filteredTaskIds = tareasFiltradas.map(t => getTaskId(t.orden, t.index));
     let count = 0;
     filteredTaskIds.forEach(id => {
@@ -126,113 +114,119 @@ export default function TasksView({ ordenes }: TasksViewProps) {
       {/* Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Mis Tareas del Día</h1>
-          <p className="text-sm text-muted-foreground mt-1">Consulta tus trabajos asignados</p>
+          <h1 className="text-2xl font-bold text-foreground">Tareas por Área</h1>
+          <p className="text-sm text-muted-foreground mt-1">Gestiona la cola de producción por departamento</p>
         </div>
-        {/* Selector de Empleado */}
-        <Select value={selectedEmpleado} onValueChange={setSelectedEmpleado}>
+        
+        {/* SELECTOR DE ÁREA */}
+        <Select value={selectedArea} onValueChange={setSelectedArea}>
           <SelectTrigger className="w-full md:w-64">
-            <SelectValue placeholder="Selecciona tu nombre" />
+            <div className="flex items-center gap-2">
+                <LayoutGrid className="w-4 h-4 text-muted-foreground"/>
+                <SelectValue placeholder="Selecciona un Área" />
+            </div>
           </SelectTrigger>
           <SelectContent>
-            {empleados.map(empleado => (
-              <SelectItem key={empleado} value={empleado}>
-                {empleado}
+            {areasDisponibles.map(area => (
+              <SelectItem key={area} value={area}>
+                {getAreaLabel(area)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
 
-      {/* Contador de tareas */}
-      {selectedEmpleado && (
-        <Card className="p-4 bg-gradient-to-r from-primary/10 to-primary/5">
+      {/* Stats del Área */}
+      {selectedArea && (
+        <Card className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-100 dark:border-blue-900">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">Tareas totales</p>
-              <p className="text-3xl font-bold text-foreground">{tareasFiltradas.length}</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Completadas</p>
-              <p className="text-3xl font-bold text-green-600">{contadorCompletadas}</p>
-            </div>
-            <div className="w-24 h-24 rounded-full border-4 border-primary flex items-center justify-center">
-              <div className="text-center">
-                <p className="text-2xl font-bold text-foreground">
-                  {tareasFiltradas.length > 0 ? Math.round((contadorCompletadas / tareasFiltradas.length) * 100) : 0}%
-                </p>
-                <p className="text-xs text-muted-foreground">Avance</p>
+              <p className="text-sm text-blue-600 dark:text-blue-400 font-medium">Cola de {getAreaLabel(selectedArea)}</p>
+              <div className="flex items-baseline gap-2 mt-1">
+                <p className="text-3xl font-bold text-foreground">{tareasFiltradas.length}</p>
+                <span className="text-sm text-muted-foreground">trabajos totales</span>
               </div>
+            </div>
+            
+            <div className="flex gap-8 text-center">
+                <div>
+                    <p className="text-sm text-muted-foreground">Pendientes</p>
+                    <p className="text-xl font-bold text-orange-600">{tareasFiltradas.length - contadorCompletadas}</p>
+                </div>
+                <div>
+                    <p className="text-sm text-muted-foreground">Listas</p>
+                    <p className="text-xl font-bold text-green-600">{contadorCompletadas}</p>
+                </div>
+            </div>
+
+            <div className="hidden md:flex w-16 h-16 rounded-full border-4 border-blue-200 dark:border-blue-800 items-center justify-center">
+                <span className="text-xs font-bold">
+                    {tareasFiltradas.length > 0 ? Math.round((contadorCompletadas / tareasFiltradas.length) * 100) : 0}%
+                </span>
             </div>
           </div>
         </Card>
       )}
 
-      {/* Tareas por tipo de servicio */}
-      {selectedEmpleado ? (
-        Object.entries(tareasAgrupadas).length > 0 ? (
-          <div className="space-y-6">
-            {Object.entries(tareasAgrupadas).map(([tipoServicio, tareas]) => {
-              // 💡 CALCULAR AVANCE POR GRUPO
-              const tareasCompletadasEnGrupo = tareas.filter(t => completedTasks.has(getTaskId(t.orden, t.index))).length;
+      {/* Grid de Tareas */}
+      {selectedArea ? (
+        tareasFiltradas.length > 0 ? (
+          <div className="space-y-4">
+             <div className="flex items-center gap-2 pb-2 border-b">
+                <CalendarClock className="w-5 h-5 text-muted-foreground" />
+                <h3 className="font-medium text-muted-foreground">
+                    Cola de trabajo: {getAreaLabel(selectedArea)}
+                </h3>
+             </div>
 
-              return (
-                <div key={tipoServicio} className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-1 h-6 bg-primary rounded-full"></div>
-                    <h2 className="text-lg font-semibold text-foreground">
-                      {getTipoServicioLabel(tipoServicio as TipoServicio)}
-                    </h2>
-                    {/* 💡 MOSTRAR AVANCE EN VEZ DE SOLO EL TOTAL */}
-                    <span className="text-sm bg-secondary text-secondary-foreground px-2 py-1 rounded-full font-medium">
-                      {tareasCompletadasEnGrupo} / {tareas.length} Tareas
-                    </span>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 animate-in fade-in zoom-in duration-300">
+              {tareasFiltradas.map(({ item, orden, index }) => {
+                const taskId = getTaskId(orden, index)
+                const isCompleted = completedTasks.has(taskId)
+                
+                return (
+                  <div key={taskId} className="relative group">
+                    <TaskCard 
+                      item={item} 
+                      orden={orden} 
+                      isCompleted={isCompleted}
+                      onToggleComplete={() => handleToggleComplete(taskId)}
+                      onClick={() => setSelectedTask({ item, orden })} 
+                    />
+                    
+                    {/* Badge de Empleado Asignado (Visible sobre la tarjeta) */}
+                    {item.empleadoAsignado && (
+                        <div className="absolute top-[-8px] right-[-4px] bg-white dark:bg-slate-800 border shadow-sm px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 z-10">
+                            <Users className="w-3 h-3" />
+                            {item.empleadoAsignado}
+                        </div>
+                    )}
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {tareas.map(({ item, orden, index }) => {
-                      const taskId = getTaskId(orden, index)
-                      const isCompleted = completedTasks.has(taskId)
-                      return (
-                        <TaskCard 
-                          key={taskId}
-                          item={item} 
-                          orden={orden} 
-                          isCompleted={isCompleted}
-                          onToggleComplete={() => handleToggleComplete(taskId)}
-                          onClick={() => setSelectedTask({ item, orden })} 
-                        />
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
         ) : (
-          <Card className="p-8 text-center">
-            <p className="text-muted-foreground">No tienes tareas asignadas.</p>
+          <Card className="p-12 text-center border-dashed">
+            <p className="text-muted-foreground">No hay tareas pendientes en el área de {getAreaLabel(selectedArea)}.</p>
           </Card>
         )
       ) : (
-        <Card className="p-8 text-center">
-          <p className="text-muted-foreground">Selecciona tu nombre para ver tus tareas del día.</p>
+        <Card className="p-12 text-center bg-muted/50">
+            <LayoutGrid className="w-12 h-12 mx-auto text-muted-foreground mb-4 opacity-50" />
+            <h3 className="text-lg font-semibold">Selecciona un departamento</h3>
+            <p className="text-muted-foreground">Elige un área de trabajo arriba para ver la cola de producción correspondiente.</p>
         </Card>
       )}
 
-      {/* Modal de detalles */}
+      {/* Modal de detalles (Sin cambios) */}
       {selectedTask && (
         <TaskDetailModal
           item={selectedTask.item} 
           orden={selectedTask.orden} 
           isOpen={!!selectedTask}
           onClose={() => setSelectedTask(null)}
-          // 💡 onUpdate para que al cerrar el modal, se recarguen los datos del padre
-          onUpdate={() => { 
-            // Esto forzará una re-renderización y actualizará el estado de completado en el padre
-            // Aunque tu componente no recarga la data de Firestore aquí, el cambio de estado 
-            // en el modal hijo (si lo has implementado) debería bastar.
-            setSelectedTask(null); // Cerrar y forzar re-render con el nuevo estado de la prop
-          }}
+          onUpdate={() => setSelectedTask(null)}
         />
       )}
     </div>

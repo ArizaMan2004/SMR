@@ -3,23 +3,28 @@
 "use client"
 
 import React, { useMemo, useState } from 'react'
-import { type OrdenServicio, EstadoPago, EstadoOrden } from '@/lib/types/orden' // Agregado EstadoOrden
+import { type OrdenServicio, EstadoPago } from '@/lib/types/orden'
 import { formatCurrency, formatBsCurrency } from '@/lib/utils/order-utils' 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { DollarSign, Search, Filter, Wallet, ArrowLeft, ArrowRight, CheckCircle2, ArrowDown, ArrowUp, Edit } from 'lucide-react' 
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
+import { 
+    Wallet, Search, Filter, ArrowLeft, ArrowRight, 
+    CheckCircle2, ArrowDown, ArrowUp, Edit, DollarSign, 
+    CalendarClock, TrendingUp 
+} from 'lucide-react'
 
-// Importamos el componente de historial y el tipo de transacción
+// --- COMPONENTES IMPORTADOS ---
 import { PaymentHistoryView, type PagoTransaction } from '@/components/orden/PaymentHistoryView' 
+import { PaymentEditModal } from '@/components/dashboard/PaymentEditModal'
 
-
-// Tipos y utilidades auxiliares
+// --- TIPOS ---
 interface ClientSummary {
+    key: string
     nombre: string
     rif: string
     totalOrdenes: number
@@ -27,38 +32,39 @@ interface ClientSummary {
     ordenesPendientes: OrdenServicio[]
 }
 
-const getPaymentBadgeVariant = (estado: EstadoPago) => {
-    switch (estado) {
-        case EstadoPago.PAGADO: return "default"; 
-        case EstadoPago.ABONADO: return "secondary"; 
-        case EstadoPago.ANULADO: return "destructive"; 
-        default: return "outline"; 
-    }
-}
-
-const ITEMS_PER_PAGE = 10;
+const ITEMS_PER_PAGE = 5; // Reducido a 5 clientes por página para mejor visualización
 
 interface ClientsAndPaymentsViewProps {
     ordenes: OrdenServicio[]
     currentUserId: string 
     bcvRate: number 
-    onEditPayment: (orden: OrdenServicio) => void 
+    // Esta función debe venir del padre (quien conecta con Firebase/API)
+    onRegisterPayment: (ordenId: string, monto: number, nota?: string, imagenUrl?: string) => Promise<void>
 }
 
+// Helper para badges
+const getPaymentBadgeVariant = (estado: EstadoPago) => {
+    switch (estado) {
+        case EstadoPago.PAGADO: return "default"; // Verde/Negro (según tema)
+        case EstadoPago.ABONADO: return "secondary"; // Gris/Azul
+        case EstadoPago.ANULADO: return "destructive"; // Rojo
+        default: return "outline"; // Pendiente
+    }
+}
 
-export function ClientsAndPaymentsView({ ordenes, currentUserId, bcvRate, onEditPayment }: ClientsAndPaymentsViewProps) {
+export function ClientsAndPaymentsView({ ordenes, currentUserId, bcvRate, onRegisterPayment }: ClientsAndPaymentsViewProps) {
     
-    const [expandedOrdenId, setExpandedOrdenId] = useState<string | null>(null);
-
-    const toggleExpand = (ordenId: string) => {
-        setExpandedOrdenId(prevId => (prevId === ordenId ? null : ordenId));
-    };
-
+    // --- ESTADOS DE UI ---
     const [searchTerm, setSearchTerm] = useState('')
     const [filterStatus, setFilterStatus] = useState<'ALL' | EstadoPago>('ALL')
     const [currentPage, setCurrentPage] = useState(1)
-    
-    // 1. Lógica de Filtrado, Búsqueda y Agrupación 
+    const [expandedOrdenId, setExpandedOrdenId] = useState<string | null>(null);
+
+    // --- ESTADOS DEL MODAL DE PAGO ---
+    const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
+    const [selectedOrdenForPayment, setSelectedOrdenForPayment] = useState<OrdenServicio | null>(null)
+
+    // --- LÓGICA DE DATOS (MEMOIZADA) ---
     const { clientSummaries, pagadasCompletamente, totalPendienteGlobal } = useMemo(() => {
         const summaryMap = new Map<string, ClientSummary>()
         const pagadasCompletamente: OrdenServicio[] = []
@@ -68,54 +74,48 @@ export function ClientsAndPaymentsView({ ordenes, currentUserId, bcvRate, onEdit
 
         const filteredOrdenes = ordenes.filter(orden => {
             const estadoPagoSeguro: EstadoPago = orden.estadoPago ?? EstadoPago.PENDIENTE;
-            const montoPendiente = orden.totalUSD - (orden.montoPagadoUSD || 0);
+            const montoPagado = orden.montoPagadoUSD || 0;
+            const montoPendiente = orden.totalUSD - montoPagado;
 
-            // Filtro por Estado de Pago
-            if (filterStatus !== 'ALL' && estadoPagoSeguro !== filterStatus) {
-                return false;
-            }
+            // 1. Filtro de Estado
+            if (filterStatus !== 'ALL' && estadoPagoSeguro !== filterStatus) return false;
 
-            // Filtro por Búsqueda (Número de Orden o Cliente)
+            // 2. Filtro de Búsqueda
             if (searchTerm) {
                 const matchesOrden = (orden.ordenNumero || '').toLowerCase().includes(lowerCaseSearchTerm)
                 const matchesCliente = orden.cliente.nombreRazonSocial.toLowerCase().includes(lowerCaseSearchTerm)
                 const matchesRif = orden.cliente.rifCedula.toLowerCase().includes(lowerCaseSearchTerm)
-                if (!matchesOrden && !matchesCliente && !matchesRif) {
-                    return false;
-                }
+                if (!matchesOrden && !matchesCliente && !matchesRif) return false;
             }
             
-            // Ignorar anuladas
-            if (orden.totalUSD <= 0 || estadoPagoSeguro === EstadoPago.ANULADO) {
-                return false;
-            }
+            // 3. Ignorar anuladas/vacías
+            if (orden.totalUSD <= 0 || estadoPagoSeguro === EstadoPago.ANULADO) return false;
 
-            // Agrega al total pendiente global si tiene saldo
+            // Calcular deuda global
             if (montoPendiente > 0.01) {
                 totalPendienteGlobal += montoPendiente;
             }
 
-            return true; // Pasa todos los filtros de búsqueda y estado
+            return true; 
         })
 
-
-        // Agrupación de las órdenes filtradas
+        // Agrupación
         for (const orden of filteredOrdenes) {
             const montoPagado = orden.montoPagadoUSD || 0;
             const montoPendiente = orden.totalUSD - montoPagado;
             
-            // Separar órdenes pagadas de las pendientes/abonadas
+            // Si está pagada (margen de error 0.01)
             if (montoPendiente <= 0.01 && orden.estadoPago === EstadoPago.PAGADO) {
                 pagadasCompletamente.push(orden);
                 continue;
             }
 
-
-            // Lógica para órdenes PENDIENTES o ABONADAS (Cuentas por Cobrar)
+            // Agrupar por Cliente (Deudores)
             const key = orden.cliente.rifCedula.trim().toUpperCase() || orden.cliente.nombreRazonSocial.trim().toUpperCase()
             
             if (!summaryMap.has(key)) {
                 summaryMap.set(key, {
+                    key,
                     nombre: orden.cliente.nombreRazonSocial,
                     rif: orden.cliente.rifCedula,
                     totalOrdenes: 0,
@@ -125,343 +125,359 @@ export function ClientsAndPaymentsView({ ordenes, currentUserId, bcvRate, onEdit
             }
 
             const summary = summaryMap.get(key)!
-            
             summary.totalOrdenes += orden.totalUSD
             summary.totalPendienteUSD += montoPendiente
             
-            // Solo muestra órdenes que aún tienen saldo pendiente (> 0.01 USD)
+            // Solo agregar a la lista si tiene deuda real
             if (montoPendiente > 0.01) {
                  summary.ordenesPendientes.push(orden);
             }
         }
 
         const summariesArray = Array.from(summaryMap.values())
-            .sort((a, b) => b.totalPendienteUSD - a.totalPendienteUSD)
-            .filter(summary => summary.ordenesPendientes.length > 0) // Solo sumarizados con órdenes pendientes visibles
+            .sort((a, b) => b.totalPendienteUSD - a.totalPendienteUSD) // Ordenar por mayor deuda
+            .filter(summary => summary.ordenesPendientes.length > 0) 
             
         return { clientSummaries: summariesArray, pagadasCompletamente, totalPendienteGlobal }
 
     }, [ordenes, searchTerm, filterStatus])
 
 
-    // 2. Lógica de Paginación 
+    // --- PAGINACIÓN ---
     const offset = (currentPage - 1) * ITEMS_PER_PAGE;
     const paginatedSummaries = clientSummaries.slice(offset, offset + ITEMS_PER_PAGE);
     const totalPages = Math.ceil(clientSummaries.length / ITEMS_PER_PAGE);
 
-    const hasCuentasPorCobrar = paginatedSummaries.length > 0;
-    const hasPagadasCompletamente = pagadasCompletamente.length > 0;
+    // --- HANDLERS ---
+    
+    const handleOpenPaymentModal = (orden: OrdenServicio) => {
+        setSelectedOrdenForPayment(orden)
+        setIsPaymentModalOpen(true)
+    }
+
+    const handleRegisterPayment = async (abonoUSD: number, nota?: string, imagenUrl?: string) => {
+        if (!selectedOrdenForPayment) return;
+
+        try {
+            await onRegisterPayment(selectedOrdenForPayment.id, abonoUSD, nota, imagenUrl);
+            setIsPaymentModalOpen(false);
+            setSelectedOrdenForPayment(null);
+        } catch (error) {
+            console.error("Error en vista registrando pago:", error);
+            alert("Error al registrar el pago. Intente nuevamente.");
+        }
+    }
+
+    const toggleExpand = (ordenId: string) => {
+        setExpandedOrdenId(prevId => (prevId === ordenId ? null : ordenId));
+    };
+
+
+    // --- RENDER ---
 
     const totalBs = formatBsCurrency(totalPendienteGlobal, bcvRate);
+    const hasDeudas = paginatedSummaries.length > 0;
+    const hasPagadas = pagadasCompletamente.length > 0;
 
-    const showAllClearMessage = 
-        !searchTerm && 
-        !hasCuentasPorCobrar && 
-        !hasPagadasCompletamente && 
-        filterStatus !== EstadoPago.PAGADO; 
-
-    if (showAllClearMessage) {
-        return (
-            <Card>
-                <CardContent className="p-6 text-center text-muted-foreground">
-                    <CheckCircle2 className="w-8 h-8 text-green-500 mx-auto mb-3"/> 
-                    <p className="font-semibold">¡Todos tus clientes están al día!</p>
-                    <p className="text-sm">No hay órdenes pendientes de pago en el sistema.</p>
-                </CardContent>
-            </Card>
+    // Caso: Todo limpio
+    if (!hasDeudas && !hasPagadas && !searchTerm && filterStatus === 'ALL') {
+         return (
+            <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
+                <div className="bg-green-100 dark:bg-green-900/30 p-6 rounded-full">
+                    <CheckCircle2 className="w-12 h-12 text-green-600 dark:text-green-400"/>
+                </div>
+                <h3 className="text-xl font-bold">¡Todo al día!</h3>
+                <p className="text-muted-foreground max-w-md">
+                    No hay cuentas por cobrar ni órdenes activas en este momento.
+                </p>
+            </div>
         )
     }
 
-
-    // 3. Renderizado principal 
     return (
-        <div className="space-y-8">
-            <CardHeader className='p-0'>
-                <CardTitle className="text-3xl flex items-center gap-2">
-                    <Wallet className="w-6 h-6"/> Gestión de Cuentas por Cobrar
-                </CardTitle>
-                <p className="text-muted-foreground text-sm">
-                    Revisa los saldos pendientes y el historial de órdenes pagadas.
-                </p>
-            </CardHeader>
-            
-            {/* --------------------------------------------------- */}
-            {/* BARRA DE HERRAMIENTAS Y RESUMEN GLOBAL */}
-            {/* --------------------------------------------------- */}
-            <Card className='p-4 shadow-lg'>
-                <div className='flex justify-between items-start mb-4'>
-                    <div>
-                        <p className='text-sm font-semibold text-muted-foreground'>Total Pendiente Global</p>
-                        <p className="text-4xl font-extrabold text-red-600 dark:text-red-400">
-                            {formatCurrency(totalPendienteGlobal)} USD
-                        </p>
-                        <p className='text-sm font-medium text-gray-700 dark:text-gray-300 mt-1'>
-                            ~ {totalBs} (Tasa BCV: {formatCurrency(bcvRate)} Bs.)
-                        </p>
-                    </div>
-                </div>
-                
-                <Separator className='my-4'/>
-                
-                <div className="flex flex-col md:flex-row gap-4">
-                    {/* Búsqueda */}
-                    <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                            placeholder="Buscar por N° Orden o Cliente/RIF..."
-                            value={searchTerm}
-                            onChange={(e) => {
-                                setSearchTerm(e.target.value)
-                                setCurrentPage(1) 
-                            }}
-                            className="pl-10"
-                        />
-                    </div>
-                    
-                    {/* Filtro de Estado */}
-                    <div className='w-full md:w-[200px]'>
-                        <Select value={filterStatus} onValueChange={(value: 'ALL' | EstadoPago) => {
-                            setFilterStatus(value)
-                            setCurrentPage(1) 
-                        }}>
-                            <SelectTrigger className='w-full'>
-                                <Filter className='w-4 h-4 mr-2 text-muted-foreground'/>
-                                <SelectValue placeholder="Filtrar por Estado de Pago" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="ALL">Mostrar Todos</SelectItem>
-                                <SelectItem value={EstadoPago.PENDIENTE}>Pendiente</SelectItem>
-                                <SelectItem value={EstadoPago.ABONADO}>Abonado</SelectItem>
-                                <SelectItem value={EstadoPago.PAGADO}>Pagado</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-                </div>
-            </Card>
-
-
-            {/* --------------------------------------------------- */}
-            {/* SECCIÓN 1: CUENTAS POR COBRAR (TABLAS PAGINADAS) */}
-            {/* --------------------------------------------------- */}
-            {hasCuentasPorCobrar ? (
-                <div className='space-y-6'>
-                    {/* 🔑 CAMBIO 1: Título sin el conteo de clientes */}
-                    <h2 className="text-2xl font-bold flex items-center gap-2 text-red-600 dark:text-red-400">
-                        Cuentas por Cobrar
+        <div className="space-y-8 p-1">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+                <div>
+                    <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+                        <Wallet className="w-8 h-8 text-primary"/> Finanzas
                     </h2>
-                    
-                    {paginatedSummaries.map((summary) => (
-                        <Card 
-                            key={summary.rif} 
-                            className='border-l-4 border-red-500/80 dark:border-red-600/80'
-                        >
-                            <CardHeader className='flex flex-row justify-between items-start'>
-                                <div className='text-left'> 
-                                    {/* ❌ Eliminamos la información del cliente del encabezado de la tarjeta */}
-                                    <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
-                                        Total Pendiente del Cliente
-                                    </p>
-                                    
-                                    <p className="text-3xl font-extrabold text-red-600 dark:text-red-400">
-                                        {formatCurrency(summary.totalPendienteUSD)} USD
-                                    </p>
-                                    <p className='text-sm font-medium text-gray-700 dark:text-gray-300 mt-1'>
-                                        ~ {formatBsCurrency(summary.totalPendienteUSD, bcvRate)}
-                                    </p>
+                    <p className="text-muted-foreground">
+                        Control de cuentas por cobrar y flujo de caja.
+                    </p>
+                </div>
+            </div>
+
+            {/* --- DASHBOARD SUPERIOR: RESUMEN FINANCIERO --- */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Card 1: Total Deuda */}
+                <Card className="border-l-4 border-l-red-500 bg-gradient-to-br from-white to-red-50/50 dark:from-slate-950 dark:to-red-950/10 shadow-md">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                            Por Cobrar (Global)
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-3xl font-bold text-red-600 dark:text-red-400">
+                            {formatCurrency(totalPendienteGlobal)}
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1 font-medium">
+                            ~ {totalBs}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                            <TrendingUp className="w-3 h-3"/> Tasa BCV: {formatCurrency(bcvRate)}
+                        </p>
+                    </CardContent>
+                </Card>
+
+                {/* Card 2: Filtros */}
+                <Card className="md:col-span-1 lg:col-span-2 shadow-sm">
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-base font-medium flex items-center gap-2">
+                            <Filter className="w-4 h-4"/> Filtrar Registros
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="flex flex-col sm:flex-row gap-3">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Buscar Cliente, RIF o N° Orden..."
+                                value={searchTerm}
+                                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                                className="pl-10"
+                            />
+                        </div>
+                        <div className="w-full sm:w-[200px]">
+                            <Select value={filterStatus} onValueChange={(v: any) => { setFilterStatus(v); setCurrentPage(1); }}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Estado" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="ALL">Todos</SelectItem>
+                                    <SelectItem value={EstadoPago.PENDIENTE}>Pendientes</SelectItem>
+                                    <SelectItem value={EstadoPago.ABONADO}>Abonados</SelectItem>
+                                    <SelectItem value={EstadoPago.PAGADO}>Pagados</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+
+
+            {/* --- SECCIÓN 1: CLIENTES DEUDORES --- */}
+            {hasDeudas ? (
+                <div className="space-y-6 animate-in fade-in duration-500">
+                    <div className="flex items-center gap-2 border-b pb-2">
+                        <CalendarClock className="w-5 h-5 text-red-500"/>
+                        <h3 className="text-lg font-bold text-gray-800 dark:text-gray-200">
+                            Cuentas Pendientes por Cliente
+                        </h3>
+                    </div>
+
+                    <div className="grid gap-6">
+                        {paginatedSummaries.map((summary) => (
+                            <Card key={summary.key} className="overflow-hidden border border-gray-200 dark:border-gray-800 shadow-sm hover:shadow-md transition-shadow">
+                                {/* Encabezado del Cliente */}
+                                <div className="bg-gray-50 dark:bg-slate-900/50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b">
+                                    <div className="flex items-center gap-3">
+                                        <div className="h-10 w-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600 font-bold">
+                                            {summary.nombre.charAt(0)}
+                                        </div>
+                                        <div>
+                                            <h4 className="font-bold text-base text-foreground">{summary.nombre}</h4>
+                                            <p className="text-xs text-muted-foreground font-mono">{summary.rif}</p>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-xs text-muted-foreground uppercase font-semibold">Deuda Total</p>
+                                        <div className="text-xl font-extrabold text-red-600 dark:text-red-400">
+                                            {formatCurrency(summary.totalPendienteUSD)}
+                                        </div>
+                                    </div>
                                 </div>
-                            </CardHeader>
 
-                            <CardContent className='pt-2'>
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow className='bg-gray-50 dark:bg-gray-800'>
-                                            <TableHead>N° Orden</TableHead>
-                                            {/* 🔑 CAMBIO 2: Nueva columna para el cliente */}
-                                            <TableHead>Cliente / RIF</TableHead> 
-                                            <TableHead className='text-right'>Total Orden</TableHead>
-                                            <TableHead className='text-right'>Pagado</TableHead>
-                                            <TableHead className='text-right'>Pendiente</TableHead>
-                                            <TableHead className='text-center'>Estado</TableHead>
-                                            <TableHead className='text-center'>Acciones</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {summary.ordenesPendientes.map((orden) => {
-                                            const pendiente = orden.totalUSD - (orden.montoPagadoUSD || 0)
-                                            const estadoDisplay = orden.estadoPago ?? EstadoPago.PENDIENTE;
-                                            
-                                            // @ts-ignore
-                                            const historialPagos: PagoTransaction[] = (orden as any).registroPagos || []; 
-                                            const isExpanded = expandedOrdenId === orden.id;
-                                            
-                                            return (
-                                                <React.Fragment key={orden.id}>
-                                                    <TableRow className='hover:bg-red-50 dark:hover:bg-red-900/10'>
-                                                        <TableCell className='font-semibold'>{orden.ordenNumero}</TableCell>
-                                                        
-                                                        {/* 🔑 CAMBIO 3: Celda con Nombre y RIF por orden */}
-                                                        <TableCell>
-                                                            <p className="font-medium leading-tight">{orden.cliente.nombreRazonSocial}</p>
-                                                            <p className="text-xs text-muted-foreground">RIF: {orden.cliente.rifCedula}</p>
-                                                        </TableCell>
-                                                        
-                                                        <TableCell className='text-right'>
-                                                            {formatCurrency(orden.totalUSD)}<br/>
-                                                            <span className='text-xs text-muted-foreground'>{formatBsCurrency(orden.totalUSD, bcvRate)}</span>
-                                                        </TableCell>
-                                                        <TableCell className='text-right text-green-600 dark:text-green-400'>
-                                                            {formatCurrency(orden.montoPagadoUSD || 0)}
-                                                        </TableCell>
-                                                        <TableCell className='text-right font-bold text-red-600 dark:text-red-400'>
-                                                            {formatCurrency(pendiente)}<br/>
-                                                            <span className='text-xs text-muted-foreground'>{formatBsCurrency(pendiente, bcvRate)}</span>
-                                                        </TableCell>
-                                                        
-                                                        <TableCell className='text-center'>
-                                                            <Badge variant={getPaymentBadgeVariant(estadoDisplay)}>
-                                                                {estadoDisplay.charAt(0) + estadoDisplay.slice(1).toLowerCase().replace('_', ' ')}
-                                                            </Badge>
-                                                        </TableCell>
-                                                        
-                                                        {/* CELDA DE ACCIONES */}
-                                                        <TableCell className='text-center space-x-2'>
-                                                            <Button 
-                                                                size="icon" 
-                                                                variant="ghost" 
-                                                                onClick={() => onEditPayment(orden)} 
-                                                                title="Registrar Pago"
-                                                            >
-                                                                <Edit className='w-4 h-4'/> 
-                                                            </Button>
-                                                            
-                                                            {historialPagos.length > 0 && (
-                                                                <Button 
-                                                                    variant="ghost" 
-                                                                    size="icon" 
-                                                                    onClick={() => toggleExpand(orden.id)}
-                                                                    title="Ver Historial de Abonos"
-                                                                >
-                                                                    {isExpanded ? 
-                                                                        <ArrowUp className="w-4 h-4 text-primary" /> : 
-                                                                        <ArrowDown className="w-4 h-4 text-primary" />
-                                                                    }
-                                                                </Button>
-                                                            )}
-                                                        </TableCell>
-                                                    </TableRow>
+                                {/* Tabla de Órdenes del Cliente */}
+                                <div className="overflow-x-auto">
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead className="w-[100px]">Orden</TableHead>
+                                                <TableHead className="text-right">Total</TableHead>
+                                                <TableHead className="text-right">Abonado</TableHead>
+                                                <TableHead className="text-right">Restante</TableHead>
+                                                <TableHead className="text-center">Estado</TableHead>
+                                                <TableHead className="text-center">Acciones</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {summary.ordenesPendientes.map((orden) => {
+                                                const pendiente = orden.totalUSD - (orden.montoPagadoUSD || 0)
+                                                // @ts-ignore (Si registroPagos no está en la interfaz base pero existe en los datos)
+                                                const hasHistory = orden.registroPagos && orden.registroPagos.length > 0;
+                                                const isExpanded = expandedOrdenId === orden.id;
 
-                                                    {/* FILA DE HISTORIAL EXPANDIDO */}
-                                                    {isExpanded && historialPagos.length > 0 && (
-                                                        <TableRow className='bg-gray-50 dark:bg-gray-850'>
-                                                            {/* 🔑 CAMBIO 4: Ajustar colSpan a 7 */}
-                                                            <TableCell colSpan={7} className="p-0 border-t border-b-2 border-primary/30 dark:border-primary/50">
-                                                                <div className="p-4">
-                                                                    <PaymentHistoryView 
-                                                                        historial={historialPagos}
-                                                                        totalOrdenUSD={orden.totalUSD}
-                                                                        montoPagadoUSD={orden.montoPagadoUSD || 0}
-                                                                    />
+                                                return (
+                                                    <React.Fragment key={orden.id}>
+                                                        <TableRow className="group hover:bg-muted/50">
+                                                            <TableCell className="font-medium">
+                                                                #{orden.ordenNumero}
+                                                            </TableCell>
+                                                            <TableCell className="text-right font-medium">
+                                                                {formatCurrency(orden.totalUSD)}
+                                                            </TableCell>
+                                                            <TableCell className="text-right text-green-600 dark:text-green-400">
+                                                                {formatCurrency(orden.montoPagadoUSD || 0)}
+                                                            </TableCell>
+                                                            <TableCell className="text-right font-bold text-red-600 dark:text-red-400">
+                                                                {formatCurrency(pendiente)}
+                                                            </TableCell>
+                                                            <TableCell className="text-center">
+                                                                <Badge variant={getPaymentBadgeVariant(orden.estadoPago || EstadoPago.PENDIENTE)}>
+                                                                    {(orden.estadoPago || 'PENDIENTE').replace('_', ' ')}
+                                                                </Badge>
+                                                            </TableCell>
+                                                            <TableCell className="text-center">
+                                                                <div className="flex items-center justify-center gap-1">
+                                                                    <Button 
+                                                                        size="sm" 
+                                                                        variant="outline" 
+                                                                        className="h-8 px-2 text-primary border-primary/20 hover:bg-primary/5"
+                                                                        onClick={() => handleOpenPaymentModal(orden)}
+                                                                    >
+                                                                        <DollarSign className="w-3.5 h-3.5 mr-1"/> Pagar
+                                                                    </Button>
+
+                                                                    {hasHistory && (
+                                                                        <Button
+                                                                            size="icon"
+                                                                            variant="ghost"
+                                                                            className="h-8 w-8"
+                                                                            onClick={() => toggleExpand(orden.id)}
+                                                                        >
+                                                                            {isExpanded ? <ArrowUp className="w-4 h-4"/> : <ArrowDown className="w-4 h-4"/>}
+                                                                        </Button>
+                                                                    )}
                                                                 </div>
                                                             </TableCell>
                                                         </TableRow>
-                                                    )}
-                                                </React.Fragment>
-                                            )
-                                        })}
-                                    </TableBody>
-                                </Table>
-                            </CardContent>
-                        </Card>
-                    ))}
-                    
+
+                                                        {/* Historial Expandible */}
+                                                        {isExpanded && hasHistory && (
+                                                            <TableRow className="bg-slate-50 dark:bg-slate-900/30">
+                                                                <TableCell colSpan={6} className="p-0">
+                                                                    <div className="p-4 border-t border-b border-primary/20">
+                                                                        <PaymentHistoryView 
+                                                                            // @ts-ignore
+                                                                            historial={orden.registroPagos}
+                                                                            totalOrdenUSD={orden.totalUSD}
+                                                                            montoPagadoUSD={orden.montoPagadoUSD || 0}
+                                                                        />
+                                                                    </div>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        )}
+                                                    </React.Fragment>
+                                                )
+                                            })}
+                                        </TableBody>
+                                    </Table>
+                                </div>
+                            </Card>
+                        ))}
+                    </div>
+
                     {/* Paginación */}
                     {totalPages > 1 && (
-                        <div className="flex justify-between items-center pt-4">
+                        <div className="flex justify-center gap-4 mt-6">
                             <Button
-                                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                                disabled={currentPage === 1}
                                 variant="outline"
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                disabled={currentPage === 1}
                             >
-                                <ArrowLeft className='w-4 h-4 mr-2'/> Anterior
+                                <ArrowLeft className="w-4 h-4 mr-2"/> Anterior
                             </Button>
-                            <span className="text-sm text-muted-foreground">
-                                Página {currentPage} de {totalPages}
+                            <span className="flex items-center text-sm font-medium">
+                                Pág {currentPage} de {totalPages}
                             </span>
                             <Button
-                                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                                disabled={currentPage === totalPages}
                                 variant="outline"
+                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                disabled={currentPage === totalPages}
                             >
-                                Siguiente <ArrowRight className='w-4 h-4 ml-2'/>
+                                Siguiente <ArrowRight className="w-4 h-4 ml-2"/>
                             </Button>
                         </div>
                     )}
                 </div>
             ) : (
-                filterStatus !== EstadoPago.PAGADO && searchTerm === '' && (
-                    <p className="text-center text-muted-foreground mt-8">
-                        No se encontraron cuentas por cobrar que coincidan con los filtros/búsqueda.
-                    </p>
+                searchTerm && (
+                    <div className="text-center py-10 text-muted-foreground">
+                        No se encontraron resultados para "{searchTerm}" con el filtro actual.
+                    </div>
                 )
             )}
 
-
-            {/* SECCIÓN 2: ÓRDENES PAGADAS COMPLETAMENTE */}
-            {(hasPagadasCompletamente && filterStatus !== EstadoPago.PENDIENTE && filterStatus !== EstadoPago.ABONADO) && (
-                <div className='pt-8 border-t border-dashed'>
-                    <PagadasCompletamenteTable 
-                        ordenes={pagadasCompletamente} 
-                        bcvRate={bcvRate} 
-                        showTitle={filterStatus === EstadoPago.PAGADO || !hasCuentasPorCobrar}
-                    /> 
+            {/* --- SECCIÓN 2: HISTORIAL DE PAGADOS --- */}
+            {hasPagadas && filterStatus !== EstadoPago.PENDIENTE && filterStatus !== EstadoPago.ABONADO && (
+                <div className="pt-10">
+                    <div className="flex items-center gap-2 mb-4">
+                        <CheckCircle2 className="w-5 h-5 text-green-600"/>
+                        <h3 className="text-lg font-bold text-gray-800 dark:text-gray-200">
+                            Historial de Órdenes Pagadas
+                        </h3>
+                    </div>
+                    
+                    <Card className="border-t-4 border-t-green-500 shadow-sm">
+                        <Table>
+                            <TableHeader>
+                                <TableRow className="bg-muted/50">
+                                    <TableHead>N° Orden</TableHead>
+                                    <TableHead>Cliente</TableHead>
+                                    <TableHead className="text-right">Monto Total</TableHead>
+                                    <TableHead className="text-center">Estado</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {pagadasCompletamente.slice(0, 10).map((orden) => ( // Mostrar solo las ultimas 10 pagadas
+                                    <TableRow key={orden.id} className="opacity-75 hover:opacity-100 transition-opacity">
+                                        <TableCell className="font-semibold">#{orden.ordenNumero}</TableCell>
+                                        <TableCell>
+                                            <span className="font-medium">{orden.cliente.nombreRazonSocial}</span>
+                                            <span className="text-xs text-muted-foreground block">{orden.cliente.rifCedula}</span>
+                                        </TableCell>
+                                        <TableCell className="text-right font-bold text-green-600 dark:text-green-400">
+                                            {formatCurrency(orden.totalUSD)}
+                                        </TableCell>
+                                        <TableCell className="text-center">
+                                            <Badge variant="default" className="bg-green-600 hover:bg-green-700">Pagado</Badge>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                        {pagadasCompletamente.length > 10 && (
+                            <div className="p-2 text-center text-xs text-muted-foreground bg-muted/20">
+                                Mostrando las 10 más recientes de {pagadasCompletamente.length} pagadas.
+                            </div>
+                        )}
+                    </Card>
                 </div>
             )}
-        </div>
-    )
-}
 
-const PagadasCompletamenteTable: React.FC<{ ordenes: OrdenServicio[], bcvRate: number, showTitle?: boolean }> = ({ ordenes, bcvRate, showTitle = true }) => {
-    return (
-        <Card className="border-l-4 border-green-500/80 dark:border-green-600/80">
-            {showTitle && (
-                <CardHeader>
-                    <CardTitle className="text-xl font-bold text-green-600 dark:text-green-400">
-                        Órdenes Pagadas Completamente
-                    </CardTitle>
-                </CardHeader>
+            {/* --- MODAL DE PAGO INTEGRADO --- */}
+            {selectedOrdenForPayment && (
+                <PaymentEditModal
+                    isOpen={isPaymentModalOpen}
+                    onClose={() => {
+                        setIsPaymentModalOpen(false)
+                        setSelectedOrdenForPayment(null)
+                    }}
+                    orden={selectedOrdenForPayment}
+                    onSave={handleRegisterPayment} // 📢 Ahora esto conecta con la lógica del padre
+                    currentUserId={currentUserId}
+                />
             )}
-            <CardContent>
-                <Table>
-                    <TableHeader>
-                        <TableRow className='bg-gray-50 dark:bg-gray-800'>
-                            <TableHead>N° Orden</TableHead>
-                            <TableHead>Cliente</TableHead> 
-                            <TableHead className='text-right'>Total Pagado</TableHead>
-                            <TableHead className='text-center'>Estado</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {ordenes.map((orden) => (
-                            <TableRow key={orden.id}>
-                                <TableCell className='font-semibold'>{orden.ordenNumero}</TableCell>
-                                <TableCell>
-                                    <p className="font-medium leading-tight">{orden.cliente.nombreRazonSocial}</p>
-                                    <p className="text-xs text-muted-foreground">RIF: {orden.cliente.rifCedula}</p>
-                                </TableCell>
-                                <TableCell className='text-right font-bold text-green-600 dark:text-green-400'>
-                                    {formatCurrency(orden.totalUSD)}<br/>
-                                    <span className='text-xs text-muted-foreground'>{formatBsCurrency(orden.totalUSD, bcvRate)}</span>
-                                </TableCell>
-                                <TableCell className='text-center'>
-                                    <Badge variant={getPaymentBadgeVariant(EstadoPago.PAGADO)}>
-                                        Pagado
-                                    </Badge>
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
-            </CardContent>
-        </Card>
+        </div>
     )
 }
