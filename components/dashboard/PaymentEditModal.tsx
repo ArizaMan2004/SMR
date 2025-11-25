@@ -7,108 +7,132 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import { 
+    DollarSign, RefreshCw, Loader2, Upload, X, 
+    Banknote, Calculator, CheckCircle2, Euro, ArrowLeftRight
+} from 'lucide-react'
+
+// --- SERVICIOS Y UTILIDADES ---
 import { formatCurrency } from '@/lib/utils/order-utils'
-
-// --- SERVICIOS ---
 import { fetchBCVRateFromAPI } from "@/lib/bcv-service"
-// ⚠️ Asegúrate de importar tu servicio de Cloudinary existente
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
-
-import { type PagoTransaction } from "@/components/orden/PaymentHistoryView" 
 import { type OrdenServicio } from '@/lib/types/orden'
-import { AlertTriangle, DollarSign, RefreshCw, Calculator, Loader2, Upload, X, Image as ImageIcon } from 'lucide-react'
 
 interface PaymentEditModalProps {
     isOpen: boolean
     orden: OrdenServicio
-    // 📢 ACTUALIZADO: onSave ahora acepta un tercer argumento opcional para la imagen
     onSave: (abonoUSD: number, nota: string | undefined, imagenUrl?: string) => void 
     onClose: () => void
     currentUserId: string
-    historialPagos?: PagoTransaction[] 
 }
 
 export function PaymentEditModal({ isOpen, orden, onSave, onClose }: PaymentEditModalProps) {
     
-    // Estados del formulario de Pago
+    // --- ESTADOS ---
     const [currencyMode, setCurrencyMode] = useState<'USD' | 'BS'>('USD')
-    const [abonoAmount, setAbonoAmount] = useState<number>(0)
+    
+    // Estado para la calculadora (Input)
+    const [calculationBase, setCalculationBase] = useState<'USD' | 'EUR'>('USD') 
+    
+    // Estado para el Header (Visualización de deuda)
+    const [headerRateType, setHeaderRateType] = useState<'USD' | 'EUR'>('USD')
+
+    // Montos
+    const [amountUSD, setAmountUSD] = useState<string>('')
+    const [amountBS, setAmountBS] = useState<string>('')
     const [nota, setNota] = useState<string>('') 
     
-    // Estados para Bolívares
-    const [bsAmount, setBsAmount] = useState<string>('')
-    const [selectedRateType, setSelectedRateType] = useState<'USD' | 'EUR'>('USD')
-    const [rates, setRates] = useState<{ usd: number, eur: number } | null>(null)
-    const [loadingRates, setLoadingRates] = useState(false)
-    const [ratesError, setRatesError] = useState<string | null>(null)
+    // Tasas
+    const [rates, setRates] = useState<{ usd: number, eur: number }>({ usd: 0, eur: 0 })
+    const [loadingRate, setLoadingRate] = useState(false)
 
-    // 📸 ESTADOS PARA IMAGEN
+    // Imagen
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
     const [previewUrl, setPreviewUrl] = useState<string | null>(null)
     const [isUploading, setIsUploading] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
-    const montoTotal = orden.totalUSD
-    const montoPagado = orden.montoPagadoUSD || 0
-    const montoPendiente = montoTotal - montoPagado
-    const canSave = abonoAmount > 0 && abonoAmount <= (montoPendiente + 0.01)
+    // Cálculos de Deuda
+    const montoPendiente = orden.totalUSD - (orden.montoPagadoUSD || 0)
 
-    // Resetear al abrir
+    // Tasa activa según selección de la calculadora
+    const activeRate = calculationBase === 'USD' ? rates.usd : rates.eur
+
+    // Tasa activa para el Header
+    const activeHeaderRate = headerRateType === 'USD' ? rates.usd : rates.eur
+    const pendingBs = montoPendiente * activeHeaderRate
+
+    // --- EFECTOS ---
     useEffect(() => {
         if (isOpen) {
+            resetForm()
             loadRates()
-            setAbonoAmount(0)
-            setBsAmount('')
-            setCurrencyMode('USD')
-            setNota('')
-            // Reset Imagen
-            setSelectedFile(null)
-            setPreviewUrl(null)
-            setIsUploading(false)
         }
     }, [isOpen])
 
-    // --- LOGICA DE TASAS (Igual que antes) ---
+    // Conversión Automática: Cuando cambia BS o la Tasa seleccionada
+    useEffect(() => {
+        if (currencyMode === 'BS' && activeRate > 0 && amountBS) {
+            const valBs = parseFloat(amountBS)
+            if (!isNaN(valBs)) {
+                setAmountUSD((valBs / activeRate).toFixed(2))
+            } else {
+                setAmountUSD('')
+            }
+        }
+    }, [amountBS, activeRate, currencyMode])
+
+    // --- FUNCIONES AUXILIARES ---
+
+    const resetForm = () => {
+        setAmountUSD('')
+        setAmountBS('')
+        setNota('')
+        setCurrencyMode('USD')
+        setCalculationBase('USD')
+        setHeaderRateType('USD') // Resetear header a USD
+        setSelectedFile(null)
+        setPreviewUrl(null)
+        setIsUploading(false)
+    }
+
     const loadRates = async () => {
-        setLoadingRates(true)
-        setRatesError(null)
+        setLoadingRate(true)
         try {
             const data = await fetchBCVRateFromAPI()
-            setRates({ usd: data.usdRate, eur: data.eurRate || 0 })
-        } catch (error) {
-            console.error("Error cargando tasas:", error)
-            setRatesError("No se pudieron cargar las tasas del BCV.")
+            setRates({ 
+                usd: data.usdRate, 
+                // @ts-ignore
+                eur: data.eurRate || 0 
+            })
+        } catch (e) {
+            console.error("Error tasa", e)
         } finally {
-            setLoadingRates(false)
+            setLoadingRate(false)
         }
     }
 
-    useEffect(() => {
-        if (currencyMode === 'BS' && rates) {
-            const amount = parseFloat(bsAmount)
-            if (!isNaN(amount) && amount > 0) {
-                const rate = selectedRateType === 'USD' ? rates.usd : rates.eur
-                if (rate > 0) {
-                    setAbonoAmount(amount / rate)
-                }
-            } else {
-                setAbonoAmount(0)
-            }
+    const handleSetFullPayment = () => {
+        if (currencyMode === 'USD') {
+            setAmountUSD(montoPendiente.toFixed(2))
+        } else {
+            // Si es en Bolívares, usa la tasa seleccionada en la calculadora
+            const totalBs = montoPendiente * activeRate
+            setAmountBS(totalBs.toFixed(2))
         }
-    }, [bsAmount, selectedRateType, rates, currencyMode])
+    }
 
-    // --- LOGICA DE IMAGEN ---
+    // --- MANEJO DE ARCHIVOS ---
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (file) {
+            if (file.size > 5 * 1024 * 1024) return alert("El archivo es muy pesado (Máx 5MB)")
             setSelectedFile(file)
-            // Crear preview local
-            const url = URL.createObjectURL(file)
-            setPreviewUrl(url)
+            setPreviewUrl(URL.createObjectURL(file))
         }
     }
 
@@ -120,204 +144,279 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose }: PaymentEdit
 
     // --- GUARDAR ---
     const handleSave = async () => {
-        if (!canSave) return
-        
-        setIsUploading(true) // Iniciamos estado de carga (bloquea botones)
+        const finalAmount = parseFloat(amountUSD)
+        if (isNaN(finalAmount) || finalAmount <= 0) return
+
+        setIsUploading(true)
 
         try {
-            // 1. Subir imagen si existe
-            let finalImageUrl: string | undefined = undefined
-            
+            let imageUrl: string | undefined = undefined
             if (selectedFile) {
-                // Usamos tu servicio existente
-                finalImageUrl = await uploadFileToCloudinary(selectedFile)
+                imageUrl = await uploadFileToCloudinary(selectedFile)
             }
 
-            // 2. Preparar nota con detalles de tasa
             let finalNota = nota
-            if (currencyMode === 'BS' && rates) {
-                const rateUsed = selectedRateType === 'USD' ? rates.usd : rates.eur
-                const autoNote = ` [Pago en Bs: ${parseFloat(bsAmount).toLocaleString('es-VE', { minimumFractionDigits: 2 })} | Tasa ${selectedRateType}: ${rateUsed}]`
-                finalNota = (nota.trim() + autoNote).trim()
+            if (currencyMode === 'BS') {
+                const symbol = calculationBase === 'USD' ? '$' : '€';
+                const autoNote = ` [Pago: Bs. ${parseFloat(amountBS).toLocaleString('es-VE')} @ ${activeRate.toFixed(2)} (${symbol})]`
+                finalNota = (nota + autoNote).trim()
             }
 
-            // 3. Ajuste de redondeo
-            let finalAmount = abonoAmount
-            if (finalAmount > montoPendiente && finalAmount < montoPendiente + 0.1) {
-                finalAmount = montoPendiente
-            }
-
-            // 4. Guardar Todo (Pasamos la URL de la imagen al padre)
-            onSave(finalAmount, finalNota || undefined, finalImageUrl)
-
-            // Reset
-            setAbonoAmount(0)
-            setBsAmount('')
-            setNota('')
-            handleRemoveFile()
+            onSave(finalAmount, finalNota || undefined, imageUrl)
             
         } catch (error) {
-            console.error("Error al procesar el pago/imagen:", error)
-            alert("Hubo un error al subir la imagen o procesar el pago.")
-        } finally {
-            setIsUploading(false)
+            console.error("Error guardando pago", error)
+            alert("Error al procesar el pago o subir la imagen.")
+            setIsUploading(false) 
         }
     }
 
+    const valAmount = parseFloat(amountUSD || '0')
+    const isOverLimit = valAmount > (montoPendiente + 0.1)
+    const isValid = valAmount > 0 && !isOverLimit
+
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                    <DialogTitle className="text-2xl font-bold flex items-center">
-                        <DollarSign className="w-6 h-6 mr-2 text-green-600" />
-                        Registrar Abono | Orden #{orden.ordenNumero}
-                    </DialogTitle>
-                </DialogHeader>
+            <DialogContent className="max-w-md md:max-w-lg p-0 bg-white dark:bg-gray-900 border-none shadow-2xl flex flex-col max-h-[90vh]">
+                
+                {/* --- HEADER (FIJO) --- */}
+                <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 text-white flex-none">
+                    <DialogHeader>
+                        <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                            <Banknote className="w-6 h-6 text-white/80" /> 
+                            Registrar Nuevo Pago
+                        </DialogTitle>
+                        <p className="text-blue-100 text-sm opacity-90">
+                            Orden #{orden.ordenNumero} • {orden.cliente.nombreRazonSocial}
+                        </p>
+                    </DialogHeader>
 
-                <div className="space-y-6">
-                    {/* Resumen de Saldos */}
-                    <div className="space-y-2 p-3 border rounded-lg bg-yellow-50 dark:bg-yellow-950/50">
-                        <div className="flex justify-between">
-                            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Orden:</p>
-                            <span className="font-semibold">{formatCurrency(montoTotal)}</span>
+                    {/* Tarjeta de Saldo */}
+                    <div className="mt-6 flex flex-col sm:flex-row justify-between items-end bg-white/10 backdrop-blur-sm rounded-lg p-4 border border-white/20 gap-4">
+                        <div className="flex-1 w-full">
+                            <div className="flex justify-between items-center mb-1">
+                                <p className="text-xs text-blue-100 uppercase font-semibold tracking-wider">Saldo Pendiente</p>
+                                
+                                {/* BOTÓN TOGGLE TASA HEADER */}
+                                <Button 
+                                    size="sm" 
+                                    variant="ghost" 
+                                    onClick={() => setHeaderRateType(prev => prev === 'USD' ? 'EUR' : 'USD')}
+                                    className="h-5 px-2 text-[10px] bg-black/20 hover:bg-black/30 text-white border border-white/10 rounded-full transition-all"
+                                    title="Cambiar referencia de Bs"
+                                >
+                                    Ref: <span className="font-bold ml-1">{headerRateType}</span> 
+                                    <ArrowLeftRight className="w-3 h-3 ml-1 opacity-70" />
+                                </Button>
+                            </div>
+                            
+                            {/* Monto Principal USD */}
+                            <p className="text-3xl font-bold font-mono">{formatCurrency(montoPendiente)}</p>
+                            
+                            {/* Monto Chiquito en Bs */}
+                            <p className="text-sm text-blue-100 font-medium mt-1 flex items-center">
+                                ≈ Bs. {pendingBs > 0 
+                                    ? pendingBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) 
+                                    : '...'
+                                }
+                                <span className="text-[10px] opacity-60 ml-1">
+                                    (@ Tasa {headerRateType})
+                                </span>
+                            </p>
                         </div>
-                        <div className="flex justify-between border-t pt-2 mt-1">
-                            <p className="text-lg font-bold">Saldo Pendiente:</p>
-                            <span className="text-lg font-bold text-destructive dark:text-red-400">{formatCurrency(montoPendiente)}</span>
-                        </div>
+
+                        <Button 
+                            size="sm" 
+                            variant="secondary" 
+                            className="bg-white text-blue-700 hover:bg-blue-50 border-0 h-9 text-xs font-bold shadow-sm whitespace-nowrap self-end sm:self-center"
+                            onClick={handleSetFullPayment}
+                        >
+                            PAGAR TODO
+                        </Button>
                     </div>
+                </div>
 
-                    {/* Selector de Moneda y Formulario */}
-                    <Tabs value={currencyMode} onValueChange={(v) => setCurrencyMode(v as 'USD' | 'BS')} className="w-full">
-                        <TabsList className="grid w-full grid-cols-2 mb-4">
-                            <TabsTrigger value="USD">Dólares ($)</TabsTrigger>
-                            <TabsTrigger value="BS">Bolívares (Bs)</TabsTrigger>
+                {/* --- BODY (SCROLLABLE) --- */}
+                <div className="p-6 space-y-6 flex-1 overflow-y-auto">
+                    
+                    <Tabs value={currencyMode} onValueChange={(v) => {setCurrencyMode(v as any); setAmountUSD(''); setAmountBS('')}} className="w-full">
+                        <TabsList className="grid w-full grid-cols-2 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+                            <TabsTrigger value="USD" className="data-[state=active]:bg-white dark:data-[state=active]:bg-gray-700 data-[state=active]:shadow-sm transition-all">
+                                Dólares ($)
+                            </TabsTrigger>
+                            <TabsTrigger value="BS" className="data-[state=active]:bg-white dark:data-[state=active]:bg-gray-700 data-[state=active]:shadow-sm transition-all">
+                                Bolívares (Bs)
+                            </TabsTrigger>
                         </TabsList>
 
-                        <TabsContent value="USD" className="space-y-4">
-                            <div className="space-y-2">
-                                <Label>Monto (USD)</Label>
-                                <div className="relative">
-                                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                                    <Input
-                                        type="number"
-                                        placeholder={`Máx. ${montoPendiente.toFixed(2)}`}
-                                        className="pl-9 text-lg font-semibold"
-                                        value={abonoAmount || ''}
-                                        onChange={(e) => setAbonoAmount(parseFloat(e.target.value) || 0)}
-                                    />
-                                </div>
+                        {/* INPUT USD */}
+                        <TabsContent value="USD" className="pt-4 space-y-3 animate-in fade-in slide-in-from-left-2">
+                            <Label className="text-sm font-medium text-gray-500">Monto a pagar ($)</Label>
+                            <div className="relative">
+                                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                                <Input
+                                    type="number"
+                                    placeholder="0.00"
+                                    className="pl-10 text-xl font-semibold h-12"
+                                    value={amountUSD}
+                                    onChange={(e) => setAmountUSD(e.target.value)}
+                                    autoFocus
+                                />
                             </div>
                         </TabsContent>
 
-                        <TabsContent value="BS" className="space-y-4">
-                            {/* Selector Tasa */}
-                            <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-md border space-y-3">
-                                <div className="flex justify-between items-center mb-2">
-                                    <Label className="text-xs font-bold text-muted-foreground uppercase">Tasa de Conversión</Label>
-                                    <Button variant="ghost" size="sm" onClick={loadRates} disabled={loadingRates} className="h-6 px-2 text-xs">
-                                        <RefreshCw className={`w-3 h-3 mr-1 ${loadingRates ? 'animate-spin' : ''}`} /> Actualizar
+                        {/* INPUT BS */}
+                        <TabsContent value="BS" className="pt-4 space-y-4 animate-in fade-in slide-in-from-right-2">
+                            
+                            {/* SELECTOR DE TASA (BOTONES GRANDES) */}
+                            <div className="space-y-2">
+                                <div className="flex justify-between items-center">
+                                    <Label className="text-xs text-muted-foreground">Calcular usando tasa:</Label>
+                                    <Button variant="ghost" size="icon" className="h-5 w-5" onClick={loadRates} disabled={loadingRate}>
+                                        <RefreshCw className={`w-3 h-3 text-blue-600 ${loadingRate ? 'animate-spin' : ''}`} />
                                     </Button>
                                 </div>
-                                {loadingRates && !rates ? (
-                                    <div className="text-xs text-muted-foreground">Cargando tasas...</div>
-                                ) : (
-                                    <RadioGroup value={selectedRateType} onValueChange={(v) => setSelectedRateType(v as 'USD' | 'EUR')} className="grid grid-cols-2 gap-4">
-                                        <div className={`flex items-center justify-between p-2 rounded border cursor-pointer hover:bg-white dark:hover:bg-gray-700 ${selectedRateType === 'USD' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-transparent'}`}>
-                                            <div className="flex items-center space-x-2"><RadioGroupItem value="USD" id="r-usd" /><Label htmlFor="r-usd" className="cursor-pointer font-semibold">BCV ($)</Label></div>
-                                            <span className="text-sm font-mono">{rates?.usd.toFixed(2)}</span>
+                                
+                                <div className="grid grid-cols-2 gap-3">
+                                    {/* BOTÓN TASA USD */}
+                                    <button
+                                        onClick={() => setCalculationBase('USD')}
+                                        className={`relative flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${
+                                            calculationBase === 'USD' 
+                                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' 
+                                                : 'border-gray-200 hover:border-blue-300 bg-white dark:bg-gray-800 dark:border-gray-700'
+                                        }`}
+                                    >
+                                        <div className={`p-1.5 rounded-full mb-1 ${calculationBase === 'USD' ? 'bg-blue-200 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                                            <DollarSign className="w-4 h-4" />
                                         </div>
-                                        <div className={`flex items-center justify-between p-2 rounded border cursor-pointer hover:bg-white dark:hover:bg-gray-700 ${selectedRateType === 'EUR' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-transparent'}`}>
-                                            <div className="flex items-center space-x-2"><RadioGroupItem value="EUR" id="r-eur" /><Label htmlFor="r-eur" className="cursor-pointer font-semibold">BCV (€)</Label></div>
-                                            <span className="text-sm font-mono">{rates?.eur.toFixed(2)}</span>
+                                        <span className={`text-xs font-bold ${calculationBase === 'USD' ? 'text-blue-700' : 'text-gray-500'}`}>USD BCV</span>
+                                        <span className="text-lg font-bold mt-1">{rates.usd > 0 ? rates.usd.toFixed(2) : '...'}</span>
+                                        
+                                        {calculationBase === 'USD' && (
+                                            <div className="absolute top-2 right-2 text-blue-500"><CheckCircle2 className="w-4 h-4" /></div>
+                                        )}
+                                    </button>
+
+                                    {/* BOTÓN TASA EURO */}
+                                    <button
+                                        onClick={() => setCalculationBase('EUR')}
+                                        className={`relative flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${
+                                            calculationBase === 'EUR' 
+                                                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' 
+                                                : 'border-gray-200 hover:border-indigo-300 bg-white dark:bg-gray-800 dark:border-gray-700'
+                                        }`}
+                                    >
+                                        <div className={`p-1.5 rounded-full mb-1 ${calculationBase === 'EUR' ? 'bg-indigo-200 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>
+                                            <Euro className="w-4 h-4" />
                                         </div>
-                                    </RadioGroup>
-                                )}
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>Monto Bs.</Label>
-                                    <Input type="number" placeholder="0.00" value={bsAmount} onChange={(e) => setBsAmount(e.target.value)} disabled={loadingRates || !rates} />
+                                        <span className={`text-xs font-bold ${calculationBase === 'EUR' ? 'text-indigo-700' : 'text-gray-500'}`}>EUR BCV</span>
+                                        <span className="text-lg font-bold mt-1">{rates.eur > 0 ? rates.eur.toFixed(2) : '...'}</span>
+
+                                        {calculationBase === 'EUR' && (
+                                            <div className="absolute top-2 right-2 text-indigo-500"><CheckCircle2 className="w-4 h-4" /></div>
+                                        )}
+                                    </button>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label className="text-muted-foreground">Equivale ($)</Label>
-                                    <Input readOnly className="bg-gray-100 dark:bg-gray-800 font-bold text-green-700" value={abonoAmount > 0 ? abonoAmount.toFixed(2) : '0.00'} />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                    <Label className="text-xs text-muted-foreground">Monto Bs.</Label>
+                                    <Input
+                                        type="number"
+                                        placeholder="0.00"
+                                        className="text-lg"
+                                        value={amountBS}
+                                        onChange={(e) => setAmountBS(e.target.value)}
+                                        autoFocus
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-xs text-muted-foreground">
+                                        Equivalente $ (Ref. {calculationBase})
+                                    </Label>
+                                    <div className="flex items-center h-10 px-3 rounded-md bg-gray-100 dark:bg-gray-800 border font-mono font-bold text-gray-600 dark:text-gray-300">
+                                        {amountUSD || '0.00'}
+                                    </div>
                                 </div>
                             </div>
                         </TabsContent>
                     </Tabs>
 
-                    {/* --- SECCIÓN DE FOTO / COMPROBANTE --- */}
+                    {/* ALERTA SI EXCEDE MONTO */}
+                    {isOverLimit && (
+                        <div className="text-red-500 text-xs font-medium bg-red-50 p-2 rounded flex items-center gap-2">
+                            <X className="w-4 h-4" /> El monto excede la deuda pendiente.
+                        </div>
+                    )}
+
+                    <Separator />
+
+                    {/* --- ZONA DE UPLOAD IMAGEN --- */}
                     <div className="space-y-2">
-                        <Label>Comprobante o Foto del Efectivo (Opcional)</Label>
+                        <Label className="flex items-center justify-between">
+                            <span>Comprobante / Capture</span>
+                            {previewUrl && <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">Imagen cargada</Badge>}
+                        </Label>
                         
                         {!previewUrl ? (
                             <div 
                                 onClick={() => fileInputRef.current?.click()}
-                                className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                                className="group border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl h-24 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all"
                             >
-                                <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-                                <p className="text-sm text-muted-foreground font-medium">Clic para subir foto</p>
-                                <p className="text-xs text-muted-foreground">JPG, PNG (Max 5MB)</p>
+                                <Upload className="h-6 w-6 text-gray-400 group-hover:text-blue-500 mb-1" />
+                                <span className="text-xs text-gray-500 group-hover:text-blue-600 font-medium">Clic para subir imagen</span>
                             </div>
                         ) : (
-                            <div className="relative rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 group">
-                                <img 
-                                    src={previewUrl} 
-                                    alt="Vista previa comprobante" 
-                                    className="w-full h-48 object-cover bg-gray-100"
-                                />
-                                <div className="absolute top-2 right-2 flex gap-2">
-                                    <Button 
-                                        variant="destructive" 
-                                        size="icon" 
-                                        className="h-8 w-8 shadow-sm"
-                                        onClick={handleRemoveFile}
-                                    >
-                                        <X className="h-4 w-4" />
+                            <div className="relative rounded-xl overflow-hidden border border-gray-200 h-32 group">
+                                <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                    <Button variant="destructive" size="sm" onClick={handleRemoveFile}>
+                                        <X className="w-4 h-4 mr-2" /> Quitar
                                     </Button>
-                                </div>
-                                <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white p-2 text-xs truncate">
-                                    {selectedFile?.name}
                                 </div>
                             </div>
                         )}
-                        <input 
-                            type="file" 
-                            ref={fileInputRef} 
-                            className="hidden" 
-                            accept="image/*"
-                            onChange={handleFileSelect}
-                        />
+                        <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect}/>
                     </div>
 
+                    {/* NOTAS */}
                     <div className="space-y-2">
-                        <Label>Notas del Abono</Label>
-                        <Textarea
-                            placeholder="Referencia bancaria, banco emisor, etc."
+                        <Label>Nota / Referencia</Label>
+                        <Textarea 
+                            placeholder="Ej: Pago móvil ref 1234..." 
+                            className="resize-none"
+                            rows={2}
                             value={nota}
                             onChange={(e) => setNota(e.target.value)}
                         />
                     </div>
+
                 </div>
 
-                <DialogFooter>
+                {/* --- FOOTER (FIJO) --- */}
+                <DialogFooter className="bg-gray-50 dark:bg-gray-900/50 p-4 border-t gap-2 sm:gap-0 flex-none">
                     <Button variant="outline" onClick={onClose} disabled={isUploading}>Cancelar</Button>
                     <Button 
                         onClick={handleSave} 
-                        disabled={!canSave || montoPendiente === 0 || loadingRates || isUploading}
-                        className="min-w-[160px]"
+                        disabled={!isValid || isUploading}
+                        className={`min-w-[140px] ${isValid ? 'bg-blue-600 hover:bg-blue-700' : ''}`}
                     >
                         {isUploading ? (
                             <>
                                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                                Subiendo...
+                                Procesando...
                             </>
                         ) : (
-                            `Registrar ${formatCurrency(abonoAmount)}`
+                            <>
+                                <CheckCircle2 className="w-4 h-4 mr-2" />
+                                Registrar Pago
+                            </>
                         )}
                     </Button>
                 </DialogFooter>
+
             </DialogContent>
         </Dialog>
     )

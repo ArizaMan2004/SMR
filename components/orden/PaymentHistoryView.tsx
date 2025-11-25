@@ -1,107 +1,153 @@
 // @/components/orden/PaymentHistoryView.tsx
+
 "use client"
 
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import React, { useState } from 'react'
+import { formatCurrency } from '@/lib/utils/order-utils'
+import { format } from 'date-fns'
+// 1. Agregamos DialogTitle a la importación
+import { 
+    Table, TableBody, TableCell, TableHead, TableHeader, TableRow 
+} from "@/components/ui/table"
+import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { formatCurrency, formatDate } from "@/lib/utils/order-utils"
-import { DollarSign, Clock } from "lucide-react"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Eye, ExternalLink } from 'lucide-react'
 
-// EXPORTACIÓN NOMBRADA DEL TIPO (se mantiene)
-export type PagoTransaction = {
-    montoUSD: number;
-    fechaRegistro: string; // ISO String
-    registradoPorUserId?: string | null; // Aceptamos que pueda ser nulo o indefinido
-    nota?: string | null;
-};
-
-interface PaymentHistoryViewProps {
-    historial: PagoTransaction[];
-    totalOrdenUSD: number;
-    montoPagadoUSD: number;
+export interface PagoTransaction {
+    montoUSD: number
+    fechaRegistro: string
+    registradoPorUserId: string
+    nota?: string | null
+    imagenUrl?: string | null 
 }
 
-// EXPORTACIÓN NOMBRADA DEL COMPONENTE (se mantiene)
-export function PaymentHistoryView({ historial, totalOrdenUSD, montoPagadoUSD }: PaymentHistoryViewProps) {
-    
-    // Ordenar historial de la transacción más reciente a la más antigua
-    const historialOrdenado = [...historial].sort((a, b) => 
-        new Date(b.fechaRegistro).getTime() - new Date(a.fechaRegistro).getTime()
-    );
+interface PaymentHistoryViewProps {
+    historial: PagoTransaction[]
+    totalOrdenUSD: number
+    montoPagadoUSD: number
+}
 
-    const montoPendiente = totalOrdenUSD - montoPagadoUSD;
-    const isPaid = montoPendiente <= 0.01;
+export function PaymentHistoryView({ historial, totalOrdenUSD, montoPagadoUSD }: PaymentHistoryViewProps) {
+    const [previewImage, setPreviewImage] = useState<string | null>(null)
+    const pendiente = totalOrdenUSD - montoPagadoUSD
+
+    const sortedHistorial = [...historial].sort((a, b) => 
+        new Date(b.fechaRegistro).getTime() - new Date(a.fechaRegistro).getTime()
+    )
 
     return (
-        // ✅ Ajuste del contenedor principal
-        <div className="rounded-lg border bg-white dark:bg-gray-800 shadow-md overflow-hidden">
-            <div className="p-4 border-b dark:border-gray-700 flex items-center justify-between">
-                <h3 className="text-lg font-semibold flex items-center gap-2 text-foreground dark:text-gray-100">
-                    <DollarSign className="w-5 h-5 text-green-600 dark:text-green-400" />
-                    Historial de Pagos y Abonos
-                </h3>
-            </div>
+        <div className="space-y-6 w-full bg-white dark:bg-gray-900/50 rounded-lg p-2 border border-gray-100 dark:border-gray-800">
             
-            <div className="p-4 grid grid-cols-3 gap-4 text-sm dark:text-gray-300">
-                <div className="space-y-1">
-                    <p className="font-medium text-muted-foreground dark:text-gray-400">Total de la Orden:</p>
-                    <p className="font-bold text-lg text-primary">{formatCurrency(totalOrdenUSD)}</p>
+            {/* SECCIÓN DE TOTALES */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-b pb-4">
+                <div>
+                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Total de la Orden:</p>
+                    <p className="text-xl font-bold text-blue-600 dark:text-blue-400">{formatCurrency(totalOrdenUSD)}</p>
                 </div>
-                <div className="space-y-1">
-                    <p className="font-medium text-muted-foreground dark:text-gray-400">Total Pagado:</p>
-                    <p className="font-bold text-lg text-green-600 dark:text-green-500">{formatCurrency(montoPagadoUSD)}</p>
+                <div>
+                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Total Pagado:</p>
+                    <p className="text-xl font-bold text-green-600 dark:text-green-400">{formatCurrency(montoPagadoUSD)}</p>
                 </div>
-                <div className="space-y-1">
-                    <p className="font-medium text-muted-foreground dark:text-gray-400">Monto Pendiente:</p>
-                    <p className={`font-bold text-lg ${isPaid ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-400'}`}>
-                        {formatCurrency(montoPendiente)}
+                <div>
+                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Monto Pendiente:</p>
+                    <p className={`text-xl font-bold ${pendiente > 0.01 ? 'text-red-500' : 'text-gray-500'}`}>
+                        {formatCurrency(Math.max(0, pendiente))}
                     </p>
                 </div>
             </div>
 
-            <Table>
-                {/* ✅ Dark Mode: Fondo más oscuro en la cabecera de la tabla */}
-                <TableHeader className="bg-gray-50 dark:bg-gray-700/50">
-                    <TableRow>
-                        <TableHead className="w-[150px]">Fecha</TableHead>
-                        <TableHead className="text-right">Monto (USD)</TableHead>
-                        <TableHead className="w-1/2">Nota</TableHead>
-                        <TableHead className="text-center w-[120px]">Registro</TableHead>
-                    </TableRow>
-                </TableHeader>
-                
-                <TableBody>
-                    {historialOrdenado.map((pago, index) => {
-                        const userId = pago.registradoPorUserId;
-                        const userIdDisplay = userId ? `User...${userId.slice(-4)}` : 'Sistema / Desconocido';
-                        
-                        return (
-                        <TableRow key={index} className="text-sm hover:bg-gray-50/50 dark:hover:bg-gray-700/80 transition-colors">
-                            {/* ✅ Dark Mode: Aseguramos el color del texto de la fecha */}
-                            <TableCell className="dark:text-gray-300">{formatDate(pago.fechaRegistro, true)}</TableCell>
-                            <TableCell className="text-right font-semibold text-green-700 dark:text-green-400">
-                                {formatCurrency(pago.montoUSD)}
-                            </TableCell>
-                            {/* ✅ Dark Mode: Aseguramos el color del texto secundario de la nota */}
-                            <TableCell className="text-muted-foreground italic max-w-xs overflow-hidden text-ellipsis dark:text-gray-400">
-                                {pago.nota || '—'}
-                            </TableCell>
-                            <TableCell className="text-center">
-                                {/* Muestra solo una parte del ID para referencia */}
-                                <Badge variant="secondary" className="text-xs">
-                                    {userIdDisplay}
-                                </Badge>
-                            </TableCell>
+            {/* TABLA DE PAGOS */}
+            <div className="rounded-md border bg-white dark:bg-black/20 overflow-hidden">
+                <Table>
+                    <TableHeader className="bg-gray-50 dark:bg-gray-800">
+                        <TableRow>
+                            <TableHead className="w-[120px]">Fecha</TableHead>
+                            <TableHead>Nota / Referencia</TableHead>
+                            <TableHead className="text-center w-[80px]">Foto</TableHead>
+                            <TableHead className="text-right">Monto (USD)</TableHead>
+                            <TableHead className="text-right w-[100px]">Registro</TableHead>
                         </TableRow>
-                        )
-                    })}
-                </TableBody>
-            </Table>
-            
-            {historial.length === 0 && (
-                <div className="text-center text-muted-foreground p-4 dark:text-gray-400">
-                    Aún no hay abonos registrados para esta orden.
-                </div>
-            )}
+                    </TableHeader>
+                    <TableBody>
+                        {sortedHistorial.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={5} className="text-center h-24 text-muted-foreground">
+                                    No hay pagos registrados aún.
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            sortedHistorial.map((pago, index) => (
+                                <TableRow key={index} className="hover:bg-muted/30">
+                                    <TableCell className="text-xs font-medium">
+                                        <div className="flex flex-col">
+                                            <span className="flex items-center gap-1 font-semibold text-gray-700 dark:text-gray-300">
+                                                {format(new Date(pago.fechaRegistro), 'dd/MM/yyyy')}
+                                            </span>
+                                            <span className="text-[10px] text-muted-foreground">
+                                                {format(new Date(pago.fechaRegistro), 'hh:mm a')}
+                                            </span>
+                                        </div>
+                                    </TableCell>
+                                    
+                                    <TableCell>
+                                        <div className="text-sm italic text-gray-600 dark:text-gray-400 break-words max-w-[300px]">
+                                            {pago.nota || "Sin nota"}
+                                        </div>
+                                    </TableCell>
+
+                                    <TableCell className="text-center">
+                                        {pago.imagenUrl ? (
+                                            <Button 
+                                                variant="ghost" 
+                                                size="icon"
+                                                className="h-8 w-8 text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 rounded-full"
+                                                onClick={() => setPreviewImage(pago.imagenUrl || null)}
+                                            >
+                                                <Eye className="w-4 h-4" />
+                                            </Button>
+                                        ) : (
+                                            <span className="text-xs text-muted-foreground opacity-50">-</span>
+                                        )}
+                                    </TableCell>
+
+                                    <TableCell className="text-right font-bold text-green-600 dark:text-green-400 text-sm">
+                                        {formatCurrency(pago.montoUSD)}
+                                    </TableCell>
+
+                                    <TableCell className="text-right">
+                                        <Badge variant="outline" className="text-[10px] font-mono text-muted-foreground">
+                                            {pago.registradoPorUserId ? pago.registradoPorUserId.slice(0, 6) : 'N/A'}...
+                                        </Badge>
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        )}
+                    </TableBody>
+                </Table>
+            </div>
+
+            {/* MODAL DE PREVISUALIZACIÓN */}
+            <Dialog open={!!previewImage} onOpenChange={(open) => !open && setPreviewImage(null)}>
+                <DialogContent className="max-w-4xl p-0 bg-transparent border-none shadow-none flex justify-center items-center pointer-events-none">
+                    
+                    {/* 2. SOLUCIÓN DEL ERROR: Título oculto para accesibilidad */}
+                    <DialogTitle className="sr-only">Vista previa del comprobante</DialogTitle>
+                    
+                    <div className="relative group max-h-[90vh] w-auto pointer-events-auto">
+                        <div className="absolute top-4 right-4 z-50 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {previewImage && (
+                                <a href={previewImage} target="_blank" rel="noreferrer" className="p-2 bg-black/60 text-white rounded-full flex items-center justify-center hover:bg-black/80 transition-colors">
+                                    <ExternalLink className="w-5 h-5" />
+                                </a>
+                            )}
+                        </div>
+                        {previewImage && (
+                            <img src={previewImage} alt="Comprobante" className="w-full h-auto max-h-[85vh] object-contain rounded-lg shadow-2xl bg-white" />
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }
