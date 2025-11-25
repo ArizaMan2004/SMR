@@ -5,21 +5,21 @@
 import React, { useMemo, useState } from 'react'
 import { type OrdenServicio, EstadoPago } from '@/lib/types/orden'
 import { formatCurrency, formatBsCurrency } from '@/lib/utils/order-utils' 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
 import { 
     Wallet, Search, Filter, ArrowLeft, ArrowRight, 
-    CheckCircle2, ArrowDown, ArrowUp, Edit, DollarSign, 
+    CheckCircle2, ArrowDown, ArrowUp, DollarSign, 
     CalendarClock, TrendingUp 
 } from 'lucide-react'
 
 // --- COMPONENTES IMPORTADOS ---
-import { PaymentHistoryView, type PagoTransaction } from '@/components/orden/PaymentHistoryView' 
+// Asegúrate de que este path coincida con donde guardaste el historial
+import { PaymentHistoryView } from '@/components/orden/PaymentHistoryView' 
 import { PaymentEditModal } from '@/components/dashboard/PaymentEditModal'
 
 // --- TIPOS ---
@@ -32,23 +32,23 @@ interface ClientSummary {
     ordenesPendientes: OrdenServicio[]
 }
 
-const ITEMS_PER_PAGE = 5; // Reducido a 5 clientes por página para mejor visualización
+const ITEMS_PER_PAGE = 5; 
 
 interface ClientsAndPaymentsViewProps {
     ordenes: OrdenServicio[]
     currentUserId: string 
     bcvRate: number 
-    // Esta función debe venir del padre (quien conecta con Firebase/API)
+    // Actualizado para aceptar imagenUrl
     onRegisterPayment: (ordenId: string, monto: number, nota?: string, imagenUrl?: string) => Promise<void>
 }
 
-// Helper para badges
+// Helper para colores de badges
 const getPaymentBadgeVariant = (estado: EstadoPago) => {
     switch (estado) {
-        case EstadoPago.PAGADO: return "default"; // Verde/Negro (según tema)
-        case EstadoPago.ABONADO: return "secondary"; // Gris/Azul
-        case EstadoPago.ANULADO: return "destructive"; // Rojo
-        default: return "outline"; // Pendiente
+        case EstadoPago.PAGADO: return "default"; 
+        case EstadoPago.ABONADO: return "secondary"; 
+        case EstadoPago.ANULADO: return "destructive"; 
+        default: return "outline"; 
     }
 }
 
@@ -58,6 +58,8 @@ export function ClientsAndPaymentsView({ ordenes, currentUserId, bcvRate, onRegi
     const [searchTerm, setSearchTerm] = useState('')
     const [filterStatus, setFilterStatus] = useState<'ALL' | EstadoPago>('ALL')
     const [currentPage, setCurrentPage] = useState(1)
+    
+    // Estado para controlar qué fila está expandida mostrando el historial
     const [expandedOrdenId, setExpandedOrdenId] = useState<string | null>(null);
 
     // --- ESTADOS DEL MODAL DE PAGO ---
@@ -155,16 +157,19 @@ export function ClientsAndPaymentsView({ ordenes, currentUserId, bcvRate, onRegi
         setIsPaymentModalOpen(true)
     }
 
+    // Handler intermedio para conectar el modal con el Dashboard
     const handleRegisterPayment = async (abonoUSD: number, nota?: string, imagenUrl?: string) => {
         if (!selectedOrdenForPayment) return;
 
         try {
+            // Llamamos a la función del padre (Dashboard) pasando la imagen si existe
             await onRegisterPayment(selectedOrdenForPayment.id, abonoUSD, nota, imagenUrl);
             setIsPaymentModalOpen(false);
             setSelectedOrdenForPayment(null);
         } catch (error) {
             console.error("Error en vista registrando pago:", error);
-            alert("Error al registrar el pago. Intente nuevamente.");
+            // El alert ya lo maneja el padre normalmente, pero por seguridad:
+            // alert("Error al registrar el pago."); 
         }
     }
 
@@ -313,13 +318,16 @@ export function ClientsAndPaymentsView({ ordenes, currentUserId, bcvRate, onRegi
                                         <TableBody>
                                             {summary.ordenesPendientes.map((orden) => {
                                                 const pendiente = orden.totalUSD - (orden.montoPagadoUSD || 0)
-                                                // @ts-ignore (Si registroPagos no está en la interfaz base pero existe en los datos)
-                                                const hasHistory = orden.registroPagos && orden.registroPagos.length > 0;
+                                                
+                                                // Accedemos a registroPagos con seguridad
+                                                // @ts-ignore: Propiedad dinámica de Firebase
+                                                const historialPagos = orden.registroPagos || [];
+                                                const hasHistory = historialPagos.length > 0;
                                                 const isExpanded = expandedOrdenId === orden.id;
 
                                                 return (
                                                     <React.Fragment key={orden.id}>
-                                                        <TableRow className="group hover:bg-muted/50">
+                                                        <TableRow className={`group hover:bg-muted/50 ${isExpanded ? 'bg-muted/30' : ''}`}>
                                                             <TableCell className="font-medium">
                                                                 #{orden.ordenNumero}
                                                             </TableCell>
@@ -351,9 +359,10 @@ export function ClientsAndPaymentsView({ ordenes, currentUserId, bcvRate, onRegi
                                                                     {hasHistory && (
                                                                         <Button
                                                                             size="icon"
-                                                                            variant="ghost"
+                                                                            variant={isExpanded ? "secondary" : "ghost"}
                                                                             className="h-8 w-8"
                                                                             onClick={() => toggleExpand(orden.id)}
+                                                                            title="Ver historial de pagos y fotos"
                                                                         >
                                                                             {isExpanded ? <ArrowUp className="w-4 h-4"/> : <ArrowDown className="w-4 h-4"/>}
                                                                         </Button>
@@ -362,14 +371,13 @@ export function ClientsAndPaymentsView({ ordenes, currentUserId, bcvRate, onRegi
                                                             </TableCell>
                                                         </TableRow>
 
-                                                        {/* Historial Expandible */}
+                                                        {/* --- FILA EXPANDIBLE CON EL HISTORIAL Y FOTOS --- */}
                                                         {isExpanded && hasHistory && (
-                                                            <TableRow className="bg-slate-50 dark:bg-slate-900/30">
+                                                            <TableRow className="bg-slate-50 dark:bg-slate-900/30 animate-in slide-in-from-top-2 duration-200">
                                                                 <TableCell colSpan={6} className="p-0">
-                                                                    <div className="p-4 border-t border-b border-primary/20">
+                                                                    <div className="p-4 border-t border-b border-primary/10 shadow-inner">
                                                                         <PaymentHistoryView 
-                                                                            // @ts-ignore
-                                                                            historial={orden.registroPagos}
+                                                                            historial={historialPagos}
                                                                             totalOrdenUSD={orden.totalUSD}
                                                                             montoPagadoUSD={orden.montoPagadoUSD || 0}
                                                                         />
@@ -418,7 +426,7 @@ export function ClientsAndPaymentsView({ ordenes, currentUserId, bcvRate, onRegi
                 )
             )}
 
-            {/* --- SECCIÓN 2: HISTORIAL DE PAGADOS --- */}
+            {/* --- SECCIÓN 2: HISTORIAL DE PAGADOS (ÚLTIMOS 10) --- */}
             {hasPagadas && filterStatus !== EstadoPago.PENDIENTE && filterStatus !== EstadoPago.ABONADO && (
                 <div className="pt-10">
                     <div className="flex items-center gap-2 mb-4">
@@ -436,36 +444,67 @@ export function ClientsAndPaymentsView({ ordenes, currentUserId, bcvRate, onRegi
                                     <TableHead>Cliente</TableHead>
                                     <TableHead className="text-right">Monto Total</TableHead>
                                     <TableHead className="text-center">Estado</TableHead>
+                                    <TableHead className="text-center">Detalles</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {pagadasCompletamente.slice(0, 10).map((orden) => ( // Mostrar solo las ultimas 10 pagadas
-                                    <TableRow key={orden.id} className="opacity-75 hover:opacity-100 transition-opacity">
-                                        <TableCell className="font-semibold">#{orden.ordenNumero}</TableCell>
-                                        <TableCell>
-                                            <span className="font-medium">{orden.cliente.nombreRazonSocial}</span>
-                                            <span className="text-xs text-muted-foreground block">{orden.cliente.rifCedula}</span>
-                                        </TableCell>
-                                        <TableCell className="text-right font-bold text-green-600 dark:text-green-400">
-                                            {formatCurrency(orden.totalUSD)}
-                                        </TableCell>
-                                        <TableCell className="text-center">
-                                            <Badge variant="default" className="bg-green-600 hover:bg-green-700">Pagado</Badge>
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
+                                {pagadasCompletamente.slice(0, 10).map((orden) => {
+                                    // @ts-ignore
+                                    const historial = orden.registroPagos || [];
+                                    const isExpanded = expandedOrdenId === orden.id;
+
+                                    return (
+                                        <React.Fragment key={orden.id}>
+                                            <TableRow className="opacity-75 hover:opacity-100 transition-opacity">
+                                                <TableCell className="font-semibold">#{orden.ordenNumero}</TableCell>
+                                                <TableCell>
+                                                    <span className="font-medium">{orden.cliente.nombreRazonSocial}</span>
+                                                    <span className="text-xs text-muted-foreground block">{orden.cliente.rifCedula}</span>
+                                                </TableCell>
+                                                <TableCell className="text-right font-bold text-green-600 dark:text-green-400">
+                                                    {formatCurrency(orden.totalUSD)}
+                                                </TableCell>
+                                                <TableCell className="text-center">
+                                                    <Badge variant="default" className="bg-green-600 hover:bg-green-700">Pagado</Badge>
+                                                </TableCell>
+                                                <TableCell className="text-center">
+                                                     {historial.length > 0 && (
+                                                        <Button
+                                                            size="icon"
+                                                            variant="ghost"
+                                                            className="h-8 w-8"
+                                                            onClick={() => toggleExpand(orden.id)}
+                                                        >
+                                                            {isExpanded ? <ArrowUp className="w-4 h-4"/> : <ArrowDown className="w-4 h-4"/>}
+                                                        </Button>
+                                                    )}
+                                                </TableCell>
+                                            </TableRow>
+                                            
+                                            {/* Historial también en las pagadas */}
+                                            {isExpanded && historial.length > 0 && (
+                                                <TableRow className="bg-slate-50 dark:bg-slate-900/30">
+                                                    <TableCell colSpan={5} className="p-0">
+                                                        <div className="p-4 border-t border-b border-primary/10">
+                                                            <PaymentHistoryView 
+                                                                historial={historial}
+                                                                totalOrdenUSD={orden.totalUSD}
+                                                                montoPagadoUSD={orden.montoPagadoUSD || 0}
+                                                            />
+                                                        </div>
+                                                    </TableCell>
+                                                </TableRow>
+                                            )}
+                                        </React.Fragment>
+                                    )
+                                })}
                             </TableBody>
                         </Table>
-                        {pagadasCompletamente.length > 10 && (
-                            <div className="p-2 text-center text-xs text-muted-foreground bg-muted/20">
-                                Mostrando las 10 más recientes de {pagadasCompletamente.length} pagadas.
-                            </div>
-                        )}
                     </Card>
                 </div>
             )}
 
-            {/* --- MODAL DE PAGO INTEGRADO --- */}
+            {/* --- MODAL DE PAGO (EDITAR/AGREGAR) --- */}
             {selectedOrdenForPayment && (
                 <PaymentEditModal
                     isOpen={isPaymentModalOpen}
@@ -474,7 +513,7 @@ export function ClientsAndPaymentsView({ ordenes, currentUserId, bcvRate, onRegi
                         setSelectedOrdenForPayment(null)
                     }}
                     orden={selectedOrdenForPayment}
-                    onSave={handleRegisterPayment} // 📢 Ahora esto conecta con la lógica del padre
+                    onSave={handleRegisterPayment} 
                     currentUserId={currentUserId}
                 />
             )}

@@ -37,7 +37,7 @@ import {
     updateOrdenStatus, 
     createOrden, 
     updateOrdenPaymentLog,
-    actualizarOrden // 🔥 Importante: Asegúrate de importar esto
+    actualizarOrden
 } from "@/lib/services/ordenes-service"
 import { getBCVRate } from "@/lib/bcv-service"
 import { 
@@ -56,11 +56,11 @@ export default function Dashboard() {
     const [activeView, setActiveView] = useState<ActiveView>("orders") 
     
     // --- ESTADOS DE MODALES Y EDICIÓN ---
-    const [isWizardOpen, setIsWizardOpen] = useState(false) // Un solo estado para el modal de orden (crear/editar)
-    const [editingOrder, setEditingOrder] = useState<OrdenServicio | null>(null) // Orden seleccionada para editar
+    const [isWizardOpen, setIsWizardOpen] = useState(false) 
+    const [editingOrder, setEditingOrder] = useState<OrdenServicio | null>(null) 
     
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false) 
-    const [ordenForPayment, setOrdenForPayment] = useState<OrdenServicio | null>(null) // Orden seleccionada para pagar
+    const [ordenForPayment, setOrdenForPayment] = useState<OrdenServicio | null>(null) 
 
     const currentUserId = user?.uid || "mock-user-admin-123"
     
@@ -94,27 +94,22 @@ export default function Dashboard() {
     
     // --- HANDLERS DE ORDENES ---
 
-    // 1. Abrir Modal CREAR
     const handleOpenCreate = () => {
-        setEditingOrder(null); // Limpiamos para indicar modo creación
+        setEditingOrder(null); 
         setIsWizardOpen(true);
     }
 
-    // 2. Abrir Modal EDITAR (Conectado a la Tabla)
     const handleEditOrder = (orden: OrdenServicio) => {
-        setEditingOrder(orden); // Seteamos la orden a editar
+        setEditingOrder(orden); 
         setIsWizardOpen(true);
     }
 
-    // 3. Guardar Orden (Unificado)
     const handleSaveOrder = async (data: any) => {
         try {
             if (editingOrder) {
-                // MODO ACTUALIZACIÓN
                 await actualizarOrden(editingOrder.id, data);
                 console.log("Orden actualizada:", data);
             } else {
-                // MODO CREACIÓN
                 await createOrden(data);
                 console.log("Orden creada:", data);
             }
@@ -143,42 +138,56 @@ export default function Dashboard() {
         setIsPaymentModalOpen(true) 
     }
     
-    const handlePaymentUpdate = (abonoUSD: number, nota: string | undefined) => {
+    const handlePaymentUpdate = (abonoUSD: number, nota: string | undefined, imagenUrl?: string) => {
         if (!ordenForPayment) return;
+        handleRegisterPaymentGlobal(ordenForPayment.id, abonoUSD, nota, imagenUrl)
+            .then(() => {
+                 setIsPaymentModalOpen(false); 
+                 setOrdenForPayment(null);
+            });
+    }
+
+    // 🔥 CORREGIDO: Evitamos pasar 'undefined' a Firebase
+    const handleRegisterPaymentGlobal = async (ordenId: string, monto: number, nota?: string, imagenUrl?: string) => {
+        const orden = ordenes.find(o => o.id === ordenId);
+        if (!orden) return;
 
         const newTransaction: PagoTransaction = {
-            montoUSD: abonoUSD,
+            montoUSD: monto,
             fechaRegistro: new Date().toISOString(),
             registradoPorUserId: currentUserId,
             nota: nota || null,
+            // ⬇️ SOLUCIÓN: Usamos '|| null' para que nunca sea undefined
+            // @ts-ignore
+            imagenUrl: imagenUrl || null 
         };
 
         // @ts-ignore
-        const currentHistorial: PagoTransaction[] = (ordenForPayment as any).registroPagos || []; 
+        const currentHistorial: PagoTransaction[] = (orden as any).registroPagos || []; 
         const nuevoHistorial = [...currentHistorial, newTransaction];
         
         const nuevoMontoPagadoUSD = nuevoHistorial.reduce((sum, t) => sum + t.montoUSD, 0);
 
         let nuevoEstadoPago: EstadoPago = EstadoPago.PENDIENTE;
-        if (nuevoMontoPagadoUSD >= ordenForPayment.totalUSD) {
+        if (nuevoMontoPagadoUSD >= (orden.totalUSD - 0.01)) {
             nuevoEstadoPago = EstadoPago.PAGADO;
-        } else if (nuevoMontoPagadoUSD > 0) {
+        } else if (nuevoMontoPagadoUSD > 0.01) {
             nuevoEstadoPago = EstadoPago.ABONADO;
         }
         
-        updateOrdenPaymentLog(
-            ordenForPayment.id, 
-            nuevoEstadoPago, 
-            nuevoMontoPagadoUSD, 
-            nuevoHistorial as PaymentLog[] 
-        )
-            .then(() => {
-                setIsPaymentModalOpen(false); 
-                setOrdenForPayment(null);
-            })
-            .catch(error => {
-                console.error("Fallo pago Firebase:", error);
-            })
+        try {
+            await updateOrdenPaymentLog(
+                orden.id, 
+                nuevoEstadoPago, 
+                nuevoMontoPagadoUSD, 
+                nuevoHistorial as PaymentLog[] 
+            );
+            console.log(`Pago registrado para orden ${orden.ordenNumero}`);
+        } catch (error) {
+             console.error("Fallo pago Firebase:", error);
+             alert("Error al registrar el pago en la base de datos: " + (error as any).message);
+             throw error;
+        }
     }
     
     // --- UTILIDADES PDF ---
@@ -291,7 +300,6 @@ export default function Dashboard() {
                     ordenes={ordenes}
                     onDelete={handleDeleteOrden} 
                     onStatusChange={handleUpdateStatus}
-                    // 🔥 AHORA SÍ SE PASA LA PROP ONEDIT
                     onEdit={handleEditOrder} 
                     smrLogoBase64={pdfLogoBase64}
                     bcvRate={currentBcvRate}
@@ -305,8 +313,7 @@ export default function Dashboard() {
                 <div className="max-w-7xl mx-auto">
                   <ClientsAndPaymentsView 
                       ordenes={ordenes} 
-                      // Usamos el handler de pagos
-                      onEditPayment={handleOpenPaymentModal} 
+                      onRegisterPayment={handleRegisterPaymentGlobal} 
                       bcvRate={currentBcvRate} 
                       currentUserId={currentUserId} 
                   />
@@ -320,7 +327,7 @@ export default function Dashboard() {
         {/* --- MODAL WIZARD UNIFICADO (CREAR/EDITAR) --- */}
         <Dialog open={isWizardOpen} onOpenChange={(open) => {
             setIsWizardOpen(open);
-            if(!open) setEditingOrder(null); // Limpiar al cerrar
+            if(!open) setEditingOrder(null); 
         }}>
             <DialogContent className="max-w-6xl w-[95vw] h-full max-h-[95vh] sm:max-h-[95vh] sm:max-w-4xl lg:max-w-6xl p-6 sm:p-8 flex flex-col">
                 <DialogHeader className="flex-shrink-0">
@@ -331,19 +338,19 @@ export default function Dashboard() {
                 <OrderFormWizardV2 
                     onSave={handleSaveOrder} 
                     onClose={() => { setIsWizardOpen(false); setEditingOrder(null); }}
-                    ordenToEdit={editingOrder} // 🔥 Pasamos la orden si existe
+                    ordenToEdit={editingOrder} 
                     className="flex-grow"
                 />
             </DialogContent>
         </Dialog>
 
-        {/* MODAL PAGO */}
+        {/* MODAL PAGO (Para la vista de órdenes) */}
         {ordenForPayment && (
           <PaymentEditModal
             isOpen={isPaymentModalOpen}
             orden={ordenForPayment}
             onClose={() => {setIsPaymentModalOpen(false); setOrdenForPayment(null);}}
-            onSave={(abonoUSD, nota) => handlePaymentUpdate(abonoUSD, nota)}
+            onSave={(abonoUSD, nota, imagenUrl) => handlePaymentUpdate(abonoUSD, nota, imagenUrl)}
             currentUserId={currentUserId} 
             // @ts-ignore
             historialPagos={(ordenForPayment as any).registroPagos} 
