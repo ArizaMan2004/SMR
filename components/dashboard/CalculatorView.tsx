@@ -2,7 +2,7 @@
 
 "use client"
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,8 @@ import {
     Receipt,
     Pencil,
     Check,
-    Box // Icono para material
+    Box,
+    ArrowLeftRight // <--- Icono agregado para el botón de cambio
 } from "lucide-react";
 import { fetchBCVRateFromAPI } from "@/lib/bcv-service";
 
@@ -56,7 +57,7 @@ const formatCurrencyForeign = (amount: number | null): string => {
     return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 };
 
-// --- COMPONENTE: MODAL DE RECIBO / SCREENSHOT ---
+// --- COMPONENTE: MODAL DE RECIBO / SCREENSHOT (MODIFICADO) ---
 interface ReceiptModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -66,9 +67,21 @@ interface ReceiptModalProps {
 }
 
 const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, data, type, rates }) => {
+    // Estado para controlar qué tasa se visualiza (USD o EUR)
+    const [conversionMode, setConversionMode] = useState<'USD' | 'EUR'>('USD');
+
     if (!isOpen || !data) return null;
 
-    const totalBs = rates.usdRate ? data.totalCost * rates.usdRate : 0;
+    // Determinar la tasa activa según el modo seleccionado
+    const activeRate = conversionMode === 'USD' ? rates.usdRate : rates.eurRate;
+    
+    // Calcular el total en Bolívares usando la tasa activa
+    const totalBs = activeRate ? data.totalCost * activeRate : 0;
+
+    // Función para alternar la tasa
+    const toggleConversionMode = () => {
+        setConversionMode(prev => prev === 'USD' ? 'EUR' : 'USD');
+    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -150,22 +163,45 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, onClose, data, type
                     </div>
 
                     <div className="space-y-3 pt-2">
+                        {/* Total Dólares (Fijo) */}
                         <div className="flex justify-between items-center text-lg font-bold text-gray-800 dark:text-gray-100">
                             <span>Total USD:</span>
                             <span className="text-green-600">${data.totalCost.toFixed(2)}</span>
                         </div>
                         
-                        {rates.usdRate && (
-                            <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800">
-                                <div className="flex justify-between items-center mb-1">
-                                    <span className="text-sm text-blue-800 dark:text-blue-300 font-semibold">Total en Bolívares:</span>
-                                    <span className="text-xl font-extrabold text-blue-700 dark:text-blue-400">
+                        {/* Caja Total Bolívares (Dinámica) */}
+                        {activeRate ? (
+                            <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800 relative transition-all duration-200">
+                                <div className="flex justify-between items-start mb-1">
+                                    <span className="text-sm text-blue-800 dark:text-blue-300 font-semibold mt-1">
+                                        Total en Bolívares:
+                                    </span>
+                                    
+                                    {/* Botón Selector de Tasa */}
+                                    <Button 
+                                        size="sm" 
+                                        variant="outline" 
+                                        onClick={toggleConversionMode}
+                                        className="h-6 text-[10px] px-2 bg-white dark:bg-slate-800 border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100 hover:text-blue-800 transition-colors shadow-sm"
+                                        title="Cambiar Tasa de Cambio"
+                                    >
+                                        <ArrowLeftRight className="w-3 h-3 mr-1" />
+                                        {conversionMode === 'USD' ? 'Tasa BCV ($)' : 'Tasa BCV (€)'}
+                                    </Button>
+                                </div>
+
+                                <div className="text-right">
+                                    <span className="text-2xl font-extrabold text-blue-700 dark:text-blue-400 block leading-none mt-1">
                                         Bs {formatCurrencyBs(totalBs)}
                                     </span>
                                 </div>
-                                <div className="text-right text-[10px] text-blue-600/70">
-                                    Tasa BCV: {formatCurrencyBs(rates.usdRate)}
+                                <div className="text-right text-[10px] text-blue-600/70 mt-1">
+                                    Calculado a Tasa {conversionMode}: {formatCurrencyBs(activeRate)}
                                 </div>
+                            </div>
+                        ) : (
+                            <div className="p-3 bg-yellow-50 text-yellow-700 text-xs rounded-md border border-yellow-200 text-center">
+                                Tasas de cambio no disponibles.
                             </div>
                         )}
                     </div>
