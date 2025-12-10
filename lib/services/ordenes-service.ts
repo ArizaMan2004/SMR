@@ -9,11 +9,10 @@ import {
   onSnapshot,
   query,
   orderBy,
-  where,
   getDoc,
-  getFirestore,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase"; 
+// Asegúrate de que tus tipos estén actualizados en @/lib/types/orden
 import type { OrdenServicio, EstadoOrden, EstadoPago, PaymentLog, ItemOrden, PagoTransaction } from "@/lib/types/orden";
 
 /**
@@ -41,7 +40,6 @@ export async function createOrden(data: OrdenServicio) {
 
 /**
  * 🔹 Actualiza los datos generales de una orden existente (Edición desde el Wizard)
- * ESTA ES LA FUNCIÓN QUE FALTABA
  */
 export async function actualizarOrden(ordenId: string, data: Partial<OrdenServicio>) {
   try {
@@ -56,7 +54,7 @@ export async function actualizarOrden(ordenId: string, data: Partial<OrdenServic
       fechaEntrega: data.fechaEntrega,
       ordenNumero: data.ordenNumero,
       totalUSD: data.totalUSD,
-      updatedAt: new Date().toISOString() // Marca de tiempo de actualización
+      updatedAt: new Date().toISOString()
     };
 
     await updateDoc(docRef, updatePayload);
@@ -67,6 +65,73 @@ export async function actualizarOrden(ordenId: string, data: Partial<OrdenServic
   }
 }
 
+// =========================================================================
+// 🎨 GESTIÓN DE DISEÑO Y PRODUCCIÓN
+// =========================================================================
+
+/**
+ * 🔹 Actualiza datos de nivel superior de diseño (Diseñador asignado globalmente o estado general)
+ */
+export async function updateOrdenDesign(
+  ordenId: string, 
+  data: { designerId?: string; designStatus?: string }
+) {
+  try {
+    const docRef = doc(db, "ordenes", ordenId);
+    await updateDoc(docRef, {
+      ...data,
+      updatedAt: new Date().toISOString()
+    });
+    console.log("🎨 Datos de diseño actualizados:", ordenId);
+  } catch (error) {
+    console.error("❌ Error al actualizar diseño:", error);
+    throw error;
+  }
+}
+
+/**
+ * 🔹 Actualiza un campo específico de UN ÍTEM dentro de la orden.
+ * Vital para marcar diseños individuales como PAGADOS o cambiar sus detalles sin reescribir toda la orden.
+ */
+export async function updateOrdenItemField(
+  ordenId: string, 
+  itemIndex: number, 
+  updates: { [key: string]: any }
+) {
+  try {
+    const docRef = doc(db, "ordenes", ordenId);
+    const docSnap = await getDoc(docRef);
+
+    if (!docSnap.exists()) throw new Error("Orden no encontrada");
+
+    const ordenData = docSnap.data() as OrdenServicio;
+    
+    // Clonamos el array de items para no mutar directamente
+    const newItems = [...(ordenData.items || [])];
+
+    if (!newItems[itemIndex]) throw new Error(`Ítem en índice ${itemIndex} no encontrado`);
+
+    // Actualizamos solo los campos solicitados del ítem específico
+    newItems[itemIndex] = {
+      ...newItems[itemIndex],
+      ...updates
+    };
+
+    await updateDoc(docRef, { 
+        items: newItems,
+        updatedAt: new Date().toISOString()
+    });
+    console.log(`✅ Ítem ${itemIndex} actualizado en orden ${ordenId} con:`, updates);
+  } catch (error) {
+    console.error("❌ Error actualizando campo de ítem:", error);
+    throw error;
+  }
+}
+
+// =========================================================================
+// 🔄 SUSCRIPCIONES Y ELIMINACIÓN
+// =========================================================================
+
 /**
  * 🔹 Escucha en tiempo real los cambios en las órdenes
  */
@@ -76,7 +141,6 @@ export function subscribeToOrdenes(
 ) {
   try {
     const colRef = collection(db, "ordenes");
-    // Ordenar por fecha de creación descendente
     const q = query(colRef, orderBy("fecha", "desc")); 
 
     const unsubscribe = onSnapshot(
@@ -102,9 +166,6 @@ export function subscribeToOrdenes(
   }
 }
 
-/**
- * 🔹 Elimina una orden
- */
 export async function deleteOrden(ordenId: string) {
   try {
     const docRef = doc(db, "ordenes", ordenId);
@@ -116,9 +177,10 @@ export async function deleteOrden(ordenId: string) {
   }
 }
 
-/**
- * 🔹 Actualiza el estado de una orden (Pendiente -> Proceso -> Terminado)
- */
+// =========================================================================
+// 💰 GESTIÓN DE PAGOS Y ESTADOS GENERALES
+// =========================================================================
+
 export async function updateOrdenStatus(ordenId: string, nuevoEstado: EstadoOrden) {
   try {
     const docRef = doc(db, "ordenes", ordenId);
@@ -130,21 +192,18 @@ export async function updateOrdenStatus(ordenId: string, nuevoEstado: EstadoOrde
   }
 }
 
-/**
- * 🔹 Actualiza SOLO el registro de pagos (Función interna o uso directo)
- */
 export async function updateOrdenPaymentLog(
   ordenId: string,
   nuevoEstadoPago: EstadoPago,
   montoPagadoUSD: number,
-  historialPagos: PaymentLog[] // O PagoTransaction[]
+  historialPagos: PaymentLog[] 
 ) {
   try {
     const docRef = doc(db, "ordenes", ordenId);
     await updateDoc(docRef, { 
       estadoPago: nuevoEstadoPago,
       montoPagadoUSD: montoPagadoUSD,
-      registroPagos: historialPagos, // Usamos 'registroPagos' para ser consistentes con tu modelo
+      registroPagos: historialPagos, 
     });
     console.log("💲 Pago actualizado:", ordenId);
   } catch (error) {
@@ -153,10 +212,6 @@ export async function updateOrdenPaymentLog(
   }
 }
 
-/**
- * 🔹 Registrar un nuevo pago (Función Helper para el Dashboard)
- * Obtiene la orden, calcula el nuevo total y actualiza el historial.
- */
 export async function registrarPago(ordenId: string, transaccion: PagoTransaction) {
     try {
         const docRef = doc(db, "ordenes", ordenId);
@@ -166,25 +221,18 @@ export async function registrarPago(ordenId: string, transaccion: PagoTransactio
 
         const ordenData = docSnap.data() as OrdenServicio;
         
-        // Obtener historial actual (o array vacío si no existe)
-        // @ts-ignore: Compatibilidad con nombres de campo variables
+        // @ts-ignore
         const historialActual: PagoTransaction[] = ordenData.registroPagos || ordenData.historialPagos || [];
-        
-        // Añadir nueva transacción
         const nuevoHistorial = [...historialActual, transaccion];
-        
-        // Calcular nuevo total pagado
         const nuevoMontoPagado = nuevoHistorial.reduce((acc, curr) => acc + (curr.montoUSD || curr.monto || 0), 0);
         
-        // Determinar nuevo estado
         let nuevoEstadoPago = EstadoPago.PENDIENTE;
-        if (nuevoMontoPagado >= (ordenData.totalUSD - 0.01)) { // Margen de error pequeño
+        if (nuevoMontoPagado >= (ordenData.totalUSD - 0.01)) { 
             nuevoEstadoPago = EstadoPago.PAGADO;
         } else if (nuevoMontoPagado > 0) {
             nuevoEstadoPago = EstadoPago.ABONADO;
         }
 
-        // Actualizar en BD
         await updateDoc(docRef, {
             registroPagos: nuevoHistorial,
             montoPagadoUSD: nuevoMontoPagado,
@@ -199,19 +247,15 @@ export async function registrarPago(ordenId: string, transaccion: PagoTransactio
     }
 }
 
-
 // =========================================================================
-// ✅ FUNCIÓN PARA ACTUALIZAR IMÁGENES DEL ÍTEM (Para TaskDetailModal)
+// 🖼️ GESTIÓN DE IMÁGENES (Detalles de Tareas)
 // =========================================================================
 
-/**
- * 🔹 Encuentra y actualiza el array 'imagenes' o 'pruebasImagenes' de un ítem.
- */
 export async function updateItemImagesInOrden(
   ordenId: string, 
   itemNombre: string, 
   newImages: string[],
-  fieldName: 'imagenes' | 'pruebasImagenes' = 'imagenes' // Por defecto imagenes (detalles)
+  fieldName: 'imagenes' | 'pruebasImagenes' = 'imagenes'
 ) {
   try {
     const docRef = doc(db, "ordenes", ordenId);
@@ -222,17 +266,15 @@ export async function updateItemImagesInOrden(
     const ordenData = docSnap.data() as OrdenServicio;
     let items: ItemOrden[] = ordenData.items || [];
     
-    // Buscar índice
     let itemIndex = items.findIndex(item => item.nombre === itemNombre);
 
     if (itemIndex === -1) throw new Error(`Ítem '${itemNombre}' no encontrado.`);
 
-    // Actualizar array inmutablemente
     const updatedItems = items.map((item, index) => {
       if (index === itemIndex) {
         return { 
           ...item, 
-          [fieldName]: newImages // Actualiza dinámicamente el campo correcto
+          [fieldName]: newImages 
         };
       }
       return item;

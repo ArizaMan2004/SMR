@@ -15,15 +15,20 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton" 
 import { toast } from 'sonner' 
 import { cn } from "@/lib/utils"
+
 import { 
     ChevronLeft, ChevronRight, Plus, X, User, DollarSign, Calendar, 
-    Timer, Check, Users, Loader2, Pencil, Trash2, RefreshCcw, Save, AlertCircle, Phone, Mail, MapPin, Hash
+    Timer, Check, Users, Loader2, Pencil, Trash2, RefreshCcw, Save, AlertCircle, 
+    FileCode, FileImage, Palette, Scissors, Printer, Hash
 } from "lucide-react" 
 
 import { type FormularioOrdenData, type ItemOrden, type ServiciosSolicitados, type OrdenServicio } from "@/lib/types/orden" 
 import { ItemFormModal } from "@/components/orden/item-form-modal"
 import { getLastOrderNumber } from "@/lib/firebase/ordenes" 
 import { getFrequentClients, saveClient, deleteClient } from "@/lib/firebase/clientes" 
+
+// 🔥 IMPORTAMOS EL SERVICIO DE DISEÑADORES
+import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
 
 // --- TIPOS Y CONSTANTES ---
 
@@ -40,11 +45,14 @@ export type ClienteWizard = {
 const PREFIJOS_RIF = ["V", "E", "P", "R", "J", "G"] as const;
 const PREFIJOS_TELEFONO = ["0412", "0422", "0414", "0424", "0416", "0426"] as const;
 const JEFES_CONTACTO = ["Marcos Leal", "Samuel Leal"] as const;
-const EMPLEADOS_DISPONIBLES = [
-    "N/A", "Marcos (Gerencia)", "Samuel (Diseño/Producción)", 
+
+// Lista estática para producción general
+const EMPLEADOS_PRODUCCION = [
+    "N/A", "Marcos (Gerencia)", "Samuel (Producción)", 
     "Daniela Chiquito (Corte Láser)", "Jose Angel (Impresión)", 
-    "Daniel Montero (Impresión)", "Jesus Ariza (Diseño)"
+    "Daniel Montero (Impresión)"
 ];
+
 const MATERIALES_IMPRESION = [
     "Vinil Brillante", "Vinil Mate", "Banner Cara Negra", "Banner Cara Blanca", 
     "Banner Cara Gris", "Vinil Transparente (Clear)", "Otro/No aplica" 
@@ -102,7 +110,6 @@ export const OrderFormWizardV2: React.FC<OrderFormWizardProps> = ({ onSave, onCl
     const [isLoading, setIsLoading] = useState(false);
     const [isItemModalOpen, setIsItemModalOpen] = useState(false);
     
-    // 🔥 NUEVO ESTADO: Índice del ítem que se está editando (null si es nuevo)
     const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
 
     const [isOrderNumLoading, setIsOrderNumLoading] = useState(false);
@@ -111,8 +118,14 @@ export const OrderFormWizardV2: React.FC<OrderFormWizardProps> = ({ onSave, onCl
     const [selectedClientId, setSelectedClientId] = useState<string>('NEW'); 
     const [isClientEditing, setIsClientEditing] = useState(true); 
 
-    // --- CARGA INICIAL ---
+    // 🔥 ESTADO PARA DISEÑADORES DE FIREBASE
+    const [designersList, setDesignersList] = useState<Designer[]>([]);
+
+    // --- CARGA INICIAL Y SUSCRIPCIONES ---
     useEffect(() => {
+        // Suscribirse a diseñadores
+        const unsubscribeDesigners = subscribeToDesigners(setDesignersList);
+
         const loadData = async () => {
             setIsClientLoading(true);
             try {
@@ -170,6 +183,8 @@ export const OrderFormWizardV2: React.FC<OrderFormWizardProps> = ({ onSave, onCl
             }
         };
         loadData();
+
+        return () => unsubscribeDesigners();
     }, [ordenToEdit]);
 
     const fetchOrderNumber = async () => {
@@ -217,7 +232,6 @@ export const OrderFormWizardV2: React.FC<OrderFormWizardProps> = ({ onSave, onCl
     }, [frequentClients]);
 
     const handleSaveClientData = useCallback(async () => {
-        // ... (Lógica igual que antes)
         const { nombreRazonSocial, numeroTelefono, prefijoTelefono, prefijoRif, numeroRif, domicilioFiscal, correo, personaContacto } = formData.cliente;
         if (!nombreRazonSocial.trim()) { toast.error("Nombre obligatorio"); return; }
         if (numeroTelefono.length !== 7) { toast.error("Teléfono inválido"); return; }
@@ -248,7 +262,6 @@ export const OrderFormWizardV2: React.FC<OrderFormWizardProps> = ({ onSave, onCl
     }, [formData.cliente, selectedClientId]);
 
     const handleDeleteClientData = useCallback(async () => {
-        // ... (Lógica igual que antes)
         if (!window.confirm('¿Eliminar cliente?')) return;
         try {
             setIsLoading(true);
@@ -280,49 +293,42 @@ export const OrderFormWizardV2: React.FC<OrderFormWizardProps> = ({ onSave, onCl
         });
     }, []);
     
-    // 🔥🔥 LÓGICA MODIFICADA: AGREGAR O EDITAR ITEM
-    const handleSaveItem = useCallback((newItem: ItemOrden & { materialDeImpresion?: string }) => {
+    // 🔥 MANEJO DE ÍTEMS
+    const handleSaveItem = useCallback((newItem: ItemOrden & { materialDeImpresion?: string, archivoTipo?: string, archivoFormato?: string }) => {
         setFormData(prev => {
             const itemProcesado = { 
                 ...newItem, 
-                // Si es nuevo, ponemos empleado N/A por defecto, si se edita, mantenemos el que tenía si existe
                 empleadoAsignado: newItem.empleadoAsignado || "N/A", 
                 materialDeImpresion: newItem.materialDeImpresion || "Otro/No aplica" 
             };
 
             let newItems = [...prev.items];
 
-            // SI HAY ÍNDICE DE EDICIÓN, REEMPLAZAMOS
             if (editingItemIndex !== null) {
                 newItems[editingItemIndex] = itemProcesado;
             } else {
-                // SI NO, AGREGAMOS
                 newItems = [...newItems, itemProcesado];
             }
 
             const newForm = { ...prev, items: newItems };
             
-            // Auto-check servicios (igual que antes)
-            if (newItem.unidad === 'tiempo' || newItem.tipoServicio === 'CORTE_LASER') newForm.serviciosSolicitados.corteLaser = true;
+            // Auto-check servicios
+            if (newItem.unidad === 'tiempo' || newItem.tipoServicio === 'CORTE') newForm.serviciosSolicitados.corteLaser = true;
             if (newItem.tipoServicio === 'IMPRESION') newForm.serviciosSolicitados.impresionDigital = true;
             if (newItem.tipoServicio === 'ROTULACION') newForm.serviciosSolicitados.rotulacion = true;
             if (newItem.tipoServicio === 'AVISO_CORPOREO') newForm.serviciosSolicitados.avisoCorporeo = true;
-            if (newItem.materialDeImpresion && newItem.materialDeImpresion !== "Otro/No aplica") newForm.serviciosSolicitados.impresionGranFormato = true;
             
             return newForm;
         });
         
-        // Reseteamos el índice de edición al guardar
         setEditingItemIndex(null);
     }, [editingItemIndex]);
 
-    // 🔥 Nueva función para abrir modal en modo edición
     const handleEditItemClick = (index: number) => {
         setEditingItemIndex(index);
         setIsItemModalOpen(true);
     };
 
-    // 🔥 Nueva función para abrir modal en modo creación
     const handleNewItemClick = () => {
         setEditingItemIndex(null);
         setIsItemModalOpen(true);
@@ -331,13 +337,13 @@ export const OrderFormWizardV2: React.FC<OrderFormWizardProps> = ({ onSave, onCl
     const currentTotal = useMemo(() => {
         return formData.items.reduce((sum, item) => {
             let subtotal = 0;
-            const { unidad, cantidad, precioUnitario, medidaXCm, medidaYCm, tiempoCorte } = item as any;
+            const { unidad, cantidad, precioUnitario, medidaXCm, medidaYCm } = item as any;
             if (cantidad <= 0 || precioUnitario < 0) return sum;
+            
             if (unidad === 'und') subtotal = cantidad * precioUnitario;
             else if (unidad === 'm2' && medidaXCm && medidaYCm) subtotal = (medidaXCm / 100) * (medidaYCm / 100) * precioUnitario * cantidad;
-            else if (unidad === 'tiempo' && tiempoCorte) {
-               const [min, sec] = tiempoCorte.split(':').map(Number);
-               subtotal = (min + (sec / 60)) * 0.80 * cantidad;
+            else if (unidad === 'tiempo') {
+                subtotal = cantidad * precioUnitario;
             }
             return sum + subtotal;
         }, 0);
@@ -431,10 +437,10 @@ export const OrderFormWizardV2: React.FC<OrderFormWizardProps> = ({ onSave, onCl
                                 const newItems = [...formData.items]; (newItems[idx] as any).empleadoAsignado = val;
                                 setFormData(p => ({...p, items: newItems}));
                             }}
-                            // 🔥 Pasamos los nuevos handlers
                             openItemModal={handleNewItemClick}
                             onEditItem={handleEditItemClick}
                             currentTotal={currentTotal}
+                            designersList={designersList} // 🔥 PASAMOS LA LISTA DE FIREBASE
                         />}
                         {step === 3 && <Step3 data={formData} totalUSD={currentTotal} onChange={handleChange} />}
                     </div>
@@ -461,27 +467,18 @@ export const OrderFormWizardV2: React.FC<OrderFormWizardProps> = ({ onSave, onCl
             
             <ItemFormModal
                 isOpen={isItemModalOpen}
-                onClose={() => { setIsItemModalOpen(false); setEditingItemIndex(null); }} // Limpiar al cerrar
-                onAddItem={handleSaveItem} // Ahora maneja add/edit
+                onClose={() => { setIsItemModalOpen(false); setEditingItemIndex(null); }}
+                onAddItem={handleSaveItem}
                 hasPrintingSelected={formData.serviciosSolicitados.impresionDigital || formData.serviciosSolicitados.impresionGranFormato}
                 materialesDisponibles={MATERIALES_IMPRESION}
-                // 🔥 Pasamos el ítem a editar si existe el índice
                 itemToEdit={editingItemIndex !== null ? formData.items[editingItemIndex] : undefined}
             />
         </Card>
     )
 }
 
-// ... (Step1 queda igual que antes) ...
-// Resumido para brevedad, usar el Step1 del código anterior que ya estaba corregido con isWizardLoading
-
-const Step1: React.FC<any> = (props) => {
-    // ... Copiar el Step1 corregido del mensaje anterior ...
-    // Asumo que ya lo tienes, si no, avísame para volver a ponerlo completo.
-    // Por seguridad, aquí está la versión reducida funcional:
-    const { data, onChange, frequentClients, isClientLoading, onClientSelected, isClientEditing, selectedClientId, onSaveClient, onEditClient, onDeleteClient, ordenNumero, refreshOrderNum, isOrderNumLoading, isStepValid, isEditingOrder, isWizardLoading } = props;
+const Step1: React.FC<any> = ({ data, onChange, frequentClients, isClientLoading, onClientSelected, isClientEditing, selectedClientId, onSaveClient, onEditClient, onDeleteClient, ordenNumero, refreshOrderNum, isOrderNumLoading, isWizardLoading }) => {
     const showError = (field: string) => field === 'telefono' && data.cliente.numeroTelefono.length > 0 && data.cliente.numeroTelefono.length < 7;
-
     return (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-8 space-y-4">
@@ -491,7 +488,7 @@ const Step1: React.FC<any> = (props) => {
                             <Label className="text-blue-800 font-bold flex items-center gap-2 text-xs uppercase"><Users className="w-3.5 h-3.5"/> Seleccionar Cliente</Label>
                             <Select onValueChange={onClientSelected} value={selectedClientId} disabled={isClientEditing && selectedClientId !== 'NEW'}>
                                 <SelectTrigger className="bg-background h-9">{isClientLoading ? <Skeleton className="h-5 w-32"/> : <SelectValue placeholder="Buscar cliente..." />}</SelectTrigger>
-                                <SelectContent><SelectItem value="NEW" className="font-bold text-primary">✨ Nuevo Cliente</SelectItem>{selectedClientId === 'CUSTOM' && <SelectItem value="CUSTOM">✏️ Cliente de la Orden</SelectItem>}<Separator className="my-1"/>{frequentClients.map(c => <SelectItem key={c.id} value={c.id}>{c.nombreRazonSocial}</SelectItem>)}</SelectContent>
+                                <SelectContent><SelectItem value="NEW" className="font-bold text-primary">✨ Nuevo Cliente</SelectItem>{selectedClientId === 'CUSTOM' && <SelectItem value="CUSTOM">✏️ Cliente de la Orden</SelectItem>}<Separator className="my-1"/>{frequentClients.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.nombreRazonSocial}</SelectItem>)}</SelectContent>
                             </Select>
                         </div>
                         <div className="flex gap-2 w-full md:w-auto">{isClientEditing ? <Button size="sm" onClick={onSaveClient} disabled={isWizardLoading} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white h-9">{isWizardLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Save className="w-3.5 h-3.5 mr-2"/>} Guardar</Button> : <><Button size="sm" variant="outline" className="h-9" onClick={onEditClient}><Pencil className="w-3.5 h-3.5 mr-2"/> Editar</Button><Button size="sm" variant="destructive" className="h-9 w-9 p-0" onClick={onDeleteClient}><Trash2 className="w-3.5 h-3.5"/></Button></>}</div>
@@ -506,10 +503,6 @@ const Step1: React.FC<any> = (props) => {
                         <div className="space-y-1"><div className="flex justify-between"><Label className="text-xs">Teléfono <span className="text-red-500">*</span></Label>{showError('telefono') && <span className="text-[10px] text-red-500 font-bold">Incompleto</span>}</div><div className="flex shadow-sm rounded-md"><Select value={data.cliente.prefijoTelefono} onValueChange={(v) => onChange('cliente.prefijoTelefono', v)}><SelectTrigger className="w-[80px] rounded-l-md"><SelectValue /></SelectTrigger><SelectContent>{PREFIJOS_TELEFONO.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select><Input className={cn("rounded-l-none", showError('telefono') && "border-red-400 bg-red-50")} placeholder="1234567" maxLength={7} value={data.cliente.numeroTelefono} onChange={(e) => onChange('cliente.numeroTelefono', e.target.value)} /></div></div>
                         <div className="space-y-1"><Label className="text-xs">Contacto</Label><Select value={JEFES_CONTACTO.includes(data.cliente.personaContacto as any) ? data.cliente.personaContacto : "MANUAL"} onValueChange={(v) => onChange('cliente.personaContacto', v === "MANUAL" ? "" : v)}><SelectTrigger className="w-full bg-muted/30"><SelectValue placeholder="Seleccionar..." /></SelectTrigger><SelectContent>{JEFES_CONTACTO.map(j => <SelectItem key={j} value={j}>{j}</SelectItem>)}<SelectItem value="MANUAL" className="text-orange-500">Manual</SelectItem></SelectContent></Select>{(!JEFES_CONTACTO.includes(data.cliente.personaContacto as any)) && (<Input className="mt-2 h-8 text-sm" placeholder="Nombre..." value={data.cliente.personaContacto || ""} onChange={(e) => onChange('cliente.personaContacto', e.target.value)} />)}</div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div className="space-y-1"><Label className="text-xs">Correo</Label><Input className="pl-3" type="email" value={data.cliente.correo || ""} onChange={(e) => onChange('cliente.correo', e.target.value)} placeholder="email@ejemplo.com" /></div>
-                        <div className="space-y-1"><Label className="text-xs">Domicilio</Label><Input className="pl-3" value={data.cliente.domicilioFiscal || ""} onChange={(e) => onChange('cliente.domicilioFiscal', e.target.value)} placeholder="Dirección..." /></div>
-                    </div>
                 </div>
             </div>
             <div className="lg:col-span-4 space-y-4">
@@ -518,10 +511,9 @@ const Step1: React.FC<any> = (props) => {
                     <CardContent className="space-y-6 pt-6">
                         <div className="space-y-2">
                             <div className="flex justify-between items-center"><Label className="text-muted-foreground text-[10px] uppercase font-bold tracking-wider">Número</Label><Badge variant="outline" className="text-[10px] h-5">Auto</Badge></div>
-                            <div className="flex gap-2"><div className="relative w-full"><Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-primary opacity-50" /><Input value={ordenNumero || "..."} readOnly className="pl-10 text-xl font-mono font-bold text-center bg-white border-primary/20"/></div><Button variant="outline" size="icon" onClick={refreshOrderNum} disabled={isOrderNumLoading || isEditingOrder}><RefreshCcw className={cn("w-4 h-4", isOrderNumLoading && "animate-spin")} /></Button></div>
+                            <div className="flex gap-2"><div className="relative w-full"><Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-primary opacity-50" /><Input value={ordenNumero || "..."} readOnly className="pl-10 text-xl font-mono font-bold text-center bg-white border-primary/20"/></div><Button variant="outline" size="icon" onClick={refreshOrderNum} disabled={isOrderNumLoading}><RefreshCcw className={cn("w-4 h-4", isOrderNumLoading && "animate-spin")} /></Button></div>
                         </div>
                         <div className="space-y-2"><Label className="text-muted-foreground text-[10px] uppercase font-bold tracking-wider">Entrega <span className="text-red-500">*</span></Label><Input type="date" className="h-10 font-medium" value={data.fechaEntrega} onChange={(e) => onChange('fechaEntrega', e.target.value)} /></div>
-                        {!isStepValid && (<div className="bg-red-50 text-red-600 p-3 rounded-md text-[11px] flex gap-2 items-start border border-red-100"><AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /><p>Faltan campos obligatorios (*).</p></div>)}
                     </CardContent>
                 </Card>
             </div>
@@ -529,8 +521,7 @@ const Step1: React.FC<any> = (props) => {
     )
 }
 
-// 🔥 Step2 ACTUALIZADO con botón Editar
-const Step2: React.FC<any> = ({ items, removeItem, data, onChange, onItemAssignmentChange, openItemModal, onEditItem, currentTotal }) => { 
+const Step2: React.FC<any> = ({ items, removeItem, data, onChange, onItemAssignmentChange, openItemModal, onEditItem, currentTotal, designersList }) => { 
     return (
         <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -549,20 +540,62 @@ const Step2: React.FC<any> = ({ items, removeItem, data, onChange, onItemAssignm
                             <Table>
                                 <TableHeader className="sticky top-0 bg-white dark:bg-slate-950 z-10 shadow-sm"><TableRow className="h-8"><TableHead className="w-[35%] pl-4 text-xs">Descripción</TableHead><TableHead className="text-center w-[10%] text-xs">Cant.</TableHead><TableHead className="w-[20%] text-xs">Detalle</TableHead><TableHead className="text-right w-[15%] text-xs">Total</TableHead><TableHead className="text-center w-[10%] text-xs">Asignado</TableHead><TableHead className="w-[10%] text-center">Acciones</TableHead></TableRow></TableHeader>
                                 <TableBody>
-                                    {items.length > 0 ? items.map((item: any, idx: number) => (
+                                    {items.length > 0 ? items.map((item: any, idx: number) => {
+                                        // 🔥 LÓGICA DINÁMICA DE EMPLEADOS
+                                        const isDesign = item.tipoServicio === 'DISENO';
+                                        const assignmentOptions = isDesign 
+                                            ? ["Sin Asignar", ...designersList.map((d: any) => d.name)] 
+                                            : EMPLEADOS_PRODUCCION;
+
+                                        return (
                                         <TableRow key={idx} className="group h-10">
-                                            <TableCell className="pl-4 py-2 align-middle"><p className="font-bold text-xs text-foreground">{item.nombre}</p><div className="flex flex-wrap gap-1 mt-0.5">{item.unidad === 'm2' && <Badge variant="secondary" className="text-[9px] h-4 px-1 font-normal bg-blue-50 text-blue-700 border-blue-100">{item.medidaXCm}x{item.medidaYCm}cm</Badge>}{item.tiempoCorte && <Badge variant="secondary" className="text-[9px] h-4 px-1 font-normal bg-orange-50 text-orange-700 border-orange-100"><Timer className="w-3 h-3 mr-1"/>{item.tiempoCorte}</Badge>}</div></TableCell>
+                                            <TableCell className="pl-4 py-2 align-middle">
+                                                <div className="font-bold text-xs text-foreground flex items-center gap-2">
+                                                    {item.tipoServicio === 'DISENO' && <Palette className="w-3 h-3 text-purple-500"/>}
+                                                    {item.tipoServicio === 'CORTE' && <Scissors className="w-3 h-3 text-orange-500"/>}
+                                                    {item.tipoServicio === 'IMPRESION' && <Printer className="w-3 h-3 text-blue-500"/>}
+                                                    {item.nombre}
+                                                </div>
+                                                <div className="flex flex-wrap gap-1 mt-0.5">
+                                                    {item.unidad === 'm2' && <Badge variant="secondary" className="text-[9px] h-4 px-1 font-normal bg-blue-50 text-blue-700 border-blue-100">{item.medidaXCm}x{item.medidaYCm}cm</Badge>}
+                                                    {item.tiempoCorte && <Badge variant="secondary" className="text-[9px] h-4 px-1 font-normal bg-orange-50 text-orange-700 border-orange-100"><Timer className="w-3 h-3 mr-1"/>{item.tiempoCorte}</Badge>}
+                                                    
+                                                    {item.tipoServicio === 'DISENO' && item.archivoTipo && (
+                                                        <Badge variant="outline" className="text-[9px] h-4 px-1">
+                                                            {item.archivoTipo === 'vector' ? <FileCode className="w-3 h-3 mr-1"/> : <FileImage className="w-3 h-3 mr-1"/>}
+                                                            {item.archivoFormato}
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                            </TableCell>
                                             <TableCell className="text-center align-middle font-mono text-xs">{item.cantidad}</TableCell>
-                                            <TableCell className="text-[10px] text-muted-foreground align-middle truncate max-w-[100px]">{item.materialDeImpresion || item.materialDetalleCorte || '-'}</TableCell>
-                                            <TableCell className="text-right font-bold text-green-700 dark:text-green-400 align-middle text-xs">${(item.precioUnitario * item.cantidad).toFixed(2)}</TableCell>
-                                            <TableCell className="text-center align-middle"><Select value={item.empleadoAsignado || "N/A"} onValueChange={(value) => onItemAssignmentChange(idx, value)}><SelectTrigger className="w-full text-[10px] h-6 min-h-0 px-2 border-dashed"><SelectValue placeholder="-" /></SelectTrigger><SelectContent>{EMPLEADOS_DISPONIBLES.map((employee) => (<SelectItem key={employee} value={employee} className="text-xs">{employee.split(' ')[0]}</SelectItem>))}</SelectContent></Select></TableCell>
+                                            <TableCell className="text-[10px] text-muted-foreground align-middle truncate max-w-[100px]">{item.materialDeImpresion !== "Otro/No aplica" ? item.materialDeImpresion : (item.materialDetalleCorte || '-')}</TableCell>
+                                            <TableCell className="text-right font-bold text-green-700 dark:text-green-400 align-middle text-xs">
+                                                ${(item.cantidad * item.precioUnitario).toFixed(2)}
+                                            </TableCell>
+                                            
+                                            {/* SELECTOR DE EMPLEADO DINÁMICO */}
+                                            <TableCell className="text-center align-middle">
+                                                <Select value={item.empleadoAsignado || (isDesign ? "Sin Asignar" : "N/A")} onValueChange={(value) => onItemAssignmentChange(idx, value)}>
+                                                    <SelectTrigger className="w-full text-[10px] h-6 min-h-0 px-2 border-dashed">
+                                                        <SelectValue placeholder="-" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {assignmentOptions.map((employee: string) => (
+                                                            <SelectItem key={employee} value={employee} className="text-xs">
+                                                                {employee.includes('(') ? employee.split(' ')[0] : employee}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </TableCell>
+                                            
                                             <TableCell className="align-middle text-center">
-                                                {/* 🔥 BOTÓN EDITAR */}
                                                 <Button variant="ghost" size="icon" onClick={() => onEditItem(idx)} className="h-6 w-6 text-blue-500 hover:bg-blue-50 mr-1"><Pencil className="w-3 h-3"/></Button>
                                                 <Button variant="ghost" size="icon" onClick={() => removeItem(idx)} className="h-6 w-6 text-muted-foreground hover:text-red-500"><X className="w-3 h-3"/></Button>
                                             </TableCell>
                                         </TableRow>
-                                    )) : (<TableRow><TableCell colSpan={6} className="h-32 text-center text-muted-foreground bg-muted/5"><p className="text-sm">La lista de ítems está vacía.</p></TableCell></TableRow>)}
+                                    )}) : (<TableRow><TableCell colSpan={6} className="h-32 text-center text-muted-foreground bg-muted/5"><p className="text-sm">La lista de ítems está vacía.</p></TableCell></TableRow>)}
                                 </TableBody>
                             </Table>
                         </div>
@@ -580,7 +613,6 @@ const Step2: React.FC<any> = ({ items, removeItem, data, onChange, onItemAssignm
     )
 }
 
-// Step3 permanece igual (sin cambios)
 const Step3: React.FC<any> = ({ data, totalUSD, onChange }) => {
     return (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full">

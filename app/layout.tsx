@@ -22,7 +22,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" suppressHydrationWarning>
-      <body className={`font-sans antialiased`}>
+      {/* AGREGADO: suppressHydrationWarning aquí abajo 👇 */}
+      <body className={`font-sans antialiased`} suppressHydrationWarning>
         <AuthProvider>
           <ThemeProviderWrapper>{children}</ThemeProviderWrapper>
         </AuthProvider>

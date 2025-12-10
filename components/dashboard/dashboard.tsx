@@ -7,11 +7,10 @@ import { useEffect, useState } from "react"
 import React from 'react'; 
 // UI
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 
-// Componentes
+// Componentes Existentes
 import Sidebar from "@/components/dashboard/sidebar"
 import TrialExpirationModal from "@/components/dashboard/trial-expiration-modal"
 import { OrderFormWizardV2 } from "@/components/orden/order-form-wizard"
@@ -24,9 +23,13 @@ import TasksView from "@/components/dashboard/tasks-view"
 import BudgetEntryView from "@/components/dashboard/BudgetEntryView" 
 import CalculatorView from "@/components/dashboard/CalculatorView" 
 
+// --- NUEVO COMPONENTE DE DISEÑO ---
+import { DesignManagementView } from "@/components/dashboard/DesignManagementView"
+
 // Iconos
 import { 
-    Plus, Users, CheckCircle, FileText, Calculator 
+    Plus, Users, CheckCircle, FileText, Calculator,
+    Palette, Printer // <--- Iconos nuevos agregados
 } from "lucide-react" 
 
 // Servicios y Tipos
@@ -47,7 +50,8 @@ import {
 } from "@/lib/logo-service" 
 import { generateOrderPDF, type PDFOptions } from "@/lib/services/pdf-generator"; 
 
-type ActiveView = "orders" | "clients" | "tasks" | "calculator" | "old_calculator" 
+// Agregamos "design_production" al tipo de vistas activas
+type ActiveView = "orders" | "clients" | "tasks" | "calculator" | "old_calculator" | "design_production"
 
 export default function Dashboard() {
     const { user, logout } = useAuth() 
@@ -147,7 +151,6 @@ export default function Dashboard() {
             });
     }
 
-    // 🔥 CORREGIDO: Evitamos pasar 'undefined' a Firebase
     const handleRegisterPaymentGlobal = async (ordenId: string, monto: number, nota?: string, imagenUrl?: string) => {
         const orden = ordenes.find(o => o.id === ordenId);
         if (!orden) return;
@@ -157,7 +160,6 @@ export default function Dashboard() {
             fechaRegistro: new Date().toISOString(),
             registradoPorUserId: currentUserId,
             nota: nota || null,
-            // ⬇️ SOLUCIÓN: Usamos '|| null' para que nunca sea undefined
             // @ts-ignore
             imagenUrl: imagenUrl || null 
         };
@@ -214,6 +216,9 @@ export default function Dashboard() {
     // --- RENDER ---
     const navItems = [
       { id: 'orders', label: 'Órdenes de Servicio', icon: <FileText className="w-5 h-5" /> }, 
+      // --- NUEVA OPCIÓN DE MENÚ ---
+      { id: 'design_production', label: 'Diseño y Producción', icon: <Palette className="w-5 h-5" /> },
+      // --------------------------
       { id: 'tasks', label: 'Mis Tareas', icon: <CheckCircle className="w-5 h-5" /> },
       { id: 'clients', label: 'Clientes y Cobranza', icon: <Users className="w-5 h-5" /> }, 
       { id: 'calculator', label: 'Presupuestos', icon: <Calculator className="w-5 h-5" /> }, 
@@ -275,6 +280,20 @@ export default function Dashboard() {
                       </div>
                   </div>
               )}
+
+            {/* --- NUEVA VISTA DE DISEÑO Y PRODUCCIÓN --- */}
+            {activeView === "design_production" && (
+              <div className="p-4 lg:p-8">
+                <div className="max-w-7xl mx-auto">
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-3xl font-bold">Taller de Diseño y Producción</h2>
+                    </div>
+                    {/* Le pasamos las ordenes para futura integración real */}
+                    <DesignManagementView ordenes={ordenes} />
+                </div>
+              </div>
+            )}
+            {/* ------------------------------------------ */}
           
             {activeView === "orders" && (
               <div className="p-4 lg:p-8">
