@@ -3,19 +3,25 @@
 
 import * as React from "react"
 import { useState, useEffect } from "react" 
-// Shadcn UI
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { motion, AnimatePresence } from "framer-motion"
+
+// Shadcn UI & Estilos
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Card, CardContent } from "@/components/ui/card"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { cn } from "@/lib/utils"
+
+// Iconos
 import { 
-    AlertCircle, Sparkles, MoveVertical, Timer, Layers, Scissors, 
-    Hash, DollarSign, Box, FileCode, FileImage, PenTool 
+    X, Sparkles, MoveVertical, Timer, Layers, Scissors, 
+    Hash, DollarSign, Box, FileCode, FileImage, PenTool,
+    Type, User, AlertCircle, HardHat
 } from "lucide-react"
 
 // Tipos
@@ -23,7 +29,7 @@ import { type ItemOrden, type UnidadItem, type TipoServicio } from "@/lib/types/
 
 // --- CONSTANTES DE NEGOCIO ---
 const PRECIO_LASER_POR_MINUTO = 0.80
-
+const PERSONAL_TALLER = ["Marcos", "Samuel", "Daniela", "Jose Angel", "Daniel Montero"];
 const MATERIALES_CORTE = ["Acrilico", "Melamina", "MDF", "Cartulina", "Otro"] as const;
 const GROSORES_DISPONIBLES = ["1mm", "2mm", "3mm", "4mm", "5mm"] as const;
 const COLORES_ACRILICO = [
@@ -44,72 +50,47 @@ const UNIDADES_DISPONIBLES: { value: UnidadItem, label: string }[] = [
   { value: 'tiempo', label: 'Tiempo (min)' },
 ]
 
-// Configuración de Archivos
 const TIPOS_ARCHIVO = [
     { value: "vector", label: "Vector (Líneas)", icon: FileCode },
     { value: "imagen", label: "Imagen (Pixel)", icon: FileImage },
 ]
+
 const FORMATOS_ARCHIVO = {
     vector: ["CDR", "AI", "PDF", "DXF", "EPS", "SVG"],
     imagen: ["JPG", "PNG", "PSD", "TIFF", "BMP"]
 }
 
-// --- ESTADO INICIAL ---
 const getInitialState = () => ({
   nombre: "",
-  // @ts-ignore: Permitimos DISENO aunque no esté en el tipo estricto de TS aún
   tipoServicio: "OTROS" as TipoServicio | "DISENO",
   cantidad: 1,
   unidad: "und" as UnidadItem,
-  
-  // Materiales Impresión
   materialDeImpresion: "Otro/No aplica",
-  
-  // Materiales Corte
   materialDeCorte: MATERIALES_CORTE[0], 
   grosorMaterial: GROSORES_DISPONIBLES[2],      
   colorAcrilico: COLORES_ACRILICO[0].value, 
-
-  // Archivos (Solo diseño)
   archivoTipo: "vector" as "vector" | "imagen",
   archivoFormato: "CDR",
-  
-  // Costos y Medidas
   precioUnitario: 0,
   medidaXCm: 0,
   medidaYCm: 0,
   tiempoCorte: "0:00",
-  empleadoAsignado: undefined as string | undefined,
-  
-  // Extras
+  empleadoAsignado: "N/A", 
   suministrarMaterial: false,
   costoMaterialExtra: 0,
-
   subtotal: 0,
   error: "",
 });
 
-type ItemFormState = ReturnType<typeof getInitialState>;
-
-interface ItemFormModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onAddItem: (item: ItemOrden) => void; 
-  hasPrintingSelected: boolean;
-  materialesDisponibles: readonly string[];
-  itemToEdit?: ItemOrden; 
-}
-
-export function ItemFormModal({ isOpen, onClose, onAddItem, hasPrintingSelected, materialesDisponibles, itemToEdit }: ItemFormModalProps) {
-  const [state, setState] = useState<ItemFormState>(getInitialState());
+export function ItemFormModal({ isOpen, onClose, onAddItem, itemToEdit, designers = [] }: any) {
+  const [state, setState] = useState<any>(getInitialState());
   const [minutosInput, setMinutosInput] = useState('0');
   const [segundosInput, setSegundosInput] = useState('00');
-  
-  // 1. CARGAR DATOS AL ABRIR
+
+  // 1. CARGA DE DATOS
   useEffect(() => {
     if (isOpen) {
       if (itemToEdit) {
-          // Parsear Tiempo
           const isTiempo = itemToEdit.unidad === 'tiempo';
           let mins = '0', secs = '00';
           if (isTiempo && itemToEdit.tiempoCorte) {
@@ -117,11 +98,7 @@ export function ItemFormModal({ isOpen, onClose, onAddItem, hasPrintingSelected,
              mins = parts[0] || '0'; secs = parts[1] || '00';
           }
           
-          // Parsear Materiales de Corte
-          let matCorte = MATERIALES_CORTE[0];
-          let grosor = GROSORES_DISPONIBLES[2];
-          let color = COLORES_ACRILICO[0].value;
-          
+          let matCorte = MATERIALES_CORTE[0], grosor = GROSORES_DISPONIBLES[2], color = COLORES_ACRILICO[0].value;
           if (itemToEdit.materialDetalleCorte) {
              const parts = itemToEdit.materialDetalleCorte.split(' ');
              const foundMat = MATERIALES_CORTE.find(m => parts.includes(m));
@@ -132,403 +109,252 @@ export function ItemFormModal({ isOpen, onClose, onAddItem, hasPrintingSelected,
              if (foundColor) color = foundColor.value;
           }
 
-          // @ts-ignore: Recuperar campos nuevos si existen
-          const archTipo = itemToEdit.archivoTipo || "vector";
-          // @ts-ignore
-          const archFmt = itemToEdit.archivoFormato || "CDR";
-
-          setMinutosInput(mins);
-          setSegundosInput(secs);
-          
+          setMinutosInput(mins); setSegundosInput(secs);
           setState({
               ...getInitialState(),
               ...itemToEdit,
-              // @ts-ignore
-              tipoServicio: itemToEdit.tipoServicio, // Para aceptar DISENO
               materialDeCorte: matCorte,
               grosorMaterial: grosor,
               colorAcrilico: color,
-              archivoTipo: archTipo,
-              archivoFormato: archFmt,
-              // @ts-ignore
+              archivoTipo: itemToEdit.archivoTipo || "vector",
+              archivoFormato: itemToEdit.archivoFormato || "CDR",
               suministrarMaterial: itemToEdit.suministrarMaterial || false,
-              // @ts-ignore
               costoMaterialExtra: itemToEdit.costoMaterialExtra || 0,
+              empleadoAsignado: itemToEdit.empleadoAsignado || "N/A"
           });
       } else {
           setState(getInitialState());
-          setMinutosInput('0');
-          setSegundosInput('00');
+          setMinutosInput('0'); setSegundosInput('00');
       }
     }
-  }, [isOpen, itemToEdit]); 
-  
-  // 2. CALCULADORA DE SUBTOTAL (Efecto en Vivo)
+  }, [isOpen, itemToEdit]);
+
+  // 2. CÁLCULO DE SUBTOTAL
   useEffect(() => {
     let costoBaseUnitario = 0;
     const { cantidad, precioUnitario, unidad, medidaXCm, medidaYCm, suministrarMaterial, costoMaterialExtra } = state; 
 
     if (cantidad > 0) {
-        if (unidad === 'und') {
-            costoBaseUnitario = precioUnitario;
-        } else if (unidad === 'm2' && medidaXCm > 0 && medidaYCm > 0) {
-            const area = (medidaXCm / 100) * (medidaYCm / 100);
-            costoBaseUnitario = area * precioUnitario;
+        if (unidad === 'und') costoBaseUnitario = precioUnitario;
+        else if (unidad === 'm2' && medidaXCm > 0 && medidaYCm > 0) {
+            costoBaseUnitario = (medidaXCm / 100) * (medidaYCm / 100) * precioUnitario;
         } else if (unidad === 'tiempo') {
-            const minutes = parseFloat(minutosInput) || 0;
-            const seconds = parseFloat(segundosInput) || 0;
-            const totalMinutes = minutes + (seconds / 60);
+            const totalMinutes = (parseFloat(minutosInput) || 0) + ((parseFloat(segundosInput) || 0) / 60);
             costoBaseUnitario = totalMinutes * PRECIO_LASER_POR_MINUTO;
         }
         
-        // Sumar extras
-        let costoTotalUnitario = costoBaseUnitario;
-        if (suministrarMaterial && costoMaterialExtra > 0) {
-            costoTotalUnitario += costoMaterialExtra;
-        }
-
-        setState(prev => ({ ...prev, subtotal: costoTotalUnitario * cantidad }));
-    } else {
-        setState(prev => ({ ...prev, subtotal: 0 }));
+        const totalUnit = costoBaseUnitario + (suministrarMaterial ? costoMaterialExtra : 0);
+        setState((prev: any) => ({ ...prev, subtotal: totalUnit * cantidad }));
     }
-  }, [state.cantidad, state.precioUnitario, state.unidad, state.medidaXCm, state.medidaYCm, minutosInput, segundosInput, state.suministrarMaterial, state.costoMaterialExtra]); 
-  
-  // 3. AUTO-CONFIGURACIÓN INTELIGENTE
+  }, [state.cantidad, state.precioUnitario, state.unidad, state.medidaXCm, state.medidaYCm, minutosInput, segundosInput, state.suministrarMaterial, state.costoMaterialExtra]);
+
+  // 3. AUTO-CONFIGURACIÓN
   useEffect(() => {
-    if (state.tipoServicio === 'DISENO') {
-        setState(prev => ({ ...prev, unidad: 'und', materialDeImpresion: "Otro/No aplica", archivoTipo: 'imagen', archivoFormato: 'JPG' }));
-    } 
-    else if (state.tipoServicio === 'CORTE') {
-        setState(prev => ({ ...prev, unidad: 'tiempo', materialDeImpresion: "Otro/No aplica", archivoTipo: 'vector', archivoFormato: 'CDR' }));
-    } 
-    else if (state.tipoServicio === 'IMPRESION') {
-        setState(prev => ({ ...prev, unidad: 'm2', archivoTipo: 'imagen', archivoFormato: 'TIFF' }));
-    }
-  }, [state.tipoServicio]); 
+    if (state.tipoServicio === 'DISENO') setState((p: any) => ({ ...p, unidad: 'und', archivoTipo: 'imagen', archivoFormato: 'JPG' }));
+    else if (state.tipoServicio === 'CORTE') setState((p: any) => ({ ...p, unidad: 'tiempo', archivoTipo: 'vector', archivoFormato: 'CDR' }));
+    else if (state.tipoServicio === 'IMPRESION') setState((p: any) => ({ ...p, unidad: 'm2', archivoFormato: 'TIFF' }));
+    else setState((p: any) => ({ ...p, unidad: 'und' }));
+  }, [state.tipoServicio]);
 
-  const handleChange = (key: keyof ItemFormState, value: any) => {
-    setState(prev => ({ ...prev, [key]: value, error: "" }));
-  };
-  
-  // 4. GUARDAR
   const handleSave = () => {
-    if (!state.nombre.trim()) { setState(prev => ({ ...prev, error: "Falta la descripción del ítem." })); return; }
-    if (state.cantidad <= 0) { setState(prev => ({ ...prev, error: "La cantidad debe ser mayor a 0." })); return; }
+    if (!state.nombre.trim() || state.cantidad <= 0) {
+        setState((p: any) => ({ ...p, error: "Faltan datos obligatorios." })); return;
+    }
     
-    // Generar nombre automático para Corte si es genérico
-    let finalNombre = state.nombre.trim();
     let materialDetalleCorte = '';
-    
     if (state.tipoServicio === 'CORTE') {
-        const mat = state.materialDeCorte;
-        const gros = (mat !== 'Cartulina' && mat !== 'Otro') ? state.grosorMaterial : '';
-        const col = (mat === 'Acrilico' && state.colorAcrilico) ? COLORES_ACRILICO.find(c => c.value === state.colorAcrilico)?.label : '';
-        materialDetalleCorte = `${mat} ${gros} ${col}`.trim().replace(/\s+/g, ' '); 
-        
-        // Si el usuario dejó el nombre por defecto, lo enriquecemos
-        if (finalNombre === "" || finalNombre.toLowerCase() === "corte") {
-            finalNombre = `Corte ${materialDetalleCorte}`;
-        }
+        const col = COLORES_ACRILICO.find(c => c.value === state.colorAcrilico)?.label;
+        materialDetalleCorte = `${state.materialDeCorte} ${state.grosorMaterial} ${col || ''}`.trim();
     }
 
-    // Calcular Precio Unitario Final
-    let tiempoCorteFinal: string | undefined;
-    let precioUnitarioCalculado = state.precioUnitario;
-
-    if (state.unidad === 'tiempo') {
-        const mins = Math.max(0, parseInt(minutosInput) || 0);
-        const secs = Math.max(0, parseInt(segundosInput) || 0);
-        if (mins === 0 && secs === 0) { setState(prev => ({ ...prev, error: "El tiempo no puede ser 0." })); return; }
-        
-        tiempoCorteFinal = `${mins}:${String(secs).padStart(2, '0')}`;
-        // En unidad Tiempo, el precio unitario ES el costo total del tiempo por unidad de servicio
-        precioUnitarioCalculado = (mins + (secs / 60)) * PRECIO_LASER_POR_MINUTO;
-    }
+    let tiempoCorteFinal = state.unidad === 'tiempo' ? `${minutosInput}:${segundosInput.padStart(2, '0')}` : null;
+    let precioUnitarioCalculado = state.unidad === 'tiempo' 
+        ? (parseInt(minutosInput) + (parseInt(segundosInput) / 60)) * PRECIO_LASER_POR_MINUTO
+        : state.precioUnitario;
     
-    // Sumar Material Extra al precio unitario base para que el total de la orden cuadre
-    if (state.suministrarMaterial && state.costoMaterialExtra > 0) {
-         // Nota: Para m2 esto simplifica el costo extra por pieza, no por m2.
-         precioUnitarioCalculado += state.costoMaterialExtra;
-    }
+    if (state.suministrarMaterial) precioUnitarioCalculado += state.costoMaterialExtra;
 
-    const newItem: ItemOrden = {
-      nombre: finalNombre, 
-      // @ts-ignore
-      tipoServicio: state.tipoServicio,
-      cantidad: state.cantidad,
-      unidad: state.unidad,
+    onAddItem({
+      ...state,
+      nombre: state.nombre.trim(),
       precioUnitario: precioUnitarioCalculado, 
-      
-      medidaXCm: state.medidaXCm,
-      medidaYCm: state.medidaYCm,
-      materialDeImpresion: state.materialDeImpresion !== "Otro/No aplica" ? state.materialDeImpresion : undefined,
-      
-      ...(tiempoCorteFinal && { tiempoCorte: tiempoCorteFinal }), 
-      ...(materialDetalleCorte && { materialDetalleCorte }), 
-      ...(state.empleadoAsignado && { empleadoAsignado: state.empleadoAsignado }),
-      
-      // Campos nuevos (se guardan aunque TS se queje si no actualizas types.ts)
-      // @ts-ignore
-      archivoTipo: state.archivoTipo,
-      // @ts-ignore
-      archivoFormato: state.archivoFormato,
-      // @ts-ignore
-      suministrarMaterial: state.suministrarMaterial,
-      // @ts-ignore
-      costoMaterialExtra: state.costoMaterialExtra,
-    };
-
-    onAddItem(newItem);
+      tiempoCorte: tiempoCorteFinal,
+      materialDetalleCorte: materialDetalleCorte || null,
+      empleadoAsignado: state.empleadoAsignado
+    });
     onClose();
   };
 
-  // --- LOGICA DE VISIBILIDAD DE CAMPOS ---
-  const showSizeInputs = state.unidad === 'm2';
-  const showLaserInputs = state.unidad === 'tiempo';
-  const showPriceInput = state.unidad !== 'tiempo'; // Si es tiempo, el precio se calcula solo
-  
-  // Impresión: mostrar si es tipo IMPRESION o si viene de un contexto de impresión
-  const showMaterialSelect = (state.tipoServicio === 'IMPRESION' || hasPrintingSelected) && state.tipoServicio !== 'CORTE' && state.tipoServicio !== 'DISENO';
-  
-  // Corte: mostrar solo si es tipo CORTE
-  const showCorteDetails = state.tipoServicio === 'CORTE';
-  const showGrosor = showCorteDetails && state.materialDeCorte !== 'Cartulina' && state.materialDeCorte !== 'Otro';
-  const showColor = showCorteDetails && state.materialDeCorte === 'Acrilico';
-
-  // Diseño: mostrar solo si es tipo DISENO
-  const showFileDetails = state.tipoServicio === 'DISENO';
-
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="w-full max-w-5xl h-[90vh] flex flex-col p-0 overflow-hidden bg-gray-50 dark:bg-slate-950">
+      <DialogContent className="max-w-[95vw] md:max-w-5xl h-[90vh] p-0 border-none bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-3xl overflow-hidden rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl flex flex-col">
         
-        <DialogHeader className="p-6 pb-4 border-b bg-white dark:bg-slate-900 shrink-0">
-          <DialogTitle className="text-xl font-bold text-primary flex items-center gap-2">
-            <Sparkles className="w-5 h-5"/> {itemToEdit ? "Editar Ítem" : "Nuevo Ítem"}
-          </DialogTitle>
-        </DialogHeader>
+        <header className="shrink-0 p-6 md:p-10 bg-white/50 dark:bg-slate-900/50 border-b border-slate-200/50 flex justify-between items-center">
+            <div className="flex items-center gap-5">
+                <div className="h-14 w-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-500/30">
+                    <Sparkles className="w-7 h-7" />
+                </div>
+                <div>
+                    <DialogTitle className="text-xl md:text-3xl font-black tracking-tighter uppercase text-slate-900 dark:text-white leading-none">
+                        {itemToEdit ? "Editar Ítem" : "Nuevo Producto"}
+                    </DialogTitle>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Especificaciones de Taller</p>
+                </div>
+            </div>
+            <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full h-12 w-12 hover:bg-slate-200/50 transition-colors">
+                <X className="w-6 h-6" />
+            </Button>
+        </header>
 
         <div className="flex-1 min-h-0 relative">
-            <ScrollArea className="h-full w-full">
-                <div className="p-6 space-y-6">
+            <ScrollArea className="h-full">
+                <div className="p-6 md:p-12 space-y-10">
                     
-                    {/* BLOQUE 1: DATOS PRINCIPALES */}
-                    <Card className="shadow-sm border border-gray-200 dark:border-gray-800">
-                        <CardContent className="p-4 grid grid-cols-1 md:grid-cols-12 gap-4">
-                            {/* Nombre */}
-                            <div className="md:col-span-8 space-y-1.5">
-                                <Label>Descripción del Trabajo <span className="text-red-500">*</span></Label>
-                                <Input value={state.nombre} onChange={(e) => handleChange('nombre', e.target.value)} placeholder="Ej: Diseño de Logo, Corte de Letras..." className="font-medium" autoFocus />
+                    {/* BLOQUE: IDENTIFICACIÓN Y RESPONSABLE */}
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                        <div className="md:col-span-6 space-y-2">
+                            <Label className="text-[10px] font-black uppercase ml-2 text-slate-400 tracking-widest">Descripción del Trabajo</Label>
+                            <div className="relative">
+                                <Type className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
+                                <Input 
+                                    value={state.nombre} 
+                                    onChange={e => setState({...state, nombre: e.target.value})}
+                                    className="h-14 pl-12 rounded-2xl bg-white dark:bg-slate-900 border-none shadow-sm font-bold text-lg focus:ring-4 focus:ring-blue-500/10 transition-all"
+                                    placeholder="Nombre del trabajo..."
+                                />
                             </div>
-                            
-                            {/* Tipo de Servicio */}
-                            <div className="md:col-span-4 space-y-1.5">
-                                <Label>Tipo de Servicio</Label>
-                                <Select value={state.tipoServicio} onValueChange={(v) => handleChange('tipoServicio', v as any)}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="DISENO">🎨 Diseño Gráfico</SelectItem>
-                                        <SelectItem value="IMPRESION">🖨️ Impresión Digital</SelectItem>
-                                        <SelectItem value="CORTE">✂️ Corte / Grabado</SelectItem> 
-                                        <SelectItem value="ROTULACION">🚗 Rotulación</SelectItem>
-                                        <SelectItem value="AVISO_CORPOREO">🏢 Aviso Corpóreo</SelectItem>
-                                        <SelectItem value="OTROS">📦 Otros</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            
-                            {/* Cantidad */}
-                            <div className="md:col-span-3 space-y-1.5">
-                                <Label>Cantidad</Label>
-                                <div className="relative">
-                                    <Hash className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground"/>
-                                    <Input type="number" min="1" className="pl-9" value={state.cantidad} onChange={(e) => handleChange('cantidad', Math.max(1, parseInt(e.target.value) || 1))} />
-                                </div>
-                            </div>
-                            
-                            {/* Unidad */}
-                            <div className="md:col-span-4 space-y-1.5">
-                                <Label>Unidad de Medida</Label>
-                                <Select value={state.unidad} onValueChange={(v: UnidadItem) => handleChange('unidad', v)} disabled={state.tipoServicio === 'CORTE' || state.tipoServicio === 'DISENO'}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>{UNIDADES_DISPONIBLES.map(u => <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>)}</SelectContent>
-                                </Select>
-                            </div>
-
-                            {/* Precio Manual (Oculto si es Tiempo porque se calcula solo) */}
-                            {showPriceInput && (
-                                <div className="md:col-span-5 space-y-1.5 animate-in fade-in zoom-in duration-300">
-                                    <Label>Precio {state.unidad === 'm2' ? 'por m²' : 'Unitario'} (USD)</Label>
-                                    <div className="relative">
-                                        <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-green-600"/>
-                                        <Input type="number" min="0" step="0.01" className="pl-9 font-bold text-green-700" value={state.precioUnitario} onChange={(e) => handleChange('precioUnitario', parseFloat(e.target.value) || 0)} />
-                                    </div>
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
-
-                    {/* BLOQUE 2: DETALLES DE ARCHIVO (SOLO DISEÑO) */}
-                    {showFileDetails && (
-                        <Card className="bg-indigo-50/50 dark:bg-indigo-950/10 border-indigo-200 dark:border-indigo-900 animate-in fade-in slide-in-from-top-2">
-                             <CardContent className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div className="space-y-1.5">
-                                    <Label className="text-indigo-700 flex items-center gap-2"><PenTool className="w-4 h-4"/> Tipo de Entrega</Label>
-                                    <Select value={state.archivoTipo} onValueChange={(v:any) => handleChange('archivoTipo', v)}>
-                                        <SelectTrigger className="bg-white dark:bg-slate-950"><SelectValue /></SelectTrigger>
-                                        <SelectContent>{TIPOS_ARCHIVO.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-1.5">
-                                    <Label className="text-indigo-700">Formato / Extensión</Label>
-                                    <Select value={state.archivoFormato} onValueChange={(v) => handleChange('archivoFormato', v)}>
-                                        <SelectTrigger className="bg-white dark:bg-slate-950"><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            {FORMATOS_ARCHIVO[state.archivoTipo].map(fmt => (
-                                                <SelectItem key={fmt} value={fmt}>{fmt}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                             </CardContent>
-                        </Card>
-                    )}
-
-                    {/* BLOQUE 3: DETALLES DE CORTE (SOLO CORTE) */}
-                    {showCorteDetails && (
-                        <Card className="bg-orange-50/50 dark:bg-orange-950/10 border-orange-200 dark:border-orange-900 animate-in slide-in-from-top-2">
-                            <CardContent className="p-4 space-y-4">
-                                <h4 className="text-sm font-bold text-orange-700 dark:text-orange-400 flex items-center gap-2"><Scissors className="w-4 h-4"/> Materiales para Corte</h4>
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                    <div className="space-y-1.5">
-                                        <Label>Material</Label>
-                                        <Select value={state.materialDeCorte} onValueChange={(v) => handleChange('materialDeCorte', v)}>
-                                            <SelectTrigger className="bg-white dark:bg-slate-950"><SelectValue /></SelectTrigger>
-                                            <SelectContent>{MATERIALES_CORTE.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
-                                        </Select>
-                                    </div>
-                                    {showGrosor && (
-                                        <div className="space-y-1.5">
-                                            <Label>Grosor</Label>
-                                            <Select value={state.grosorMaterial} onValueChange={(v) => handleChange('grosorMaterial', v)}>
-                                                <SelectTrigger className="bg-white dark:bg-slate-950"><SelectValue /></SelectTrigger>
-                                                <SelectContent>{GROSORES_DISPONIBLES.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent>
-                                            </Select>
-                                        </div>
-                                    )}
-                                    {showColor && (
-                                        <div className="space-y-1.5">
-                                            <Label>Color</Label>
-                                            <Select value={state.colorAcrilico} onValueChange={(v) => handleChange('colorAcrilico', v)}>
-                                                <SelectTrigger className="bg-white dark:bg-slate-950"><SelectValue /></SelectTrigger>
-                                                <SelectContent>{COLORES_ACRILICO.map(c => <SelectItem key={c.value} value={c.value}>{c.emoji} {c.label}</SelectItem>)}</SelectContent>
-                                            </Select>
-                                        </div>
-                                    )}
-                                </div>
-                            </CardContent>
-                        </Card>
-                    )}
-
-                    {/* BLOQUE 4: MEDIDAS (SOLO M2) */}
-                    {showSizeInputs && (
-                        <Card className="bg-blue-50/50 dark:bg-blue-950/10 border-blue-200 dark:border-blue-900 animate-in slide-in-from-top-2">
-                            <CardContent className="p-4 grid grid-cols-2 gap-4">
-                                <div className="col-span-2 text-sm font-bold text-blue-700 dark:text-blue-400 flex items-center gap-2"><MoveVertical className="w-4 h-4"/> Dimensiones (cm)</div>
-                                <div className="space-y-1.5">
-                                    <Label>Ancho (X)</Label>
-                                    <Input type="number" min="0" value={state.medidaXCm} onChange={(e) => handleChange('medidaXCm', parseFloat(e.target.value) || 0)} className="bg-white dark:bg-slate-950"/>
-                                </div>
-                                <div className="space-y-1.5">
-                                    <Label>Alto (Y)</Label>
-                                    <Input type="number" min="0" value={state.medidaYCm} onChange={(e) => handleChange('medidaYCm', parseFloat(e.target.value) || 0)} className="bg-white dark:bg-slate-950"/>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    )}
-
-                    {/* BLOQUE 5: TIEMPO LASER (SOLO TIEMPO) */}
-                    {showLaserInputs && (
-                        <Card className="bg-orange-50/50 dark:bg-orange-950/10 border-orange-200 dark:border-orange-900 animate-in slide-in-from-top-2">
-                            <CardContent className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                                <div className="space-y-2">
-                                    <Label className="text-orange-700 font-bold flex items-center gap-2"><Timer className="w-4 h-4"/> Tiempo de Corte</Label>
-                                    <div className="flex gap-2 items-center">
-                                        <div className="flex-1">
-                                            <Input placeholder="0" type="number" min="0" value={minutosInput} onChange={(e) => setMinutosInput(e.target.value)} className="bg-white dark:bg-slate-950 text-center font-mono text-lg"/>
-                                            <span className="text-[10px] text-center block text-muted-foreground mt-1">Minutos</span>
-                                        </div>
-                                        <span className="text-xl font-bold text-orange-400">:</span>
-                                        <div className="flex-1">
-                                            <Input placeholder="00" type="number" min="0" max="59" value={segundosInput} onChange={(e) => setSegundosInput(e.target.value)} className="bg-white dark:bg-slate-950 text-center font-mono text-lg"/>
-                                            <span className="text-[10px] text-center block text-muted-foreground mt-1">Segundos</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="bg-white dark:bg-slate-950 p-3 rounded border text-center">
-                                    <p className="text-xs text-muted-foreground uppercase font-bold mb-1">Tarifa Láser</p>
-                                    <p className="text-lg font-bold text-orange-600">${PRECIO_LASER_POR_MINUTO.toFixed(2)} / min</p>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    )}
-
-                    {/* BLOQUE 6: MATERIAL IMPRESIÓN */}
-                    {showMaterialSelect && (
-                        <div className="space-y-1.5 animate-in fade-in">
-                            <Label className="flex items-center gap-2"><Layers className="w-4 h-4 text-purple-500"/> Material de Impresión</Label>
-                            <Select value={state.materialDeImpresion} onValueChange={(v) => handleChange('materialDeImpresion', v)}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>{materialesDisponibles.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+                        </div>
+                        <div className="md:col-span-3 space-y-2">
+                            <Label className="text-[10px] font-black uppercase ml-2 text-slate-400 tracking-widest">Servicio</Label>
+                            <Select value={state.tipoServicio} onValueChange={v => setState({...state, tipoServicio: v})}>
+                                <SelectTrigger className="h-14 rounded-2xl bg-white dark:bg-slate-900 border-none shadow-sm font-black text-blue-600">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="rounded-2xl border-none shadow-2xl">
+                                    <SelectItem value="DISENO">🎨 Diseño Gráfico</SelectItem>
+                                    <SelectItem value="IMPRESION">🖨️ Impresión</SelectItem>
+                                    <SelectItem value="CORTE">✂️ Corte / Grabado</SelectItem>
+                                    <SelectItem value="ROTULACION">🚗 Rotulación</SelectItem>
+                                    <SelectItem value="AVISO_CORPOREO">🏢 Aviso Corpóreo</SelectItem>
+                                    <SelectItem value="OTROS">📦 Otros</SelectItem>
+                                </SelectContent>
                             </Select>
                         </div>
-                    )}
 
-                    {/* BLOQUE 7: SUMINISTRO MATERIAL (GLOBAL) */}
-                    <Card className="shadow-sm border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
-                        <CardContent className="p-4 flex items-end gap-4">
-                            <div className="flex items-center h-10">
-                                <div className="flex items-center space-x-2">
-                                    <input type="checkbox" id="suministrar" className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary" checked={state.suministrarMaterial} onChange={(e) => handleChange('suministrarMaterial', e.target.checked)}/>
-                                    <Label htmlFor="suministrar" className="font-bold cursor-pointer flex items-center gap-2">
-                                        <Box className="w-4 h-4 text-primary" /> Suministrar Material
-                                    </Label>
+                        {/* SELECTOR DE ENCARGADO / RESPONSABLE */}
+                        <div className="md:col-span-3 space-y-2">
+                            <Label className="text-[10px] font-black uppercase text-orange-600 ml-2 tracking-widest">Responsable</Label>
+                            <Select value={state.empleadoAsignado} onValueChange={v => setState({...state, empleadoAsignado: v})}>
+                                <SelectTrigger className="h-14 rounded-2xl bg-white dark:bg-slate-900 border-none shadow-sm font-black text-slate-800 dark:text-white">
+                                    <div className="flex items-center gap-2"><User className="w-4 h-4 text-orange-500"/> <SelectValue /></div>
+                                </SelectTrigger>
+                                <SelectContent className="rounded-2xl border-none shadow-2xl">
+                                    <SelectItem value="N/A">Sin Asignar</SelectItem>
+                                    <Separator className="my-2"/>
+                                    <div className="px-2 py-1.5 text-[9px] font-black text-slate-400 uppercase tracking-widest">Equipo Taller</div>
+                                    {PERSONAL_TALLER.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                                    <Separator className="my-2"/>
+                                    <div className="px-2 py-1.5 text-[9px] font-black text-slate-400 uppercase tracking-widest">Diseñadores</div>
+                                    {designers.map((d: any) => <SelectItem key={d.id} value={d.name}>{d.name}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                        <SectionField label="Cantidad" icon={<Hash className="w-3 h-3"/>}>
+                            <Input type="number" value={state.cantidad} onChange={e => setState({...state, cantidad: parseInt(e.target.value) || 1})} className="h-12 rounded-xl bg-white dark:bg-slate-900 border-none font-black text-center text-lg" />
+                        </SectionField>
+                        <SectionField label="Unidad" icon={<Layers className="w-3 h-3"/>}>
+                            <Select value={state.unidad} onValueChange={v => setState({...state, unidad: v})} disabled={state.tipoServicio === 'CORTE'}>
+                                <SelectTrigger className="h-12 rounded-xl bg-white dark:bg-slate-900 border-none font-bold"><SelectValue /></SelectTrigger>
+                                <SelectContent>{UNIDADES_DISPONIBLES.map(u => <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>)}</SelectContent>
+                            </Select>
+                        </SectionField>
+                        {state.unidad !== 'tiempo' && (
+                            <SectionField label="Precio Base (USD)" icon={<DollarSign className="w-3 h-3"/>} className="col-span-2">
+                                <Input type="number" step="0.01" value={state.precioUnitario} onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})} className="h-12 rounded-xl bg-white dark:bg-slate-900 border-none font-black text-emerald-600 text-xl" />
+                            </SectionField>
+                        )}
+                    </div>
+
+                    <AnimatePresence mode="wait">
+                        {state.tipoServicio === 'DISENO' && (
+                            <motion.div key="panel-diseno" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="bg-indigo-500/5 p-8 rounded-[2.5rem] border border-indigo-200/50 space-y-6">
+                                <div className="flex items-center gap-2"><PenTool className="w-4 h-4 text-indigo-500"/> <h4 className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Archivos Digitales</h4></div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <SectionField label="Entrega"><Select value={state.archivoTipo} onValueChange={v => setState({...state, archivoTipo: v})}><SelectTrigger className="bg-white dark:bg-slate-900 border-none rounded-xl h-12 font-bold"><SelectValue /></SelectTrigger><SelectContent>{TIPOS_ARCHIVO.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select></SectionField>
+                                    <SectionField label="Extensión"><Select value={state.archivoFormato} onValueChange={v => setState({...state, archivoFormato: v})}><SelectTrigger className="bg-white dark:bg-slate-900 border-none rounded-xl h-12 font-bold"><SelectValue /></SelectTrigger><SelectContent>{FORMATOS_ARCHIVO[state.archivoTipo as 'vector' | 'imagen'].map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent></Select></SectionField>
                                 </div>
+                            </motion.div>
+                        )}
+                        {state.tipoServicio === 'CORTE' && (
+                            <motion.div key="panel-corte" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="bg-orange-500/5 p-8 rounded-[2.5rem] border border-orange-200/50 space-y-6">
+                                <div className="flex items-center gap-2"><Scissors className="w-4 h-4 text-orange-500"/> <h4 className="text-[10px] font-black uppercase tracking-widest text-orange-600">Material y Tiempo</h4></div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <SectionField label="Material"><Select value={state.materialDeCorte} onValueChange={v => setState({...state, materialDeCorte: v})}><SelectTrigger className="bg-white dark:bg-slate-900 border-none h-12 rounded-xl font-bold"><SelectValue /></SelectTrigger><SelectContent>{MATERIALES_CORTE.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent></Select></SectionField>
+                                    {state.materialDeCorte === 'Acrilico' && (<SectionField label="Color"><Select value={state.colorAcrilico} onValueChange={v => setState({...state, colorAcrilico: v})}><SelectTrigger className="bg-white dark:bg-slate-900 border-none h-12 rounded-xl font-bold"><SelectValue /></SelectTrigger><SelectContent>{COLORES_ACRILICO.map(c => <SelectItem key={c.value} value={c.value}>{c.emoji} {c.label}</SelectItem>)}</SelectContent></Select></SectionField>)}
+                                    <SectionField label="Tiempo Estimado"><div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-1 rounded-xl h-12 px-4 border border-slate-100 dark:border-slate-800"><Input value={minutosInput} onChange={e => setMinutosInput(e.target.value)} className="border-none text-center font-black h-10" placeholder="0" /><span>:</span><Input value={segundosInput} onChange={e => setSegundosInput(e.target.value)} className="border-none text-center font-black h-10" placeholder="00" /></div></SectionField>
+                                </div>
+                            </motion.div>
+                        )}
+                        {state.unidad === 'm2' && (
+                            <motion.div key="panel-medidas" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="bg-blue-500/5 p-8 rounded-[2.5rem] border border-blue-200/50 space-y-6">
+                                <div className="flex items-center gap-2"><MoveVertical className="w-4 h-4 text-blue-500"/> <h4 className="text-[10px] font-black uppercase tracking-widest text-blue-600">Medidas (cm)</h4></div>
+                                <div className="grid grid-cols-2 gap-8">
+                                    <SectionField label="Ancho (X)"><Input type="number" value={state.medidaXCm} onChange={e => setState({...state, medidaXCm: parseFloat(e.target.value) || 0})} className="h-12 rounded-xl border-none bg-white dark:bg-slate-900 font-black text-center" /></SectionField>
+                                    <SectionField label="Alto (Y)"><Input type="number" value={state.medidaYCm} onChange={e => setState({...state, medidaYCm: parseFloat(e.target.value) || 0})} className="h-12 rounded-xl border-none bg-white dark:bg-slate-900 font-black text-center" /></SectionField>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* BLOQUE: SUMINISTRO MATERIAL */}
+                    <div className={cn("p-8 rounded-[2.5rem] border transition-all", state.suministrarMaterial ? "bg-emerald-500/5 border-emerald-200 shadow-inner" : "bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800")}>
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className={cn("p-3 rounded-2xl", state.suministrarMaterial ? "bg-emerald-500 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-400")}><Box /></div>
+                                <div><p className="font-black text-sm uppercase">Suministrar Material</p><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Incluir costo en la orden</p></div>
                             </div>
+                            <input type="checkbox" checked={state.suministrarMaterial} onChange={e => setState({...state, suministrarMaterial: e.target.checked})} className="w-7 h-7 rounded-lg text-emerald-500 cursor-pointer" />
+                        </div>
+                        <AnimatePresence>
                             {state.suministrarMaterial && (
-                                <div className="flex-1 space-y-1.5 animate-in fade-in slide-in-from-left-2">
-                                    <Label className="text-xs text-muted-foreground">Costo Material (Unitario)</Label>
-                                    <div className="relative">
-                                        <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground"/>
-                                        <Input type="number" min="0" step="0.01" className="pl-9 bg-white dark:bg-slate-950" value={state.costoMaterialExtra} onChange={(e) => handleChange('costoMaterialExtra', parseFloat(e.target.value) || 0)} placeholder="0.00"/>
-                                    </div>
-                                </div>
+                                <motion.div key="material-input" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-6 pt-6 border-t border-emerald-100 dark:border-emerald-900/30">
+                                    <Label className="text-[10px] font-black uppercase text-emerald-600 ml-2">Costo Extra por Unidad</Label>
+                                    <div className="relative mt-2"><DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-400"/><Input type="number" step="0.01" value={state.costoMaterialExtra} onChange={e => setState({...state, costoMaterialExtra: parseFloat(e.target.value) || 0})} className="h-12 pl-10 rounded-xl border-none bg-emerald-500/10 font-black text-emerald-700 text-lg" /></div>
+                                </motion.div>
                             )}
-                        </CardContent>
-                    </Card>
+                        </AnimatePresence>
+                    </div>
 
-                    {state.error && (<Alert variant="destructive" className="animate-in zoom-in duration-300"><AlertCircle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{state.error}</AlertDescription></Alert>)}
+                    {state.error && (<Alert variant="destructive" className="rounded-[1.5rem] bg-red-50 border-red-200"><AlertCircle className="h-5 w-5" /><AlertTitle className="font-black">Error</AlertTitle><AlertDescription className="font-medium">{state.error}</AlertDescription></Alert>)}
                 </div>
             </ScrollArea>
         </div>
 
-        {/* FOOTER: TOTALES Y BOTONES */}
-        <div className="border-t bg-white dark:bg-slate-900 p-4 shrink-0 flex flex-col sm:flex-row justify-between items-center gap-4">
-            <div className="text-center sm:text-left">
-                <p className="text-xs text-muted-foreground uppercase font-bold">Subtotal Estimado</p>
-                <div className="flex items-baseline gap-1">
-                    <p className="text-3xl font-black text-green-600 dark:text-green-400">${state.subtotal.toFixed(2)}</p>
-                    <span className="text-sm text-gray-400">USD</span>
-                </div>
+        <footer className="shrink-0 p-8 md:px-12 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-t border-slate-100 dark:border-slate-800 flex flex-col md:flex-row justify-between items-center gap-8">
+            <div className="text-center md:text-left">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Subtotal Estimado</p>
+                <div className="flex items-baseline gap-2"><span className="text-4xl font-black text-blue-600 tracking-tighter">${state.subtotal.toFixed(2)}</span><span className="text-sm font-black text-slate-300 uppercase">USD</span></div>
             </div>
-            <div className="flex gap-2 w-full sm:w-auto">
-                <Button variant="outline" onClick={onClose} className="flex-1 sm:flex-none">Cancelar</Button>
-                <Button onClick={handleSave} className="flex-1 sm:flex-none bg-primary hover:bg-primary/90 min-w-[140px] shadow-lg shadow-primary/20">
+            <div className="flex gap-4 w-full md:w-auto">
+                <Button variant="ghost" onClick={onClose} className="rounded-2xl h-14 px-8 font-black text-slate-400 hover:text-slate-600">Cancelar</Button>
+                <Button onClick={handleSave} className="flex-1 md:flex-none rounded-2xl h-14 px-12 bg-blue-600 hover:bg-blue-700 text-white font-black text-lg shadow-2xl transition-all hover:scale-105">
                     {itemToEdit ? "Guardar Cambios" : "Agregar Ítem"}
                 </Button>
             </div>
-        </div>
+        </footer>
       </DialogContent>
     </Dialog>
   )
+}
+
+function SectionField({ label, icon, children, className }: any) {
+    return (
+        <div className={cn("space-y-2.5", className)}>
+            <Label className="text-[10px] font-black uppercase ml-2 text-slate-400 flex items-center gap-1.5 tracking-widest">{icon} {label}</Label>
+            {children}
+        </div>
+    )
 }

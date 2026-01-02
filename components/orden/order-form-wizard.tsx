@@ -1,8 +1,8 @@
 // @/components/orden/order-form-wizard.tsx
 "use client"
 
-import { useState, useMemo, useCallback, useEffect } from "react"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
+import React, { useState, useMemo, useCallback, useEffect } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Input } from "@/components/ui/input" 
@@ -11,345 +11,221 @@ import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area" 
 import { Badge } from "@/components/ui/badge" 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select" 
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table" 
 import { Skeleton } from "@/components/ui/skeleton" 
 import { toast } from 'sonner' 
 import { cn } from "@/lib/utils"
 
 import { 
     ChevronLeft, ChevronRight, Plus, X, User, DollarSign, Calendar, 
-    Timer, Check, Users, Loader2, Pencil, Trash2, RefreshCcw, Save, AlertCircle, 
-    FileCode, FileImage, Palette, Scissors, Printer, Hash
+    Check, Users, Loader2, Pencil, Trash2, RefreshCcw, Save, 
+    Palette, Scissors, Printer, Hash, Receipt, Info, Box, Timer
 } from "lucide-react" 
 
-import { type FormularioOrdenData, type ItemOrden, type ServiciosSolicitados, type OrdenServicio } from "@/lib/types/orden" 
+import { type ItemOrden } from "@/lib/types/orden" 
 import { ItemFormModal } from "@/components/orden/item-form-modal"
 import { getLastOrderNumber } from "@/lib/firebase/ordenes" 
 import { getFrequentClients, saveClient, deleteClient } from "@/lib/firebase/clientes" 
-
-// 🔥 IMPORTAMOS EL SERVICIO DE DISEÑADORES
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
 
-// --- TIPOS Y CONSTANTES ---
-
-export type ClienteWizard = { 
-    id: string, 
-    nombreRazonSocial: string, 
-    rifCedula: string, 
-    telefono: string, 
-    correo: string, 
-    domicilioFiscal: string 
-    personaContacto?: string | null; 
+// --- UTILIDAD PARA ELIMINAR UNDEFINED (OBLIGATORIO PARA FIREBASE) ---
+const cleanFirebaseObject = (obj: any): any => {
+    const newObj = { ...obj };
+    Object.keys(newObj).forEach(key => {
+        if (newObj[key] === undefined) {
+            delete newObj[key];
+        } else if (newObj[key] && typeof newObj[key] === 'object' && !Array.isArray(newObj[key])) {
+            newObj[key] = cleanFirebaseObject(newObj[key]);
+        } else if (Array.isArray(newObj[key])) {
+            newObj[key] = newObj[key].map((item: any) => 
+                (typeof item === 'object' && item !== null) ? cleanFirebaseObject(item) : item
+            );
+        }
+    });
+    return newObj;
 };
 
 const PREFIJOS_RIF = ["V", "E", "P", "R", "J", "G"] as const;
 const PREFIJOS_TELEFONO = ["0412", "0422", "0414", "0424", "0416", "0426"] as const;
 const JEFES_CONTACTO = ["Marcos Leal", "Samuel Leal"] as const;
 
-// Lista estática para producción general
-const EMPLEADOS_PRODUCCION = [
-    "N/A", "Marcos (Gerencia)", "Samuel (Producción)", 
-    "Daniela Chiquito (Corte Láser)", "Jose Angel (Impresión)", 
-    "Daniel Montero (Impresión)"
-];
-
-const MATERIALES_IMPRESION = [
-    "Vinil Brillante", "Vinil Mate", "Banner Cara Negra", "Banner Cara Blanca", 
-    "Banner Cara Gris", "Vinil Transparente (Clear)", "Otro/No aplica" 
-] as const;
-
-const getServiceText = (key: keyof ServiciosSolicitados): string => {
-    switch (key) {
-        case 'impresionDigital': return 'Impresión Digital';
-        case 'impresionGranFormato': return 'Gran Formato';
-        case 'corteLaser': return 'Corte Láser';
-        case 'laminacion': return 'Laminación';
-        case 'avisoCorporeo': return 'Aviso Corpóreo';
-        case 'rotulacion': return 'Rotulación';
-        case 'instalacion': return 'Instalación';
-        case 'senaletica': return 'Señaletica';
-        default: return key;
-    }
-};
-
-type FormularioOrdenExtendida = FormularioOrdenData & { 
-    cliente: { 
-        prefijoTelefono: string, 
-        numeroTelefono: string, 
-        prefijoRif: string, 
-        numeroRif: string 
-    } 
-};
-
-const INITIAL_FORM_DATA: FormularioOrdenExtendida = {
+const INITIAL_FORM_DATA = {
     ordenNumero: '', 
     fechaEntrega: new Date().toISOString().split('T')[0],
-    cliente: {
+    cliente: { 
         nombreRazonSocial: "", rifCedula: "", telefono: "", 
-        prefijoTelefono: "0414", numeroTelefono: "", prefijoRif: "J", numeroRif: "", 
-        domicilioFiscal: "", correo: "", personaContacto: "",
-    } as any, 
-    serviciosSolicitados: {
-        impresionDigital: false, impresionGranFormato: false, corteLaser: false, laminacion: false,
-        avisoCorporeo: false, rotulacion: false, instalacion: false, senaletica: false,
+        prefijoTelefono: "0414", numeroTelefono: "", 
+        prefijoRif: "J", numeroRif: "", 
+        domicilioFiscal: "", correo: "", personaContacto: "" 
+    },
+    serviciosSolicitados: { 
+        impresionDigital: false, impresionGranFormato: false, corteLaser: false, laminacion: false, 
+        avisoCorporeo: false, rotulacion: false, instalacion: false, senaletica: false 
     },
     items: [],
     descripcionDetallada: "",
-} as any; 
+};
 
-interface OrderFormWizardProps {
-    onSave: (data: FormularioOrdenData & { totalUSD: number }) => Promise<void>;
-    onClose: () => void;
-    className?: string;
-    ordenToEdit?: OrdenServicio | null;
-}
-
-export const OrderFormWizardV2: React.FC<OrderFormWizardProps> = ({ onSave, onClose, className, ordenToEdit }) => {
+export const OrderFormWizardV2: React.FC<any> = ({ onSave, onClose, ordenToEdit }) => {
     const [step, setStep] = useState(1);
-    const [formData, setFormData] = useState<FormularioOrdenExtendida>(INITIAL_FORM_DATA);
+    const [formData, setFormData] = useState<any>(INITIAL_FORM_DATA);
     const [isLoading, setIsLoading] = useState(false);
     const [isItemModalOpen, setIsItemModalOpen] = useState(false);
-    
     const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
-
     const [isOrderNumLoading, setIsOrderNumLoading] = useState(false);
-    const [frequentClients, setFrequentClients] = useState<ClienteWizard[]>([]); 
+    const [frequentClients, setFrequentClients] = useState<any[]>([]); 
     const [isClientLoading, setIsClientLoading] = useState(true);
     const [selectedClientId, setSelectedClientId] = useState<string>('NEW'); 
     const [isClientEditing, setIsClientEditing] = useState(true); 
-
-    // 🔥 ESTADO PARA DISEÑADORES DE FIREBASE
     const [designersList, setDesignersList] = useState<Designer[]>([]);
 
-    // --- CARGA INICIAL Y SUSCRIPCIONES ---
     useEffect(() => {
-        // Suscribirse a diseñadores
         const unsubscribeDesigners = subscribeToDesigners(setDesignersList);
-
         const loadData = async () => {
             setIsClientLoading(true);
             try {
                 const clients = await getFrequentClients();
                 setFrequentClients(clients.map(c => ({
-                    id: c.id!,
-                    nombreRazonSocial: c.nombreRazonSocial,
-                    rifCedula: c.rifCedulaCompleto, 
-                    telefono: c.telefonoCompleto,   
-                    correo: c.correo,
-                    domicilioFiscal: c.domicilioFiscal,
-                    personaContacto: c.personaContactoCliente,
+                    id: c.id!, nombreRazonSocial: c.nombreRazonSocial, rifCedula: c.rifCedulaCompleto, 
+                    telefono: c.telefonoCompleto, correo: c.correo, domicilioFiscal: c.domicilioFiscal, personaContacto: c.personaContactoCliente,
                 })));
 
                 if (ordenToEdit) {
-                    const [prefijoRif, numeroRif] = ordenToEdit.cliente.rifCedula.includes('-') 
-                        ? ordenToEdit.cliente.rifCedula.split('-') 
-                        : ["J", ordenToEdit.cliente.rifCedula];
-                    
+                    const [prefijoRif, numeroRif] = (ordenToEdit.cliente.rifCedula || "J-").split('-');
                     const tel = ordenToEdit.cliente.telefono || "";
-                    const prefijoTelefono = tel.length >= 4 ? tel.substring(0, 4) : "0414";
-                    const numeroTelefono = tel.length >= 4 ? tel.substring(4) : tel;
-
                     setFormData({
                         ...ordenToEdit,
                         ordenNumero: String(ordenToEdit.ordenNumero),
-                        cliente: {
-                            ...ordenToEdit.cliente,
-                            prefijoRif, numeroRif, prefijoTelefono, numeroTelefono
-                        },
-                        items: ordenToEdit.items || [],
-                        serviciosSolicitados: ordenToEdit.serviciosSolicitados || INITIAL_FORM_DATA.serviciosSolicitados
-                    } as FormularioOrdenExtendida);
-                    
-                    const existingClient = clients.find(c => c.rifCedulaCompleto === ordenToEdit.cliente.rifCedula);
-                    if (existingClient) {
-                        setSelectedClientId(existingClient.id!);
-                        setIsClientEditing(false);
-                    } else {
-                        setSelectedClientId('CUSTOM'); 
-                        setIsClientEditing(true);
+                        cliente: { 
+                            ...ordenToEdit.cliente, 
+                            prefijoRif, numeroRif, 
+                            prefijoTelefono: tel.substring(0, 4) || "0414", 
+                            numeroTelefono: tel.substring(4) 
+                        }
+                    });
+
+                    // ✨ LÓGICA DE DETECCIÓN EXPRESS ✨
+                    // Si el RIF es V-EXPRESS, saltamos directamente al Paso 2
+                    if (ordenToEdit.cliente?.rifCedula === "V-EXPRESS") {
+                        setStep(2);
                     }
+
+                    const existing = clients.find(c => c.rifCedulaCompleto === ordenToEdit.cliente.rifCedula);
+                    if (existing) { setSelectedClientId(existing.id!); setIsClientEditing(false); }
+                    else { setSelectedClientId('CUSTOM'); setIsClientEditing(true); }
                 } else {
-                    setIsOrderNumLoading(true);
-                    try {
-                        const lastNumber = await getLastOrderNumber(); 
-                        setFormData(prev => ({ ...prev, ordenNumero: String(lastNumber + 1) }));
-                    } catch(e) { console.error(e) }
-                    setIsOrderNumLoading(false);
+                    fetchOrderNumber();
                 }
-            } catch (error) {
-                console.error("Error cargando datos:", error);
-            } finally {
-                setIsClientLoading(false);
-            }
+            } finally { setIsClientLoading(false); }
         };
         loadData();
-
         return () => unsubscribeDesigners();
     }, [ordenToEdit]);
 
     const fetchOrderNumber = async () => {
-        if (ordenToEdit) return; 
         setIsOrderNumLoading(true);
         try {
             const lastNumber = await getLastOrderNumber(); 
-            setFormData(prev => ({ ...prev, ordenNumero: String(lastNumber + 1) }));
+            setFormData((prev: any) => ({ ...prev, ordenNumero: String(lastNumber + 1) }));
         } finally { setIsOrderNumLoading(false); }
     };
 
-    // --- MANEJO DE CLIENTES ---
-    const handleSelectClient = useCallback((clientId: string) => {
+    const handleSelectClient = (clientId: string) => {
         setSelectedClientId(clientId);
         if (clientId === 'NEW' || clientId === 'CUSTOM') {
-            setIsClientEditing(true); 
-            setFormData(prev => ({
-                ...prev,
-                cliente: {
-                    ...INITIAL_FORM_DATA.cliente,
-                    prefijoTelefono: prev.cliente.prefijoTelefono, prefijoRif: prev.cliente.prefijoRif,
-                    nombreRazonSocial: "", numeroTelefono: "", numeroRif: "", correo: "", domicilioFiscal: "", personaContacto: "",
-                }
+            setIsClientEditing(true);
+            setFormData((p: any) => ({ 
+                ...p, 
+                cliente: { ...INITIAL_FORM_DATA.cliente, prefijoTelefono: p.cliente.prefijoTelefono, prefijoRif: p.cliente.prefijoRif } 
             }));
             return;
         }
         const client = frequentClients.find(c => c.id === clientId);
         if (client) {
-            setIsClientEditing(false); 
-            const [prefijoRif, numeroRif] = client.rifCedula.includes('-') ? client.rifCedula.split('-') : ["J", client.rifCedula];
-            const prefijoTelefono = client.telefono.substring(0, 4);
-            const numeroTelefono = client.telefono.substring(4);
-            setFormData(prev => ({
+            setIsClientEditing(false);
+            const [prefijoRif, numeroRif] = (client.rifCedula || "J-").split('-');
+            setFormData((prev: any) => ({
                 ...prev,
                 cliente: {
                     ...prev.cliente,
-                    nombreRazonSocial: client.nombreRazonSocial,
-                    correo: client.correo,
-                    domicilioFiscal: client.domicilioFiscal,
-                    personaContacto: prev.cliente.personaContacto || client.personaContacto || "", 
-                    prefijoRif, numeroRif, prefijoTelefono, numeroTelefono,
+                    nombreRazonSocial: client.nombreRazonSocial, correo: client.correo,
+                    domicilioFiscal: client.domicilioFiscal, personaContacto: client.personaContacto || "",
+                    prefijoRif, numeroRif, prefijoTelefono: client.telefono.substring(0, 4), numeroTelefono: client.telefono.substring(4),
                 }
             }));
         }
-    }, [frequentClients]);
+    };
 
-    const handleSaveClientData = useCallback(async () => {
+    const handleSaveClientData = async () => {
         const { nombreRazonSocial, numeroTelefono, prefijoTelefono, prefijoRif, numeroRif, domicilioFiscal, correo, personaContacto } = formData.cliente;
-        if (!nombreRazonSocial.trim()) { toast.error("Nombre obligatorio"); return; }
-        if (numeroTelefono.length !== 7) { toast.error("Teléfono inválido"); return; }
-        const idToSave = selectedClientId === 'NEW' || selectedClientId === 'CUSTOM' ? undefined : selectedClientId;
-        const isJefe = JEFES_CONTACTO.some(j => j === personaContacto);
-        const contactValue = (!isJefe && personaContacto.trim() !== "") ? personaContacto : null;
-        const payload = {
-            nombreRazonSocial,
-            telefonoCompleto: `${prefijoTelefono}${numeroTelefono}`,
-            rifCedulaCompleto: `${prefijoRif}-${numeroRif}`,
-            prefijoTelefono, numeroTelefono, prefijoRif, numeroRif,
-            domicilioFiscal, correo,
-            personaContactoCliente: contactValue, 
-        };
+        if (!nombreRazonSocial?.trim() || numeroTelefono?.length !== 7) return toast.error("Datos de cliente inválidos");
+        
+        setIsLoading(true);
         try {
-            setIsLoading(true);
-            const newId = await saveClient(payload, idToSave);
-            const clients = await getFrequentClients();
-            setFrequentClients(clients.map(c => ({
-                id: c.id!, nombreRazonSocial: c.nombreRazonSocial, rifCedula: c.rifCedulaCompleto, 
-                telefono: c.telefonoCompleto, correo: c.correo, domicilioFiscal: c.domicilioFiscal, personaContacto: c.personaContactoCliente
-            })));
+            const idToSave = (selectedClientId === 'NEW' || selectedClientId === 'CUSTOM') ? undefined : selectedClientId;
+            const payload = {
+                nombreRazonSocial, telefonoCompleto: `${prefijoTelefono}${numeroTelefono}`,
+                rifCedulaCompleto: `${prefijoRif}-${numeroRif}`, prefijoTelefono, numeroTelefono, prefijoRif, numeroRif,
+                domicilioFiscal, correo, personaContactoCliente: JEFES_CONTACTO.includes(personaContacto as any) ? null : personaContacto
+            };
+            const newId = await saveClient(cleanFirebaseObject(payload), idToSave);
+            toast.success("Cliente guardado");
             setSelectedClientId(newId);
             setIsClientEditing(false);
-            toast.success("Cliente guardado.");
-        } catch { toast.error("Error al guardar cliente."); } 
-        finally { setIsLoading(false); }
-    }, [formData.cliente, selectedClientId]);
+            const updated = await getFrequentClients();
+            setFrequentClients(updated.map(c => ({ id: c.id, nombreRazonSocial: c.nombreRazonSocial, rifCedula: c.rifCedulaCompleto, telefono: c.telefonoCompleto })));
+        } catch { toast.error("Error al guardar cliente"); } finally { setIsLoading(false); }
+    };
 
-    const handleDeleteClientData = useCallback(async () => {
-        if (!window.confirm('¿Eliminar cliente?')) return;
+    const handleDeleteClientData = async () => {
+        if (!window.confirm("¿Seguro que deseas eliminar este cliente?")) return;
+        setIsLoading(true);
         try {
-            setIsLoading(true);
-            await deleteClient(selectedClientId); 
+            await deleteClient(selectedClientId);
+            toast.success("Cliente eliminado");
             setSelectedClientId('NEW');
             setIsClientEditing(true);
-            setFormData(prev => ({ ...prev, cliente: INITIAL_FORM_DATA.cliente }));
-            const clients = await getFrequentClients();
-            setFrequentClients(clients.map(c => ({
-                id: c.id!, nombreRazonSocial: c.nombreRazonSocial, rifCedula: c.rifCedulaCompleto, 
-                telefono: c.telefonoCompleto, correo: c.correo, domicilioFiscal: c.domicilioFiscal, personaContacto: c.personaContactoCliente
-            })));
-            toast.success("Cliente eliminado.");
-        } catch { toast.error("Error eliminando."); } 
-        finally { setIsLoading(false); }
-    }, [selectedClientId]);
+            const updated = await getFrequentClients();
+            setFrequentClients(updated.map(c => ({ id: c.id, nombreRazonSocial: c.nombreRazonSocial, rifCedula: c.rifCedulaCompleto, telefono: c.telefonoCompleto })));
+        } catch { toast.error("Error al eliminar"); } finally { setIsLoading(false); }
+    };
 
     const handleChange = useCallback((path: string, value: any) => {
-        setFormData(prev => {
-            const newForm = { ...prev };
+        setFormData((prev: any) => {
+            const newForm = JSON.parse(JSON.stringify(prev));
             const keys = path.split('.');
-            let current: any = newForm;
+            let current = newForm;
             for (let i = 0; i < keys.length - 1; i++) current = current[keys[i]];
             const lastKey = keys[keys.length - 1];
-            if (lastKey === 'numeroTelefono') value = value.replace(/[^0-9]/g, '').slice(0, 7);
-            if (lastKey === 'numeroRif') value = value.replace(/[^0-9]/g, '').slice(0, 9);
             current[lastKey] = value;
             return newForm;
         });
     }, []);
-    
-    // 🔥 MANEJO DE ÍTEMS
-    const handleSaveItem = useCallback((newItem: ItemOrden & { materialDeImpresion?: string, archivoTipo?: string, archivoFormato?: string }) => {
-        setFormData(prev => {
-            const itemProcesado = { 
-                ...newItem, 
-                empleadoAsignado: newItem.empleadoAsignado || "N/A", 
-                materialDeImpresion: newItem.materialDeImpresion || "Otro/No aplica" 
-            };
-
-            let newItems = [...prev.items];
-
-            if (editingItemIndex !== null) {
-                newItems[editingItemIndex] = itemProcesado;
-            } else {
-                newItems = [...newItems, itemProcesado];
-            }
-
-            const newForm = { ...prev, items: newItems };
-            
-            // Auto-check servicios
-            if (newItem.unidad === 'tiempo' || newItem.tipoServicio === 'CORTE') newForm.serviciosSolicitados.corteLaser = true;
-            if (newItem.tipoServicio === 'IMPRESION') newForm.serviciosSolicitados.impresionDigital = true;
-            if (newItem.tipoServicio === 'ROTULACION') newForm.serviciosSolicitados.rotulacion = true;
-            if (newItem.tipoServicio === 'AVISO_CORPOREO') newForm.serviciosSolicitados.avisoCorporeo = true;
-            
-            return newForm;
-        });
-        
-        setEditingItemIndex(null);
-    }, [editingItemIndex]);
-
-    const handleEditItemClick = (index: number) => {
-        setEditingItemIndex(index);
-        setIsItemModalOpen(true);
-    };
-
-    const handleNewItemClick = () => {
-        setEditingItemIndex(null);
-        setIsItemModalOpen(true);
-    };
 
     const currentTotal = useMemo(() => {
-        return formData.items.reduce((sum, item) => {
-            let subtotal = 0;
-            const { unidad, cantidad, precioUnitario, medidaXCm, medidaYCm } = item as any;
-            if (cantidad <= 0 || precioUnitario < 0) return sum;
-            
-            if (unidad === 'und') subtotal = cantidad * precioUnitario;
-            else if (unidad === 'm2' && medidaXCm && medidaYCm) subtotal = (medidaXCm / 100) * (medidaYCm / 100) * precioUnitario * cantidad;
-            else if (unidad === 'tiempo') {
-                subtotal = cantidad * precioUnitario;
-            }
-            return sum + subtotal;
+        return formData.items.reduce((sum: number, item: any) => {
+            const cantidad = parseFloat(item.cantidad) || 0;
+            const precio = parseFloat(item.precioUnitario) || 0;
+            const x = parseFloat(item.medidaXCm) || 0;
+            const y = parseFloat(item.medidaYCm) || 0;
+            if (cantidad <= 0) return sum;
+            let sub = (item.unidad === 'm2' && x > 0 && y > 0) ? (x / 100) * (y / 100) * precio * cantidad : precio * cantidad;
+            return sum + sub;
         }, 0);
     }, [formData.items]);
 
-    const handleSave = async () => {
+    const handleSaveItem = useCallback((newItem: any) => {
+        setFormData((prev: any) => {
+            const itemProcesado = { ...newItem, empleadoAsignado: newItem.empleadoAsignado || "N/A" };
+            let newItems = [...prev.items];
+            if (editingItemIndex !== null) newItems[editingItemIndex] = itemProcesado;
+            else newItems.push(itemProcesado);
+            return { ...prev, items: newItems };
+        });
+        setEditingItemIndex(null);
+        setIsItemModalOpen(false);
+    }, [editingItemIndex]);
+
+    const handleSaveOrder = async () => {
         setIsLoading(true);
         const { prefijoTelefono, numeroTelefono, prefijoRif, numeroRif, ...clienteRest } = formData.cliente;
         const finalPayload = {
@@ -358,272 +234,177 @@ export const OrderFormWizardV2: React.FC<OrderFormWizardProps> = ({ onSave, onCl
             cliente: {
                 ...clienteRest,
                 telefono: `${prefijoTelefono}${numeroTelefono}`,
-                rifCedula: prefijoRif && numeroRif ? `${prefijoRif}-${numeroRif}` : '',
+                rifCedula: `${prefijoRif}-${numeroRif}`,
             },
             totalUSD: parseFloat(currentTotal.toFixed(2)),
         };
 
         try {
-            await onSave(finalPayload as any); 
-            toast.success(ordenToEdit ? `Orden #${finalPayload.ordenNumero} actualizada.` : `Orden #${finalPayload.ordenNumero} creada.`);
+            const cleanPayload = cleanFirebaseObject(finalPayload);
+            await onSave(cleanPayload);
+            toast.success("Orden guardada");
             onClose();
         } catch (error) {
-            toast.error("Error al guardar la orden.");
+            console.error(error);
+            toast.error("Error al guardar");
         } finally {
             setIsLoading(false);
         }
     };
 
-    const isStep1Valid = useMemo(() => {
-        const { nombreRazonSocial, numeroTelefono } = formData.cliente;
-        const { fechaEntrega } = formData;
-        return Boolean(nombreRazonSocial?.trim().length > 0 && numeroTelefono?.trim().length === 7 && fechaEntrega?.trim().length > 0);
-    }, [formData.cliente, formData.fechaEntrega]);
-    
-    const isStep2Valid = useMemo(() => formData.items.length > 0, [formData.items.length]);
+    const isStep1Valid = formData.cliente.nombreRazonSocial?.length > 0 && formData.cliente.numeroTelefono?.length === 7;
 
     return (
-        <Card className={cn("w-full max-w-7xl mx-auto shadow-2xl dark:border-gray-800 bg-background flex flex-col overflow-hidden h-[90vh] md:h-[85vh]", className)}>
-            <div className="flex flex-col border-b dark:border-gray-800 bg-muted/20 flex-shrink-0">
-                <div className="flex items-center justify-between p-4 md:p-6 pb-4">
-                    <div className="space-y-1">
-                        <CardTitle className="text-2xl font-bold tracking-tight text-primary">
-                            {ordenToEdit ? `Editar Orden #${ordenToEdit.ordenNumero}` : 'Nueva Orden de Servicio'}
-                        </CardTitle>
-                        <CardDescription className="hidden md:block">
-                            {ordenToEdit ? 'Modifique los datos necesarios.' : 'Complete los datos requeridos para procesar la solicitud.'}
-                        </CardDescription>
+        <div className="flex flex-col h-full bg-slate-50/50 dark:bg-slate-950/50 overflow-hidden">
+            <header className="shrink-0 p-6 md:p-10 bg-white/70 dark:bg-slate-900/70 backdrop-blur-2xl border-b border-slate-200/50 flex flex-col md:flex-row justify-between items-center gap-6">
+                <div className="flex items-center gap-5">
+                    <div className="h-16 w-16 bg-blue-600 rounded-[1.8rem] flex items-center justify-center text-white shadow-xl shadow-blue-500/20">
+                        <Receipt className="w-8 h-8" />
                     </div>
-                    <div className="flex items-center gap-1 md:gap-4">
-                        {[1, 2, 3].map((s) => (
-                            <div key={s} className="flex items-center">
-                                <div className={cn("flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold border-2 transition-all duration-300", step === s ? "border-primary bg-primary text-primary-foreground scale-110 shadow-lg" : step > s ? "border-green-500 bg-green-500 text-white" : "border-muted-foreground/30 text-muted-foreground bg-background")}>
-                                    {step > s ? <Check className="w-4 h-4" /> : s}
-                                </div>
-                                {s < 3 && <div className={cn("w-6 md:w-12 h-1 mx-1 md:mx-2 rounded-full", step > s ? "bg-green-500" : "bg-muted-foreground/20")} />}
+                    <div>
+                        <h2 className="text-3xl font-black tracking-tighter uppercase text-slate-900 dark:text-white leading-none">
+                            {ordenToEdit ? `Editar #${formData.ordenNumero}` : 'Nueva Orden'}
+                        </h2>
+                        <div className="flex items-center gap-3 mt-2">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Paso {step} de 3</span>
+                            <div className="flex gap-1.5">
+                                {[1, 2, 3].map(s => <div key={s} className={cn("h-1.5 w-8 rounded-full transition-all duration-500", step >= s ? "bg-blue-600" : "bg-slate-200 dark:bg-slate-800")} />)}
                             </div>
-                        ))}
+                        </div>
                     </div>
                 </div>
-            </div>
-            
-            <div className="flex-1 min-h-0 relative"> 
-                <ScrollArea className="h-full w-full bg-white dark:bg-slate-950/50"> 
-                    <div className="p-4 md:p-8 max-w-6xl mx-auto">
-                        {step === 1 && <Step1 
-                            data={formData} 
-                            onChange={handleChange} 
-                            frequentClients={frequentClients}
-                            isClientLoading={isClientLoading}
-                            onClientSelected={handleSelectClient}
-                            isClientEditing={isClientEditing}
-                            selectedClientId={selectedClientId}
-                            onSaveClient={handleSaveClientData}
-                            onEditClient={() => setIsClientEditing(true)}
-                            onDeleteClient={handleDeleteClientData}
-                            isWizardLoading={isLoading}
-                            ordenNumero={formData.ordenNumero}
-                            refreshOrderNum={fetchOrderNumber}
-                            isOrderNumLoading={isOrderNumLoading}
-                            isStepValid={isStep1Valid}
-                            isEditingOrder={!!ordenToEdit}
-                        />}
-                        {step === 2 && <Step2 
-                            items={formData.items} 
-                            removeItem={(idx: number) => setFormData(p => ({...p, items: p.items.filter((_, i) => i !== idx)}))} 
-                            data={formData} 
-                            onChange={handleChange}
-                            onItemAssignmentChange={(idx: number, val: string) => {
-                                const newItems = [...formData.items]; (newItems[idx] as any).empleadoAsignado = val;
-                                setFormData(p => ({...p, items: newItems}));
-                            }}
-                            openItemModal={handleNewItemClick}
-                            onEditItem={handleEditItemClick}
-                            currentTotal={currentTotal}
-                            designersList={designersList} // 🔥 PASAMOS LA LISTA DE FIREBASE
-                        />}
-                        {step === 3 && <Step3 data={formData} totalUSD={currentTotal} onChange={handleChange} />}
+                <div className="flex items-center gap-4">
+                    <Badge variant="outline" className="h-10 px-4 rounded-2xl border-slate-200 bg-white font-black text-blue-600 text-lg">
+                        TOTAL: ${currentTotal.toFixed(2)}
+                    </Badge>
+                    <Button variant="ghost" onClick={onClose} className="rounded-full h-12 w-12 hover:bg-red-50 hover:text-red-500"><X className="w-6 h-6" /></Button>
+                </div>
+            </header>
+
+            <div className="flex-1 min-h-0 relative">
+                <ScrollArea className="h-full">
+                    <div className="p-6 md:p-12 max-w-6xl mx-auto">
+                        <AnimatePresence mode="wait">
+                            <motion.div key={step} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                                
+                                {step === 1 && (
+                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                        <div className="lg:col-span-2 space-y-6">
+                                            <section className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-8">
+                                                <div className="flex justify-between items-center">
+                                                    <div className="flex items-center gap-3"><Users className="text-blue-500"/><h3 className="font-black text-sm uppercase text-slate-400">Datos Cliente</h3></div>
+                                                    <div className="flex gap-2">
+                                                        <Button size="sm" variant={isClientEditing ? "default" : "outline"} onClick={() => isClientEditing ? handleSaveClientData() : setIsClientEditing(true)} className="rounded-xl font-black">
+                                                            {isClientEditing ? <><Save className="w-4 h-4 mr-2"/> Guardar</> : <><Pencil className="w-4 h-4 mr-2"/> Editar</>}
+                                                        </Button>
+                                                        {!isClientEditing && <Button size="sm" variant="destructive" onClick={handleDeleteClientData} className="rounded-xl w-10 p-0"><Trash2 className="w-4 h-4"/></Button>}
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-6">
+                                                    <Select onValueChange={handleSelectClient} value={selectedClientId}>
+                                                        <SelectTrigger className="h-14 rounded-2xl bg-slate-50 border-none font-bold text-lg"><SelectValue placeholder="Buscar..." /></SelectTrigger>
+                                                        <SelectContent><SelectItem value="NEW" className="font-black text-blue-600">✨ Nuevo Cliente</SelectItem>{frequentClients.map(c => <SelectItem key={c.id} value={c.id}>{c.nombreRazonSocial}</SelectItem>)}</SelectContent>
+                                                    </Select>
+                                                    <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-6 transition-all", !isClientEditing && "opacity-50 pointer-events-none")}>
+                                                        <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre</Label><Input value={formData.cliente?.nombreRazonSocial || ""} onChange={e => handleChange('cliente.nombreRazonSocial', e.target.value)} className="h-12 rounded-xl bg-slate-50 border-none font-bold" /></div>
+                                                        <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-slate-400 ml-2">RIF</Label><div className="flex gap-2"><Select value={formData.cliente?.prefijoRif || "J"} onValueChange={v => handleChange('cliente.prefijoRif', v)}><SelectTrigger className="w-20 h-12 bg-slate-50 border-none font-bold"><SelectValue /></SelectTrigger><SelectContent>{PREFIJOS_RIF.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select><Input value={formData.cliente?.numeroRif || ""} onChange={e => handleChange('cliente.numeroRif', e.target.value)} className="h-12 bg-slate-50 border-none flex-1 font-mono" /></div></div>
+                                                        <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Teléfono</Label><div className="flex gap-2"><Select value={formData.cliente?.prefijoTelefono || "0414"} onValueChange={v => handleChange('cliente.prefijoTelefono', v)}><SelectTrigger className="w-24 h-12 bg-slate-50 border-none font-bold"><SelectValue /></SelectTrigger><SelectContent>{PREFIJOS_TELEFONO.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select><Input value={formData.cliente?.numeroTelefono || ""} onChange={e => handleChange('cliente.numeroTelefono', e.target.value)} className="h-12 bg-slate-50 border-none flex-1 font-mono" /></div></div>
+                                                        <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Persona de Contacto</Label><Input value={formData.cliente?.personaContacto || ""} onChange={e => handleChange('cliente.personaContacto', e.target.value)} className="h-12 rounded-xl bg-slate-50 border-none font-bold" /></div>
+                                                    </div>
+                                                </div>
+                                            </section>
+                                        </div>
+                                        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-6">
+                                            <div className="flex items-center gap-3"><Calendar className="text-orange-500"/><h3 className="font-black text-sm uppercase text-slate-400">Entrega</h3></div>
+                                            <Input type="date" value={formData.fechaEntrega || ""} onChange={e => handleChange('fechaEntrega', e.target.value)} className="h-14 rounded-2xl bg-orange-50 border-none text-xl font-black text-orange-600" />
+                                            <div className="p-4 bg-blue-50/50 rounded-2xl border border-dashed border-blue-200"><div className="flex justify-between items-center text-[10px] font-black uppercase text-blue-400"><span>Orden #</span><RefreshCcw className="w-3 h-3 cursor-pointer" onClick={fetchOrderNumber}/></div><p className="text-2xl font-black text-blue-700">#{formData.ordenNumero || "---"}</p></div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {step === 2 && (
+                                    <div className="space-y-8">
+                                        <div className="flex flex-col md:flex-row justify-between items-end gap-4">
+                                            <div><h3 className="text-3xl font-black tracking-tighter uppercase">Detalle Taller</h3><p className="text-slate-500 font-bold">Agrega productos.</p></div>
+                                            <Button onClick={() => { setEditingItemIndex(null); setIsItemModalOpen(true); }} className="rounded-2xl h-14 px-8 bg-blue-600 font-black text-lg gap-2 shadow-xl shadow-blue-500/20"><Plus className="w-6 h-6"/> Agregar Ítem</Button>
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-4">
+                                            {formData.items.map((item: any, idx: number) => (
+                                                <motion.div key={idx} whileHover={{ x: 10 }} className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-slate-200/50 flex flex-col md:flex-row justify-between items-center gap-6">
+                                                    <div className="flex items-center gap-5 flex-1">
+                                                        <div className="h-14 w-14 bg-slate-50 rounded-2xl flex items-center justify-center">
+                                                            {item.tipoServicio === 'IMPRESION' ? <Printer className="text-blue-500" /> : item.tipoServicio === 'CORTE' ? <Scissors className="text-orange-500" /> : <Palette className="text-purple-500" />}
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <div className="flex items-center gap-2">
+                                                                <h4 className="font-black text-lg uppercase leading-tight">{item.nombre}</h4>
+                                                                {item.empleadoAsignado && item.empleadoAsignado !== "N/A" && (
+                                                                    <Badge variant="outline" className="bg-slate-50 dark:bg-slate-800 text-slate-500 border-slate-200 text-[9px] font-black uppercase px-2 py-0 gap-1">
+                                                                        <User className="w-2.5 h-2.5" /> {item.empleadoAsignado}
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                                <Badge variant="secondary" className="rounded-lg text-[9px] font-black uppercase">{item.cantidad} {item.unidad}</Badge>
+                                                                {item.suministrarMaterial && <Badge variant="outline" className="text-emerald-600 border-emerald-200 text-[9px] font-black uppercase">Material Incluido</Badge>}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-6">
+                                                        <div className="text-right"><p className="text-[10px] font-black text-slate-400 uppercase">Total</p><p className="text-2xl font-black text-blue-600">${(parseFloat(item.cantidad) * parseFloat(item.precioUnitario)).toFixed(2)}</p></div>
+                                                        <div className="flex gap-2">
+                                                            <Button variant="ghost" size="icon" onClick={() => { setEditingItemIndex(idx); setIsItemModalOpen(true); }} className="rounded-xl hover:bg-blue-50 text-blue-500"><Pencil className="w-4 h-4"/></Button>
+                                                            <Button variant="ghost" size="icon" onClick={() => setFormData({...formData, items: formData.items.filter((_:any, i:number)=> i !== idx)})} className="rounded-xl hover:bg-red-50 text-red-500"><Trash2 className="w-4 h-4"/></Button>
+                                                        </div>
+                                                    </div>
+                                                </motion.div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {step === 3 && (
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-8">
+                                            <h3 className="font-black text-sm uppercase text-slate-400">Resumen Final</h3>
+                                            <div className="space-y-4">
+                                                <div className="flex justify-between p-4 bg-slate-50 rounded-2xl"><span className="text-slate-500 font-bold uppercase text-xs">Cliente</span><span className="font-black">{formData.cliente?.nombreRazonSocial || "---"}</span></div>
+                                                <div className="flex justify-between p-6 bg-blue-600 rounded-[2rem] text-white shadow-xl shadow-blue-500/30"><span className="font-black uppercase text-sm">Total Orden</span><span className="text-4xl font-black tracking-tighter">${currentTotal.toFixed(2)}</span></div>
+                                            </div>
+                                        </div>
+                                        <div className="bg-yellow-50/50 p-8 rounded-[2.5rem] border border-yellow-200 flex flex-col">
+                                            <h3 className="font-black text-sm uppercase text-yellow-600 mb-4">Notas de Producción</h3>
+                                            <Textarea value={formData.descripcionDetallada || ""} onChange={e => handleChange('descripcionDetallada', e.target.value)} className="flex-1 min-h-[200px] bg-transparent border-none text-lg font-bold text-yellow-900 focus-visible:ring-0 resize-none" placeholder="Instrucciones..." />
+                                        </div>
+                                    </div>
+                                )}
+                                
+                            </motion.div>
+                        </AnimatePresence>
                     </div>
                 </ScrollArea>
             </div>
 
-            <Separator className="dark:bg-gray-800 flex-shrink-0" />
-            <div className="flex justify-between p-4 md:p-6 bg-muted/10 flex-shrink-0 z-10 border-t">
-                <div className="flex gap-2">
-                    <Button onClick={() => setStep(prev => Math.max(1, prev - 1))} disabled={step === 1 || isLoading} variant="ghost" className="gap-2 pl-2">
-                        <ChevronLeft className="w-4 h-4" /> Anterior
-                    </Button>
-                    {step === 1 && <Button variant="outline" onClick={onClose}>Cancelar</Button>}
-                </div>
-                <Button 
-                    onClick={() => step < 3 ? setStep(s => s + 1) : handleSave()}
-                    disabled={isLoading || (step === 1 && !isStep1Valid) || (step === 2 && !isStep2Valid)}
-                    className={cn("gap-2 min-w-[150px] transition-all", step === 3 ? "bg-green-600 hover:bg-green-700 text-white shadow-md hover:shadow-lg" : "bg-primary hover:bg-primary/90 shadow-sm")}
-                >
-                    {step < 3 ? 'Siguiente' : (isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (ordenToEdit ? 'Actualizar Orden' : 'Finalizar Orden'))}
-                    {step < 3 && <ChevronRight className="w-4 h-4" />}
+            <footer className="shrink-0 p-8 md:px-12 bg-white/80 backdrop-blur-xl border-t border-slate-200/50 flex justify-between items-center">
+                <Button variant="ghost" onClick={() => step > 1 ? setStep(s => s - 1) : onClose()} className="rounded-2xl h-14 px-8 font-black">
+                    {step === 1 ? 'Cancelar' : 'Anterior'}
                 </Button>
-            </div>
-            
+                <Button 
+                    disabled={isLoading || (step === 1 && !isStep1Valid) || (step === 2 && formData.items.length === 0)}
+                    onClick={() => step < 3 ? setStep(s => s + 1) : handleSaveOrder()}
+                    className={cn("rounded-2xl h-14 px-12 font-black text-lg bg-blue-600 hover:bg-blue-700 shadow-xl transition-all", step === 3 && "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20")}
+                >
+                    {isLoading ? <Loader2 className="animate-spin w-6 h-6"/> : (step === 3 ? 'Finalizar Orden' : 'Siguiente')}
+                </Button>
+            </footer>
+
             <ItemFormModal
                 isOpen={isItemModalOpen}
                 onClose={() => { setIsItemModalOpen(false); setEditingItemIndex(null); }}
                 onAddItem={handleSaveItem}
-                hasPrintingSelected={formData.serviciosSolicitados.impresionDigital || formData.serviciosSolicitados.impresionGranFormato}
-                materialesDisponibles={MATERIALES_IMPRESION}
                 itemToEdit={editingItemIndex !== null ? formData.items[editingItemIndex] : undefined}
+                designers={designersList} 
             />
-        </Card>
-    )
-}
-
-const Step1: React.FC<any> = ({ data, onChange, frequentClients, isClientLoading, onClientSelected, isClientEditing, selectedClientId, onSaveClient, onEditClient, onDeleteClient, ordenNumero, refreshOrderNum, isOrderNumLoading, isWizardLoading }) => {
-    const showError = (field: string) => field === 'telefono' && data.cliente.numeroTelefono.length > 0 && data.cliente.numeroTelefono.length < 7;
-    return (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-8 space-y-4">
-                <Card className="bg-blue-50/40 border-blue-100 shadow-sm">
-                    <div className="p-4 flex flex-col md:flex-row gap-4 items-end justify-between">
-                        <div className="w-full space-y-1.5">
-                            <Label className="text-blue-800 font-bold flex items-center gap-2 text-xs uppercase"><Users className="w-3.5 h-3.5"/> Seleccionar Cliente</Label>
-                            <Select onValueChange={onClientSelected} value={selectedClientId} disabled={isClientEditing && selectedClientId !== 'NEW'}>
-                                <SelectTrigger className="bg-background h-9">{isClientLoading ? <Skeleton className="h-5 w-32"/> : <SelectValue placeholder="Buscar cliente..." />}</SelectTrigger>
-                                <SelectContent><SelectItem value="NEW" className="font-bold text-primary">✨ Nuevo Cliente</SelectItem>{selectedClientId === 'CUSTOM' && <SelectItem value="CUSTOM">✏️ Cliente de la Orden</SelectItem>}<Separator className="my-1"/>{frequentClients.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.nombreRazonSocial}</SelectItem>)}</SelectContent>
-                            </Select>
-                        </div>
-                        <div className="flex gap-2 w-full md:w-auto">{isClientEditing ? <Button size="sm" onClick={onSaveClient} disabled={isWizardLoading} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white h-9">{isWizardLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Save className="w-3.5 h-3.5 mr-2"/>} Guardar</Button> : <><Button size="sm" variant="outline" className="h-9" onClick={onEditClient}><Pencil className="w-3.5 h-3.5 mr-2"/> Editar</Button><Button size="sm" variant="destructive" className="h-9 w-9 p-0" onClick={onDeleteClient}><Trash2 className="w-3.5 h-3.5"/></Button></>}</div>
-                    </div>
-                </Card>
-                <div className={cn("transition-all duration-300 space-y-3", !isClientEditing && "opacity-80 pointer-events-none")}>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div className="space-y-1"><Label className="text-xs">Nombre <span className="text-red-500">*</span></Label><Input className="pl-3" value={data.cliente.nombreRazonSocial} onChange={(e) => onChange('cliente.nombreRazonSocial', e.target.value)} placeholder="Inversiones C.A." /></div>
-                        <div className="space-y-1"><Label className="text-xs">RIF</Label><div className="flex shadow-sm rounded-md"><Select value={data.cliente.prefijoRif} onValueChange={(v) => onChange('cliente.prefijoRif', v)}><SelectTrigger className="w-[65px] rounded-l-md"><SelectValue /></SelectTrigger><SelectContent>{PREFIJOS_RIF.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select><Input className="rounded-l-none" placeholder="12345678" maxLength={9} value={data.cliente.numeroRif} onChange={(e) => onChange('cliente.numeroRif', e.target.value)} /></div></div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div className="space-y-1"><div className="flex justify-between"><Label className="text-xs">Teléfono <span className="text-red-500">*</span></Label>{showError('telefono') && <span className="text-[10px] text-red-500 font-bold">Incompleto</span>}</div><div className="flex shadow-sm rounded-md"><Select value={data.cliente.prefijoTelefono} onValueChange={(v) => onChange('cliente.prefijoTelefono', v)}><SelectTrigger className="w-[80px] rounded-l-md"><SelectValue /></SelectTrigger><SelectContent>{PREFIJOS_TELEFONO.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select><Input className={cn("rounded-l-none", showError('telefono') && "border-red-400 bg-red-50")} placeholder="1234567" maxLength={7} value={data.cliente.numeroTelefono} onChange={(e) => onChange('cliente.numeroTelefono', e.target.value)} /></div></div>
-                        <div className="space-y-1"><Label className="text-xs">Contacto</Label><Select value={JEFES_CONTACTO.includes(data.cliente.personaContacto as any) ? data.cliente.personaContacto : "MANUAL"} onValueChange={(v) => onChange('cliente.personaContacto', v === "MANUAL" ? "" : v)}><SelectTrigger className="w-full bg-muted/30"><SelectValue placeholder="Seleccionar..." /></SelectTrigger><SelectContent>{JEFES_CONTACTO.map(j => <SelectItem key={j} value={j}>{j}</SelectItem>)}<SelectItem value="MANUAL" className="text-orange-500">Manual</SelectItem></SelectContent></Select>{(!JEFES_CONTACTO.includes(data.cliente.personaContacto as any)) && (<Input className="mt-2 h-8 text-sm" placeholder="Nombre..." value={data.cliente.personaContacto || ""} onChange={(e) => onChange('cliente.personaContacto', e.target.value)} />)}</div>
-                    </div>
-                </div>
-            </div>
-            <div className="lg:col-span-4 space-y-4">
-                <Card className="border-t-4 border-t-primary shadow-md h-full bg-muted/5">
-                    <CardHeader className="pb-3 border-b"><CardTitle className="text-base flex items-center gap-2"><Calendar className="w-4 h-4"/> Detalles Orden</CardTitle></CardHeader>
-                    <CardContent className="space-y-6 pt-6">
-                        <div className="space-y-2">
-                            <div className="flex justify-between items-center"><Label className="text-muted-foreground text-[10px] uppercase font-bold tracking-wider">Número</Label><Badge variant="outline" className="text-[10px] h-5">Auto</Badge></div>
-                            <div className="flex gap-2"><div className="relative w-full"><Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-primary opacity-50" /><Input value={ordenNumero || "..."} readOnly className="pl-10 text-xl font-mono font-bold text-center bg-white border-primary/20"/></div><Button variant="outline" size="icon" onClick={refreshOrderNum} disabled={isOrderNumLoading}><RefreshCcw className={cn("w-4 h-4", isOrderNumLoading && "animate-spin")} /></Button></div>
-                        </div>
-                        <div className="space-y-2"><Label className="text-muted-foreground text-[10px] uppercase font-bold tracking-wider">Entrega <span className="text-red-500">*</span></Label><Input type="date" className="h-10 font-medium" value={data.fechaEntrega} onChange={(e) => onChange('fechaEntrega', e.target.value)} /></div>
-                    </CardContent>
-                </Card>
-            </div>
-        </div>
-    )
-}
-
-const Step2: React.FC<any> = ({ items, removeItem, data, onChange, onItemAssignmentChange, openItemModal, onEditItem, currentTotal, designersList }) => { 
-    return (
-        <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div className="lg:col-span-8 space-y-4">
-                    <div className="bg-white dark:bg-slate-950 rounded-lg border p-3 shadow-sm">
-                         <div className="flex flex-wrap gap-2">
-                            {Object.keys(data.serviciosSolicitados).map((key) => {
-                                const isChecked = data.serviciosSolicitados[key];
-                                return (<Button key={key} size="sm" variant={isChecked ? "default" : "outline"} onClick={() => onChange(`serviciosSolicitados.${key}`, !isChecked)} className={cn("h-7 text-xs px-3", isChecked ? "bg-primary border-primary text-white shadow-sm" : "text-muted-foreground border-dashed")}>{isChecked && <Check className="w-3 h-3 mr-1.5" />}{getServiceText(key as any)}</Button>);
-                            })}
-                         </div>
-                    </div>
-                    <Card className="border shadow-md overflow-hidden flex flex-col h-[400px]">
-                        <CardHeader className="flex flex-row items-center justify-between py-2 px-4 bg-muted/20 border-b"><CardTitle className="text-sm font-bold flex items-center gap-2"><div className="bg-primary text-primary-foreground w-5 h-5 rounded-full flex items-center justify-center text-[10px]">{items.length}</div> Ítems Agregados</CardTitle><Button size="sm" onClick={openItemModal} className="h-8 gap-1 bg-primary text-xs"><Plus className="w-3 h-3" /> Agregar</Button></CardHeader>
-                        <div className="flex-grow overflow-auto bg-white dark:bg-slate-950">
-                            <Table>
-                                <TableHeader className="sticky top-0 bg-white dark:bg-slate-950 z-10 shadow-sm"><TableRow className="h-8"><TableHead className="w-[35%] pl-4 text-xs">Descripción</TableHead><TableHead className="text-center w-[10%] text-xs">Cant.</TableHead><TableHead className="w-[20%] text-xs">Detalle</TableHead><TableHead className="text-right w-[15%] text-xs">Total</TableHead><TableHead className="text-center w-[10%] text-xs">Asignado</TableHead><TableHead className="w-[10%] text-center">Acciones</TableHead></TableRow></TableHeader>
-                                <TableBody>
-                                    {items.length > 0 ? items.map((item: any, idx: number) => {
-                                        // 🔥 LÓGICA DINÁMICA DE EMPLEADOS
-                                        const isDesign = item.tipoServicio === 'DISENO';
-                                        const assignmentOptions = isDesign 
-                                            ? ["Sin Asignar", ...designersList.map((d: any) => d.name)] 
-                                            : EMPLEADOS_PRODUCCION;
-
-                                        return (
-                                        <TableRow key={idx} className="group h-10">
-                                            <TableCell className="pl-4 py-2 align-middle">
-                                                <div className="font-bold text-xs text-foreground flex items-center gap-2">
-                                                    {item.tipoServicio === 'DISENO' && <Palette className="w-3 h-3 text-purple-500"/>}
-                                                    {item.tipoServicio === 'CORTE' && <Scissors className="w-3 h-3 text-orange-500"/>}
-                                                    {item.tipoServicio === 'IMPRESION' && <Printer className="w-3 h-3 text-blue-500"/>}
-                                                    {item.nombre}
-                                                </div>
-                                                <div className="flex flex-wrap gap-1 mt-0.5">
-                                                    {item.unidad === 'm2' && <Badge variant="secondary" className="text-[9px] h-4 px-1 font-normal bg-blue-50 text-blue-700 border-blue-100">{item.medidaXCm}x{item.medidaYCm}cm</Badge>}
-                                                    {item.tiempoCorte && <Badge variant="secondary" className="text-[9px] h-4 px-1 font-normal bg-orange-50 text-orange-700 border-orange-100"><Timer className="w-3 h-3 mr-1"/>{item.tiempoCorte}</Badge>}
-                                                    
-                                                    {item.tipoServicio === 'DISENO' && item.archivoTipo && (
-                                                        <Badge variant="outline" className="text-[9px] h-4 px-1">
-                                                            {item.archivoTipo === 'vector' ? <FileCode className="w-3 h-3 mr-1"/> : <FileImage className="w-3 h-3 mr-1"/>}
-                                                            {item.archivoFormato}
-                                                        </Badge>
-                                                    )}
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="text-center align-middle font-mono text-xs">{item.cantidad}</TableCell>
-                                            <TableCell className="text-[10px] text-muted-foreground align-middle truncate max-w-[100px]">{item.materialDeImpresion !== "Otro/No aplica" ? item.materialDeImpresion : (item.materialDetalleCorte || '-')}</TableCell>
-                                            <TableCell className="text-right font-bold text-green-700 dark:text-green-400 align-middle text-xs">
-                                                ${(item.cantidad * item.precioUnitario).toFixed(2)}
-                                            </TableCell>
-                                            
-                                            {/* SELECTOR DE EMPLEADO DINÁMICO */}
-                                            <TableCell className="text-center align-middle">
-                                                <Select value={item.empleadoAsignado || (isDesign ? "Sin Asignar" : "N/A")} onValueChange={(value) => onItemAssignmentChange(idx, value)}>
-                                                    <SelectTrigger className="w-full text-[10px] h-6 min-h-0 px-2 border-dashed">
-                                                        <SelectValue placeholder="-" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {assignmentOptions.map((employee: string) => (
-                                                            <SelectItem key={employee} value={employee} className="text-xs">
-                                                                {employee.includes('(') ? employee.split(' ')[0] : employee}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                            </TableCell>
-                                            
-                                            <TableCell className="align-middle text-center">
-                                                <Button variant="ghost" size="icon" onClick={() => onEditItem(idx)} className="h-6 w-6 text-blue-500 hover:bg-blue-50 mr-1"><Pencil className="w-3 h-3"/></Button>
-                                                <Button variant="ghost" size="icon" onClick={() => removeItem(idx)} className="h-6 w-6 text-muted-foreground hover:text-red-500"><X className="w-3 h-3"/></Button>
-                                            </TableCell>
-                                        </TableRow>
-                                    )}) : (<TableRow><TableCell colSpan={6} className="h-32 text-center text-muted-foreground bg-muted/5"><p className="text-sm">La lista de ítems está vacía.</p></TableCell></TableRow>)}
-                                </TableBody>
-                            </Table>
-                        </div>
-                    </Card>
-                </div>
-                <div className="lg:col-span-4 space-y-4">
-                     <Card className="bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-slate-950 border-green-200 dark:border-green-800 shadow-md sticky top-4">
-                        <CardHeader className="pb-2 border-b border-green-100 dark:border-green-900/50"><CardTitle className="text-green-800 dark:text-green-300 flex items-center gap-2 text-base"><DollarSign className="w-4 h-4"/> Total Estimado</CardTitle></CardHeader>
-                        <CardContent className="pt-6 text-center"><div className="text-4xl font-extrabold text-green-700 dark:text-green-400 tracking-tight">${currentTotal.toFixed(2)}</div></CardContent>
-                        <CardFooter className="bg-green-100/30 dark:bg-green-900/10 py-2 px-4"><div className="w-full flex justify-between text-xs text-green-800 dark:text-green-300"><span>Cant. Ítems:</span><span className="font-bold">{items.length}</span></div></CardFooter>
-                     </Card>
-                </div>
-            </div>
-        </div>
-    )
-}
-
-const Step3: React.FC<any> = ({ data, totalUSD, onChange }) => {
-    return (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full">
-            <div className="lg:col-span-7 space-y-4">
-                <Card>
-                    <CardHeader className="pb-3 bg-muted/20"><CardTitle className="text-sm font-bold uppercase text-muted-foreground flex items-center gap-2"><User className="w-4 h-4"/> Resumen del Cliente</CardTitle></CardHeader>
-                    <CardContent className="grid grid-cols-2 gap-y-4 pt-4 text-sm"><div className="col-span-2"><p className="text-xs text-muted-foreground">Razón Social</p><p className="font-semibold text-base">{data.cliente.nombreRazonSocial}</p></div><div><p className="text-xs text-muted-foreground">RIF / Cédula</p><p className="font-mono">{data.cliente.prefijoRif}-{data.cliente.numeroRif}</p></div><div><p className="text-xs text-muted-foreground">Teléfono</p><p className="font-mono">{data.cliente.prefijoTelefono}-{data.cliente.numeroTelefono}</p></div></CardContent>
-                </Card>
-                <Card className="bg-muted/10"><CardContent className="flex items-center justify-between p-6"><span className="text-muted-foreground font-medium">Total a Cobrar:</span><span className="text-3xl font-bold text-green-700 dark:text-green-400">${totalUSD.toFixed(2)}</span></CardContent></Card>
-            </div>
-            <div className="lg:col-span-5 h-full"><div className="bg-white dark:bg-slate-950 p-4 rounded-lg border shadow-sm h-full flex flex-col"><h3 className="text-sm font-bold uppercase text-muted-foreground mb-2">Notas Internas</h3><div className="flex-grow"><Label htmlFor="notas" className="sr-only">Notas</Label><Textarea id="notas" className="w-full h-full min-h-[200px] resize-none border-0 bg-yellow-50/50 dark:bg-yellow-950/10 focus-visible:ring-1 focus-visible:ring-yellow-400" placeholder="Instrucciones para producción..." value={data.descripcionDetallada} onChange={(e) => onChange('descripcionDetallada', e.target.value)}/></div></div></div>
         </div>
     )
 }
