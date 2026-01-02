@@ -545,7 +545,7 @@ const CalculatorView = () => {
                     <div className="p-3 bg-blue-600 rounded-2xl text-white shadow-lg shadow-blue-500/20"><CalcIcon size={24}/></div>
                     <div>
                         <h1 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tighter italic leading-none">Calculadora</h1>
-                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1.5">Siskoven v2.5</p>
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1.5">SMR v2.5</p>
                     </div>
                 </motion.div>
                 <motion.div initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="flex gap-2">

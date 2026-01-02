@@ -6,7 +6,7 @@
       "esnext"
     ],
     "allowJs": true,
-    "target": "ES6",
+    "target": "esnext",
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
@@ -32,9 +32,7 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next\\dev/types/**/*.ts",
-    ".next\\dev/types/**/*.ts"
+    ".next/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

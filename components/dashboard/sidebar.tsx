@@ -129,7 +129,7 @@ export default function Sidebar({
                         </div>
                         <div className="flex-1 overflow-hidden">
                             <p className="text-xs font-black text-slate-900 dark:text-white truncate">Administrador</p>
-                            <p className="text-[10px] font-bold text-slate-400 truncate tracking-tighter">SMR Siskoven © 2026</p>
+                            <p className="text-[10px] font-bold text-slate-400 truncate tracking-tighter">SMR © 2026</p>
                         </div>
                         <ThemeToggle />
                     </motion.div>
