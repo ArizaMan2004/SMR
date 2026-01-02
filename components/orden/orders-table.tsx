@@ -1,14 +1,18 @@
 // @/components/orden/orders-table.tsx
 "use client"
 
-import { useState, useMemo } from "react"
+import React, { useState, useMemo } from "react" // Importación de React añadida para solucionar el error
+import { motion, AnimatePresence } from "framer-motion"
 import { type OrdenServicio, EstadoOrden } from "@/lib/types/orden"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Card, CardContent } from "@/components/ui/card"
 import { formatCurrency, formatDate } from "@/lib/utils/order-utils"
-import { Trash2, Eye, Clock, Pencil, Archive, Zap, Search, ChevronLeft, ChevronRight } from "lucide-react"
+import { 
+    Trash2, Eye, Clock, Pencil, Archive, Zap, 
+    ChevronLeft, ChevronRight, ChevronDown, User, Hash
+} from "lucide-react"
 import { StatusEditModal } from "@/components/orden/status-edit-modal"
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
 
@@ -21,15 +25,15 @@ interface OrdersTableProps {
   bcvRate: number
 }
 
-// Configuración de colores
-const estadoBadgeVariant = (estado: string) => {
-  const upperState = estado?.toUpperCase();
-  switch (upperState) {
-    case "PENDIENTE": return "secondary" 
-    case "PROCESO": return "default"   
-    case "TERMINADO": return "success" 
-    case "CANCELADO": return "destructive" 
-    default: return "outline"
+// --- ESTILOS DE BADGES PROFESIONALES ---
+const getBadgeStyles = (estado: string) => {
+  const s = estado?.toUpperCase();
+  switch (s) {
+    case "PENDIENTE": return "bg-orange-100 text-orange-700 dark:bg-orange-500/10 dark:text-orange-400 border-orange-200/50";
+    case "PROCESO": return "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400 border-blue-200/50";
+    case "TERMINADO": return "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border-emerald-200/50";
+    case "CANCELADO": return "bg-rose-100 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400 border-rose-200/50";
+    default: return "bg-slate-100 text-slate-600 border-slate-200";
   }
 }
 
@@ -53,199 +57,223 @@ export function OrdersTable({
   bcvRate,
 }: OrdersTableProps) {
   
-  const [searchTerm, setSearchTerm] = useState("")
+  const [selectedOrden, setSelectedOrden] = useState<OrdenServicio | null>(null)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false)
-  const [selectedOrden, setSelectedOrden] = useState<OrdenServicio | null>(null)
 
-  // 1. Filtrado
-  const filteredOrders = useMemo(() => {
-    return ordenes.filter((orden) => {
-      const term = searchTerm.toLowerCase()
-      const nOrden = String(orden.ordenNumero || "").toLowerCase()
-      const cliente = (orden.cliente?.nombreRazonSocial || "").toLowerCase()
-      const rif = (orden.cliente?.rifCedula || "").toLowerCase()
-      return nOrden.includes(term) || cliente.includes(term) || rif.includes(term)
-    })
-  }, [ordenes, searchTerm])
+  // Despliegue de secciones
+  const [showActive, setShowActive] = useState(true)
+  const [showHistory, setShowHistory] = useState(false)
 
-  // 2. Separación
   const { activeOrders, historyOrders } = useMemo(() => {
     const active: OrdenServicio[] = []
     const history: OrdenServicio[] = []
 
-    const sorted = [...filteredOrders].sort((a, b) => 
+    const sorted = [...ordenes].sort((a, b) => 
         new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
     );
 
-    sorted.forEach(orden => {
-        const estadoNormalized = orden.estado?.toUpperCase();
-        if (estadoNormalized === "PENDIENTE" || estadoNormalized === "PROCESO") {
-            active.push(orden)
-        } else {
-            history.push(orden)
-        }
-    })
+    sorted.forEach(o => {
+        const s = o.estado?.toUpperCase();
+        if (s === "PENDIENTE" || s === "PROCESO") active.push(o);
+        else history.push(o);
+    });
 
     return { activeOrders: active, historyOrders: history }
-  }, [filteredOrders])
+  }, [ordenes])
 
-  const openDetail = (o: OrdenServicio) => { setSelectedOrden(o); setIsDetailModalOpen(true) }
-  const openStatus = (o: OrdenServicio) => { setSelectedOrden(o); setIsStatusModalOpen(true) }
+  const handleOpenDetail = (o: OrdenServicio) => { setSelectedOrden(o); setIsDetailModalOpen(true); }
+  const handleOpenStatus = (o: OrdenServicio) => { setSelectedOrden(o); setIsStatusModalOpen(true); }
 
   return (
-    <div className="space-y-10 pb-20">
+    <div className="space-y-12 pb-24">
       
-      {/* BUSCADOR */}
-      <div className="sticky top-0 z-20 bg-gray-50/95 dark:bg-gray-900/95 backdrop-blur py-4 border-b border-gray-200 dark:border-gray-800 transition-colors">
-        <div className="relative max-w-md">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Buscar orden, cliente, RIF..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 border rounded-full text-sm bg-white dark:bg-gray-950 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
-            />
-        </div>
-      </div>
+      {/* --- SECCIÓN: ÓRDENES ACTIVAS --- */}
+      <section className="space-y-6">
+        <button 
+            onClick={() => setShowActive(!showActive)}
+            className="group flex items-center justify-between w-full p-4 bg-white/50 dark:bg-slate-900/50 hover:bg-white dark:hover:bg-slate-800 rounded-[2rem] border border-slate-200/50 dark:border-slate-800/50 transition-all shadow-sm outline-none"
+        >
+            <div className="flex items-center gap-5">
+                <div className="p-3 bg-blue-600 rounded-2xl shadow-lg shadow-blue-200 dark:shadow-none group-hover:rotate-6 transition-transform">
+                    <Zap className="w-6 h-6 text-white" />
+                </div>
+                <div className="text-left">
+                    <h2 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Órdenes en Curso</h2>
+                    <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Producción Activa en Taller</p>
+                </div>
+                <Badge className="ml-4 bg-blue-600 text-white border-none px-3 rounded-full">{activeOrders.length}</Badge>
+            </div>
+            <ChevronDown className={`w-6 h-6 text-slate-400 transition-transform duration-500 ${showActive ? 'rotate-180' : ''}`} />
+        </button>
 
-      {/* --- TABLA 1: ACTIVAS --- */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-full"><Zap className="w-5 h-5 text-blue-600 dark:text-blue-400" /></div>
-            <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Órdenes en Curso</h2>
-            <Badge className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:text-white">{activeOrders.length}</Badge>
-        </div>
+        <AnimatePresence>
+            {showActive && (
+                <motion.div initial={{ opacity: 0, y: -20, height: 0 }} animate={{ opacity: 1, y: 0, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.4 }}>
+                    <Card className="border-none shadow-xl shadow-slate-200/50 dark:shadow-none bg-white dark:bg-slate-900 rounded-[2.5rem] overflow-hidden">
+                        <CardContent className="p-0">
+                            <OrdersSubTable 
+                                data={activeOrders} 
+                                isHistory={false} 
+                                actions={{ onDelete, onEdit, handleOpenDetail, handleOpenStatus }} 
+                            />
+                        </CardContent>
+                    </Card>
+                </motion.div>
+            )}
+        </AnimatePresence>
+      </section>
 
-        <Card className="border-t-4 border-t-blue-500 shadow-md bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800">
-            <CardContent className="p-0">
-                <OrdersSubTable 
-                    data={activeOrders}
-                    isHistory={false}
-                    actions={{ onDelete, onEdit, openDetail, openStatus }}
-                />
-            </CardContent>
-        </Card>
-      </div>
+      {/* --- SECCIÓN: HISTORIAL --- */}
+      <section className="space-y-6">
+        <button 
+            onClick={() => setShowHistory(!showHistory)}
+            className="group flex items-center justify-between w-full p-4 bg-white/30 dark:bg-slate-900/30 hover:bg-white/50 rounded-[2rem] border border-slate-200/50 transition-all outline-none"
+        >
+            <div className="flex items-center gap-5 opacity-70">
+                <div className="p-3 bg-slate-200 dark:bg-slate-800 rounded-2xl transition-transform group-hover:-rotate-6">
+                    <Archive className="w-6 h-6 text-slate-600" />
+                </div>
+                <div className="text-left">
+                    <h2 className="text-xl font-black text-slate-600 dark:text-slate-400 tracking-tight">Historial de Finalizados</h2>
+                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Cerradas o Canceladas</p>
+                </div>
+                <Badge variant="outline" className="ml-4 rounded-full border-slate-300 text-slate-500">{historyOrders.length}</Badge>
+            </div>
+            <ChevronDown className={`w-6 h-6 text-slate-400 transition-transform duration-500 ${showHistory ? 'rotate-180' : ''}`} />
+        </button>
 
-      {/* --- TABLA 2: HISTORIAL --- */}
-      <div className="space-y-4 pt-8">
-        <div className="flex items-center gap-2 opacity-80">
-            <div className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full"><Archive className="w-5 h-5 text-gray-600 dark:text-gray-400" /></div>
-            <h2 className="text-xl font-bold text-gray-600 dark:text-gray-400">Historial de Finalizados</h2>
-            <Badge variant="outline" className="dark:text-gray-300 dark:border-gray-700">{historyOrders.length}</Badge>
-        </div>
-
-        <Card className="border-t-4 border-t-gray-400 shadow-sm bg-gray-50/50 dark:bg-gray-900/50 opacity-90 border-gray-200 dark:border-gray-800">
-            <CardContent className="p-0">
-                <OrdersSubTable 
-                    data={historyOrders}
-                    isHistory={true}
-                    actions={{ onDelete, onEdit, openDetail, openStatus }}
-                />
-            </CardContent>
-        </Card>
-      </div>
+        <AnimatePresence>
+            {showHistory && (
+                <motion.div initial={{ opacity: 0, y: -20, height: 0 }} animate={{ opacity: 1, y: 0, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.4 }}>
+                    <Card className="border-none shadow-lg bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-[2.5rem] overflow-hidden opacity-90">
+                        <CardContent className="p-0">
+                            <OrdersSubTable 
+                                data={historyOrders} 
+                                isHistory={true} 
+                                actions={{ onDelete, onEdit, handleOpenDetail, handleOpenStatus }} 
+                            />
+                        </CardContent>
+                    </Card>
+                </motion.div>
+            )}
+        </AnimatePresence>
+      </section>
 
       {/* MODALES */}
       {selectedOrden && (
         <>
-          <OrderDetailModal orden={selectedOrden} open={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} smrLogoBase64={smrLogoBase64} bcvRate={bcvRate} />
-          <StatusEditModal isOpen={isStatusModalOpen} orden={selectedOrden} onClose={() => setIsStatusModalOpen(false)} onSave={(ordenId, nuevoEstado) => { onStatusChange(ordenId, nuevoEstado); setIsStatusModalOpen(false); }} />
+            <OrderDetailModal 
+                orden={selectedOrden} open={isDetailModalOpen} 
+                onClose={() => setIsDetailModalOpen(false)} 
+                smrLogoBase64={smrLogoBase64} bcvRate={bcvRate} 
+            />
+            <StatusEditModal 
+                isOpen={isStatusModalOpen} orden={selectedOrden} 
+                onClose={() => setIsStatusModalOpen(false)} 
+                onSave={(id, s) => { onStatusChange(id, s); setIsStatusModalOpen(false); }} 
+            />
         </>
       )}
     </div>
   )
 }
 
-// --- SUB-COMPONENTE TABLA ---
+// --- SUB-TABLA ---
 function OrdersSubTable({ data, isHistory, actions }: any) {
     const [page, setPage] = useState(1);
-    const pageSize = isHistory ? 10 : 20; 
+    const pageSize = 12;
     const totalPages = Math.ceil(data.length / pageSize);
-    
-    useMemo(() => { if(page > totalPages && totalPages > 0) setPage(1) }, [data.length]);
-
-    const paginatedData = data.slice((page - 1) * pageSize, page * pageSize);
+    const paginated = data.slice((page - 1) * pageSize, page * pageSize);
 
     if (data.length === 0) {
-        return <div className="p-10 text-center text-gray-400 dark:text-gray-500 italic">No hay órdenes en esta lista.</div>
+        return <div className="p-20 text-center text-slate-400 font-bold italic bg-slate-50/50 dark:bg-slate-800/20">No hay órdenes registradas aquí.</div>
     }
 
     return (
-        <div>
+        <div className="overflow-x-auto">
             <Table>
                 <TableHeader>
-                    <TableRow className={isHistory ? "bg-gray-100 dark:bg-gray-800" : "bg-blue-50/30 dark:bg-blue-900/20"}>
-                        <TableHead className="w-[100px] text-gray-700 dark:text-gray-300">N° Orden</TableHead>
-                        <TableHead className="text-gray-700 dark:text-gray-300">Cliente</TableHead>
-                        <TableHead className="text-right text-gray-700 dark:text-gray-300">Total ($)</TableHead>
-                        <TableHead className="text-center text-gray-700 dark:text-gray-300">Estado</TableHead>
-                        <TableHead className="text-center text-gray-700 dark:text-gray-300">Fecha Entrega</TableHead>
-                        <TableHead className="text-center text-gray-700 dark:text-gray-300">Acciones</TableHead>
+                    <TableRow className="border-b border-slate-100 dark:border-slate-800 hover:bg-transparent">
+                        <TableHead className="py-6 px-8 text-slate-400 font-black uppercase text-[10px] tracking-[0.2em]"><div className="flex items-center gap-2"><Hash className="w-3 h-3"/> Orden</div></TableHead>
+                        <TableHead className="py-6 text-slate-400 font-black uppercase text-[10px] tracking-[0.2em]"><div className="flex items-center gap-2"><User className="w-3 h-3"/> Cliente</div></TableHead>
+                        <TableHead className="py-6 text-right text-slate-400 font-black uppercase text-[10px] tracking-[0.2em]">Inversión ($)</TableHead>
+                        <TableHead className="py-6 text-center text-slate-400 font-black uppercase text-[10px] tracking-[0.2em]">Estado</TableHead>
+                        <TableHead className="py-6 text-center text-slate-400 font-black uppercase text-[10px] tracking-[0.2em]">Entrega</TableHead>
+                        <TableHead className="py-6 pr-8 text-center text-slate-400 font-black uppercase text-[10px] tracking-[0.2em]">Acciones</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {paginatedData.map((orden: OrdenServicio) => {
-                        const fechaMostrar = orden.fechaEntrega ? formatDate(orden.fechaEntrega) : formatDate(orden.fecha)
-                        
-                        return (
-                            <TableRow key={orden.id} className={isHistory ? "hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors border-b dark:border-gray-800" : "hover:bg-blue-50/20 dark:hover:bg-blue-900/10 transition-colors border-b dark:border-gray-800"}>
-                                <TableCell className="font-bold text-gray-700 dark:text-gray-200">
-                                    #{orden.ordenNumero}
-                                </TableCell>
-                                <TableCell>
-                                    <div className="font-medium text-sm text-gray-900 dark:text-gray-100">{orden.cliente?.nombreRazonSocial || "General"}</div>
-                                    <div className="text-[10px] text-muted-foreground">{orden.cliente?.rifCedula}</div>
-                                </TableCell>
-                                <TableCell className="text-right font-mono font-bold text-green-600 dark:text-green-400">
-                                    {formatCurrency(orden.totalUSD)}
-                                </TableCell>
-                                <TableCell className="text-center">
-                                    <Badge variant={estadoBadgeVariant(orden.estado)} className="text-[10px] px-2 py-0.5">
-                                        {getEtiquetaEstado(orden.estado)}
-                                    </Badge>
-                                </TableCell>
-                                <TableCell className="text-center text-xs text-gray-500 dark:text-gray-400">
-                                    {fechaMostrar}
-                                </TableCell>
-                                <TableCell className="text-center">
-                                    <div className="flex items-center justify-center gap-1">
-                                        <Button size="icon" variant="ghost" className="h-8 w-8 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20" onClick={() => actions.openDetail(orden)} title="Ver">
-                                            <Eye className="w-4 h-4"/>
-                                        </Button>
-                                        
-                                        {!isHistory && (
-                                            <Button size="icon" variant="ghost" className="h-8 w-8 text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20" onClick={() => actions.onEdit(orden)} title="Editar">
-                                                <Pencil className="w-4 h-4"/>
-                                            </Button>
-                                        )}
-
-                                        <Button size="icon" variant="ghost" className="h-8 w-8 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20" onClick={() => actions.openStatus(orden)} title="Estado">
-                                            <Clock className="w-4 h-4"/>
-                                        </Button>
-
-                                        <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={() => actions.onDelete(orden.id)} title="Eliminar">
-                                            <Trash2 className="w-4 h-4"/>
-                                        </Button>
-                                    </div>
-                                </TableCell>
-                            </TableRow>
-                        )
-                    })}
+                    {paginated.map((o: OrdenServicio) => (
+                        <TableRow key={o.id} className="group border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                            <TableCell className="py-5 px-8">
+                                <span className="text-lg font-black text-slate-900 dark:text-white tracking-tighter">#{o.ordenNumero}</span>
+                            </TableCell>
+                            <TableCell className="py-5">
+                                <div className="flex flex-col">
+                                    <span className="font-bold text-slate-800 dark:text-slate-200 text-sm leading-tight">{o.cliente?.nombreRazonSocial || o.clienteNombre}</span>
+                                    <span className="text-[10px] text-slate-400 font-mono tracking-tighter">{o.cliente?.rifCedula || o.clienteRif}</span>
+                                </div>
+                            </TableCell>
+                            <TableCell className="py-5 text-right">
+                                <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1 rounded-xl border border-emerald-100 dark:border-emerald-500/20">
+                                    {formatCurrency(o.totalUSD)}
+                                </span>
+                            </TableCell>
+                            <TableCell className="py-5 text-center">
+                                <Badge className={`rounded-xl px-4 py-1.5 font-black text-[10px] uppercase tracking-wider border transition-all shadow-sm ${getBadgeStyles(o.estado)}`}>
+                                    {getEtiquetaEstado(o.estado)}
+                                </Badge>
+                            </TableCell>
+                            <TableCell className="py-5 text-center">
+                                <div className="flex flex-col items-center">
+                                    <span className="text-xs font-bold text-slate-600 dark:text-slate-400">{formatDate(o.fechaEntrega || o.fecha)}</span>
+                                    <span className="text-[9px] font-black text-blue-500 uppercase tracking-tighter">{o.fechaEntrega ? 'Pactada' : 'Registro'}</span>
+                                </div>
+                            </TableCell>
+                            <TableCell className="py-5 pr-8 text-center">
+                                <div className="flex items-center justify-center gap-2 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <ActionButton icon={<Eye />} color="blue" onClick={() => actions.handleOpenDetail(o)} label="Ver" />
+                                    {!isHistory && <ActionButton icon={<Pencil />} color="orange" onClick={() => actions.onEdit(o)} label="Editar" />}
+                                    <ActionButton icon={<Clock />} color="green" onClick={() => actions.handleOpenStatus(o)} label="Estado" />
+                                    <ActionButton icon={<Trash2 />} color="rose" onClick={() => actions.onDelete(o.id)} label="Borrar" />
+                                </div>
+                            </TableCell>
+                        </TableRow>
+                    ))}
                 </TableBody>
             </Table>
 
+            {/* PAGINACIÓN */}
             {totalPages > 1 && (
-                <div className="flex justify-end items-center p-2 gap-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50/20 dark:bg-gray-900/20">
-                    <span className="text-xs text-muted-foreground">Pág {page} de {totalPages}</span>
-                    <div className="flex gap-1">
-                        <Button variant="outline" size="sm" className="h-7 w-7 p-0 bg-white dark:bg-gray-800" onClick={()=>setPage(p=>Math.max(1, p-1))} disabled={page===1}><ChevronLeft className="w-4 h-4"/></Button>
-                        <Button variant="outline" size="sm" className="h-7 w-7 p-0 bg-white dark:bg-gray-800" onClick={()=>setPage(p=>Math.min(totalPages, p+1))} disabled={page===totalPages}><ChevronRight className="w-4 h-4"/></Button>
+                <div className="flex justify-between items-center p-6 bg-slate-50/50 dark:bg-slate-900/50 border-t border-slate-100 dark:border-slate-800">
+                    <p className="text-xs font-bold text-slate-400">Mostrando {paginated.length} de {data.length} órdenes</p>
+                    <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} className="rounded-xl border-slate-200 shadow-sm"><ChevronLeft className="w-4 h-4"/></Button>
+                        <div className="flex items-center px-4 text-xs font-black text-slate-500 uppercase tracking-widest">Pág {page} / {totalPages}</div>
+                        <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages} className="rounded-xl border-slate-200 shadow-sm"><ChevronRight className="w-4 h-4"/></Button>
                     </div>
                 </div>
             )}
         </div>
+    )
+}
+
+// --- MINI COMPONENTE: BOTÓN DE ACCIÓN ---
+function ActionButton({ icon, color, onClick, label }: any) {
+    const colors: any = {
+        blue: "text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white border-blue-100",
+        orange: "text-orange-600 bg-orange-50 hover:bg-orange-600 hover:text-white border-orange-100",
+        green: "text-emerald-600 bg-emerald-50 hover:bg-emerald-600 hover:text-white border-emerald-100",
+        rose: "text-rose-600 bg-rose-50 hover:bg-rose-600 hover:text-white border-rose-100"
+    }
+    return (
+        <button 
+            onClick={onClick}
+            title={label}
+            className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300 shadow-sm border hover:shadow-md hover:-translate-y-1 active:translate-y-0 ${colors[color]}`}
+        >
+            {React.cloneElement(icon, { className: "w-4 h-4" })}
+        </button>
     )
 }

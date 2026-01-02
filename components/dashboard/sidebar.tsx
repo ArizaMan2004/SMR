@@ -1,15 +1,14 @@
 // @/components/dashboard/sidebar.tsx
-
 "use client"
 
-import React, { useState } from "react" 
+import React from "react" 
 import { Button } from "@/components/ui/button"
 import Image from "next/image" 
-// Importaciones de iconos
-import { LogOut, Menu, X } from "lucide-react" 
+import { motion, AnimatePresence } from "framer-motion"
+import { LogOut, X, ChevronRight } from "lucide-react" 
 import { ThemeToggle } from "@/components/theme-toggle" 
+import { cn } from "@/lib/utils"
 
-// --- TIPOS ---
 interface NavItem {
     id: string
     label: string
@@ -20,133 +19,134 @@ interface SidebarProps {
     activeView: string
     setActiveView: (view: string) => void
     navItems: NavItem[] 
-    onLogout?: () => void // <-- Esta prop es clave para cerrar sesión
+    onLogout?: () => void 
+    isMobileOpen: boolean
+    setIsMobileOpen: (v: boolean) => void
 }
 
-// 🔑 DEFINICIÓN DE RUTAS DEL LOGO (AJUSTA ESTAS RUTAS SEGÚN TUS ARCHIVOS)
 const LOGO_LIGHT_PATH = "/smr-logo-light.png";
 const LOGO_DARK_PATH = "/smr-logo-dark.png";  
-const LOGO_WIDTH = 150; 
-const LOGO_HEIGHT = 40; 
 
 export default function Sidebar({
     activeView,
     setActiveView,
     navItems,
-    onLogout, // <-- Recibimos la función de logout
+    onLogout,
+    isMobileOpen,
+    setIsMobileOpen,
 }: SidebarProps) {
-    const [isMobileOpen, setIsMobileOpen] = useState(false) 
-
-    const getIcon = (icon: React.ReactElement) => {
-        // Asegura que el icono tenga las clases correctas
-        return React.cloneElement(icon, { className: "w-4 h-4 flex-shrink-0" }); 
-    };
 
     return (
         <>
-            {/* 1. Botón de Menú Móvil */}
-            <Button 
-                variant="ghost"
-                size="icon"
-                className="fixed top-4 left-4 z-40 lg:hidden"
-                onClick={() => setIsMobileOpen(true)}
-            >
-                <Menu className="h-6 w-6" />
-            </Button>
-            
-            {/* 2. Overlay Móvil */}
-            {isMobileOpen && (
-                <div 
-                    className="fixed inset-0 bg-black/50 z-30 lg:hidden"
-                    onClick={() => setIsMobileOpen(false)}
-                />
-            )}
+            <AnimatePresence>
+                {isMobileOpen && (
+                    <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        // Ajustado a z-40 para estar debajo del modal
+                        className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 lg:hidden"
+                        onClick={() => setIsMobileOpen(false)}
+                    />
+                )}
+            </AnimatePresence>
 
-            {/* 3. Barra Lateral (Sidebar) */}
             <aside
-                className={`
-                    fixed inset-y-0 left-0 z-40 
-                    flex flex-col 
-                    w-64 bg-white dark:bg-gray-900 border-r border-border
-                    p-4
-                    transform transition-transform duration-300 ease-in-out
-                    ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}
-                    lg:static lg:translate-x-0 lg:shadow-none
-                `}
+                className={cn(
+                    // Ajustado a z-40 para que el Dialog (z-50) pase por encima
+                    "fixed inset-y-0 left-0 z-40 flex flex-col w-72 bg-white dark:bg-slate-950 border-r border-slate-200/60 dark:border-slate-800/60 transition-transform duration-500 ease-in-out shadow-2xl lg:shadow-none",
+                    isMobileOpen ? 'translate-x-0' : '-translate-x-full'
+                )}
             >
-                
-                {/* Header/Logo y Botón de Cierre Móvil */}
-                <div className="flex items-center justify-between h-16 flex-shrink-0">
-                    <div className="relative h-10 w-40 flex items-center">
-                        {/* El logo debe cambiar según el tema si usas Next/Image */}
-                        <Image 
-                            src={LOGO_LIGHT_PATH} 
-                            alt="Logo SMR" 
-                            width={LOGO_WIDTH} 
-                            height={LOGO_HEIGHT} 
-                            className="dark:hidden"
-                            priority
-                        />
-                         <Image 
-                            src={LOGO_DARK_PATH} 
-                            alt="Logo SMR" 
-                            width={LOGO_WIDTH} 
-                            height={LOGO_HEIGHT} 
-                            className="hidden dark:block"
-                            priority
-                        />
-                    </div>
-                    {/* Botón de Cierre Móvil */}
+                <div className="px-6 h-24 flex items-center justify-between">
+                    <motion.div 
+                        whileHover={{ scale: 1.05 }}
+                        className="relative h-10 w-32 cursor-pointer"
+                    >
+                        <Image src={LOGO_LIGHT_PATH} alt="Logo" fill className="object-contain dark:hidden" />
+                        <Image src={LOGO_DARK_PATH} alt="Logo" fill className="object-contain hidden dark:block" />
+                    </motion.div>
+                    
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="lg:hidden"
+                        className="lg:hidden rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
                         onClick={() => setIsMobileOpen(false)}
                     >
-                        <X className="h-6 w-6" />
+                        <X className="h-5 w-5" />
                     </Button>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto mt-6 space-y-2">
-                    {/* Navegación Principal */}
-                    <nav className="space-y-1">
-                        {navItems.map((item) => (
-                            <Button
+                <nav className="flex-1 px-4 space-y-1.5 overflow-y-auto">
+                    <p className="px-4 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                        Menú Principal
+                    </p>
+                    {navItems.map((item) => {
+                        const isActive = activeView === item.id;
+                        return (
+                            <motion.button
                                 key={item.id}
+                                whileHover={{ x: 4 }}
+                                whileTap={{ scale: 0.97 }}
                                 onClick={() => {
                                     setActiveView(item.id)
-                                    if (isMobileOpen) setIsMobileOpen(false)
+                                    if (window.innerWidth < 1024) setIsMobileOpen(false)
                                 }}
-                                variant={activeView === item.id ? "default" : "ghost"}
-                                className="w-full justify-start gap-2"
+                                className={cn(
+                                    "w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all duration-200 group relative",
+                                    isActive 
+                                        ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" 
+                                        : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100"
+                                )}
                             >
-                                {getIcon(item.icon)}
-                                {item.label}
-                            </Button>
-                        ))}
-                    </nav>
-                </div>
+                                <div className={cn(
+                                    "p-1 rounded-lg transition-colors",
+                                    isActive ? "bg-white/20" : "bg-slate-100 dark:bg-slate-800 group-hover:bg-white dark:group-hover:bg-slate-700"
+                                )}>
+                                    {React.cloneElement(item.icon, { className: "w-4 h-4" })}
+                                </div>
+                                <span className="text-sm font-bold tracking-tight flex-1 text-left">
+                                    {item.label}
+                                </span>
+                                {isActive && (
+                                    <motion.div layoutId="activeInd" className="w-1.5 h-1.5 rounded-full bg-white shadow-sm" />
+                                )}
+                                {!isActive && (
+                                    <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-all -translate-x-2 group-hover:translate-x-0" />
+                                )}
+                            </motion.button>
+                        )
+                    })}
+                </nav>
                 
-                {/* Footer (Logout y Theme Toggle) */}
-                <div className="mt-auto pt-4 space-y-2 border-t border-border flex-shrink-0"> 
-                    {/* ✅ Se asegura que este bloque no se encoja */}
-                    {onLogout && (
+                <div className="p-4 mt-auto border-t border-slate-100 dark:border-slate-800/60 space-y-3">
+                    <motion.div 
+                        whileHover={{ scale: 1.02 }}
+                        className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800 flex items-center gap-3"
+                    >
+                        <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 font-black text-sm">
+                            AD
+                        </div>
+                        <div className="flex-1 overflow-hidden">
+                            <p className="text-xs font-black text-slate-900 dark:text-white truncate">Administrador</p>
+                            <p className="text-[10px] font-bold text-slate-400 truncate tracking-tighter">SMR Siskoven © 2026</p>
+                        </div>
+                        <ThemeToggle />
+                    </motion.div>
+
+                    <motion.div whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.95 }}>
                         <Button
                             onClick={onLogout}
                             variant="ghost"
-                            className="w-full justify-start gap-2 text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                            className="w-full justify-start gap-3 py-6 rounded-2xl text-rose-500 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10 transition-colors font-bold text-sm"
                         >
-                            <LogOut className="w-4 h-4" />
+                            <div className="p-1.5 bg-rose-100 dark:bg-rose-500/20 rounded-lg">
+                                <LogOut className="w-4 h-4" />
+                            </div>
                             Cerrar Sesión
                         </Button>
-                    )}
-
-                    <div className="pt-2 flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">© 2025 SMR</span>
-                        <ThemeToggle />
-                    </div>
+                    </motion.div>
                 </div>
-
             </aside>
         </>
     )
