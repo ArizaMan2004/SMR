@@ -87,14 +87,28 @@ export default function Dashboard() {
 
     // --- 3. NAV ITEMS ---
     const navItems = useMemo(() => [
-        { id: 'orders', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> }, 
-        { id: 'design_production', label: 'Nómina Taller', icon: <Palette className="w-4 h-4" /> }, 
-        { id: 'tasks', label: 'Tareas', icon: <CheckCircle className="w-4 h-4" /> },
-        { id: 'clients', label: 'Cobranza', icon: <Users className="w-4 h-4" /> }, 
-        { id: 'payable', label: 'Cuentas x Pagar', icon: <Building2 className="w-4 h-4" /> },
-        { id: 'calculator', label: 'Presupuestos', icon: <FileSpreadsheet className="w-4 h-4" /> }, 
-        { id: 'old_calculator', label: 'Medidas', icon: <Calculator className="w-4 h-4" /> }, 
-    ], []);
+    { id: 'orders', label: 'Dashboard', icon: <LayoutDashboard /> }, 
+    { id: 'design_production', label: 'Nómina Taller', icon: <Palette /> }, 
+    { id: 'tasks', label: 'Tareas', icon: <CheckCircle /> },
+    { 
+        id: 'finances', 
+        label: 'Cuentas', 
+        icon: <DollarSign />,
+        children: [
+            { id: 'clients', label: 'Cobranza' },
+            { id: 'payable', label: 'Cuentas x Pagar' },
+        ]
+    },
+    { 
+        id: 'tools', 
+        label: 'Herramientas', 
+        icon: <Calculator />,
+        children: [
+            { id: 'calculator', label: 'Presupuestos' },
+            { id: 'old_calculator', label: 'Medidas' },
+        ]
+    },
+], []);
 
     // --- 4. MANEJADORES ---
     const handleDeleteNotification = useCallback((id: string) => {
