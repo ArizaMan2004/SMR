@@ -87,13 +87,13 @@ export default function Dashboard() {
 
     // --- 3. NAV ITEMS ---
     const navItems = useMemo(() => [
-    { id: 'orders', label: 'Dashboard', icon: <LayoutDashboard /> }, 
-    { id: 'design_production', label: 'Nómina Taller', icon: <Palette /> }, 
-    { id: 'tasks', label: 'Tareas', icon: <CheckCircle /> },
+    { id: 'orders', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> }, 
+    { id: 'design_production', label: 'Nómina Taller', icon: <Palette className="w-4 h-4" /> }, 
+    { id: 'tasks', label: 'Tareas', icon: <CheckCircle className="w-4 h-4" /> },
     { 
         id: 'finances', 
         label: 'Cuentas', 
-        icon: <DollarSign />,
+        icon: <DollarSign className="w-4 h-4" />,
         children: [
             { id: 'clients', label: 'Cobranza' },
             { id: 'payable', label: 'Cuentas x Pagar' },
@@ -102,10 +102,10 @@ export default function Dashboard() {
     { 
         id: 'tools', 
         label: 'Herramientas', 
-        icon: <Calculator />,
+        icon: <Calculator className="w-4 h-4" />,
         children: [
             { id: 'calculator', label: 'Presupuestos' },
-            { id: 'old_calculator', label: 'Medidas' },
+            { id: 'old_calculator', label: 'Calculadora de Producción' }, // <-- Nombre actualizado aquí
         ]
     },
 ], []);
