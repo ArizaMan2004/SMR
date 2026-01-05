@@ -362,14 +362,14 @@ export async function generateOrderPDF(
         columns: [
           {
             width: "50%",
-            text: `Tasa BCV Referencial: 1 USD = ${formatCurrency(bcvRate)} VES`,
+            text: ` `,
             style: "bcvRate",
             margin: [0, 0, 0, 10],
           },
           {
             width: "50%",
             alignment: "right",
-            text: `Total en Bolívares: ${formatCurrency(totalVES)} VES`,
+            text: ` `,
             style: "totalVesRef",
             margin: [0, 0, 0, 10],
           },
@@ -518,25 +518,7 @@ export async function generateBudgetPDF(
             },
             
             // Sección de Totales en Bs
-            {
-                columns: [
-                    {
-                        width: "50%",
-                        text: `Tasa BCV Referencial: 1 USD = ${formatCurrency(bcvRate)} VES`,
-                        style: "bcvRate",
-                        margin: [0, 0, 0, 10],
-                    },
-                    {
-                        width: "50%",
-                        alignment: "right",
-                        text: `Total en Bolívares: ${formatCurrency(totalVES)} VES`,
-                        style: "totalVesRef",
-                        margin: [0, 0, 0, 10],
-                    },
-                ],
-                columnGap: 10,
-                margin: [0, 0, 0, 15],
-            },
+           
 
             // Notas Legales
             {
