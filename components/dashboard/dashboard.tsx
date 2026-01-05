@@ -88,7 +88,7 @@ export default function Dashboard() {
 
     // --- 3. NAV ITEMS ---
     const navItems = useMemo(() => [
-        { id: 'orders', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> }, 
+        { id: 'orders', label: 'Ordenes de Servicio', icon: <LayoutDashboard className="w-4 h-4" /> }, 
         { 
             id: 'tasks_group', 
             label: 'Producción', 
