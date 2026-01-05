@@ -16,7 +16,6 @@ export enum EstadoPago {
     ANULADO = 'Anulado',
 }
 
-
 // --- Interfaces de Datos Simples ---
 
 export interface ClienteData {
@@ -39,89 +38,97 @@ export interface ServiciosSolicitados {
     senaletica: boolean;
 }
 
-// --- Interfaz de Registro de Pagos ---
+// --- Interfaz de Registro de Pagos / Transacciones ---
 export interface PaymentLog {
     montoUSD: number;
-    fechaRegistro: string; // ISO String para el registro
+    fechaRegistro: string; // ISO String
     metodo: 'Transferencia' | 'Efectivo' | 'Pago Móvil' | 'Tarjeta Débito/Crédito' | 'Otro';
-    referencia: string; // Número de referencia/lote
+    referencia: string;
     bancoOrigen?: string;
     bancoDestino?: string;
 }
 
+// Alias para compatibilidad con el servicio
+export interface PagoTransaction extends PaymentLog {}
+
 // --- Tipos de Servicio y Unidades ---
-export type TipoServicio = 'IMPRESION' | 'CORTE_LASER' | 'ROTULACION' | 'AVISO_CORPOREO' | 'OTROS';
+// Se añaden tipos para cubrir todas las áreas de la TasksView
+export type TipoServicio = 
+    | 'IMPRESION' 
+    | 'CORTE_LASER' 
+    | 'ROTULACION' 
+    | 'AVISO_CORPOREO' 
+    | 'INSTALACION' 
+    | 'DISENO' 
+    | 'OTROS';
+
 export type UnidadItem = 'm2' | 'metros' | 'unidades' | 'horas' | 'piezas';
 
 
-// --- Interfaz de Ítem de la Orden (el producto o servicio individual) ---
+// --- Interfaz de Ítem de la Orden ---
 export interface ItemOrden {
     nombre: string;
     tipoServicio: TipoServicio;
     cantidad: number;
     unidad: UnidadItem;
-    largo?: number; // Medida en la unidad especificada
-    ancho?: number; // Medida en la unidad especificada
-    tiempoEstimadoMinutos?: number; // Solo para corte láser
+    largo?: number; 
+    ancho?: number; 
+    tiempoEstimadoMinutos?: number; 
 
-    // Impresión
-    materialDeImpresion?: string; // Tipo de material (Vinil, Lona, Papel, etc.)
+    // ✅ MEJORA: Estado de la tarea para persistencia
+    completado?: boolean; 
 
-    // Corte Láser
-    materialDetalleCorte?: string; // Tipo de material (Acrilico, MDF, etc.)
-    grosorCorte?: number; // Grosor en mm
-    materialPropio?: 'Propio' | 'Intermediario'; // Campo antiguo/genérico (mantengo el campo original por si acaso)
+    // Detalles técnicos
+    materialDeImpresion?: string; 
+    materialDetalleCorte?: string; 
+    grosorCorte?: number; 
+    materialPropio?: 'Propio' | 'Intermediario'; 
     impresionMaterialPropio?: 'Propio' | 'Intermediario';
 
     empleadoAsignado?: string; 
     
     // Precios
-    precioUnitario: number; // Precio base (ej. por m2, por unidad)
+    precioUnitario: number; 
     subtotal: number;
 
-    // ✅ CORRECCIÓN: Referencias a archivos/imágenes
-    imagenes?: string[]; // URLs de las imágenes o referencias de archivos
+    // Referencias
+    imagenes?: string[]; 
+    pruebasImagenes?: string[];
 }
-
-// Se mantiene para compatibilidad, si se usa en order-utils.ts
-export interface ItemCobro extends ItemOrden {}
-
 
 // --- Interfaces de la Orden ---
 
-// Usado para el formulario (wizard) y datos base
-export interface FormularioOrdenData {
-    ordenNumero: string;
-    fechaEntrega: string; // ISO String (YYYY-MM-DD)
-    cliente: ClienteData;
-    serviciosSolicitados: ServiciosSolicitados;
-    items: ItemOrden[];
-    descripcionDetallada: string;
-}
-
-// Usado para la base de datos y la visualización final 
 export interface OrdenServicio {
-    id: string; // El ID de Firestore
+    id?: string; // Opcional porque al crearla no existe aún
     ordenNumero: string;
-    fecha: string; // ISO String (Fecha de creación de la orden)
-    fechaEntrega: string; // ISO String
+    fecha: string; // Fecha de creación
+    fechaEntrega: string; // Fecha límite original
+    
+    // ✅ MEJORA: Para el orden de prioridad en TasksView
+    fechaEntregaEstimada?: string; 
+
     cliente: ClienteData;
     serviciosSolicitados: ServiciosSolicitados;
     items: ItemOrden[];
     descripcionDetallada: string;
     
-    // Total calculado (en USD)
+    // Totales
     totalUSD: number;
-    totalBS: number; // Total calculado (en Bolívares)
+    totalBS: number; 
     
-    // CAMPOS DE PAGO ACTUALIZADOS
-    montoPagadoUSD: number; // Se convierte en totalUSD si está 'PAGADO', o el monto abonado
+    // Pagos
+    montoPagadoUSD: number; 
     estadoPago: EstadoPago;
-    historialPagos: PaymentLog[]; // Registro de abonos
     
-    // CAMPOS DE ESTADO DE LA ORDEN
+    // ✅ CORRECCIÓN: Estandarizado con el nombre usado en el servicio
+    registroPagos: PaymentLog[]; 
+    
+    // Estado General
     estado: EstadoOrden; 
     
-    // Fechas de seguimiento
-    fechaFinalizacion?: string; // ISO String
+    // Seguimiento
+    fechaFinalizacion?: string; 
+    updatedAt?: string;
+    designerId?: string;
+    designStatus?: string;
 }

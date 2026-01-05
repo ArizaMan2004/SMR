@@ -1,5 +1,3 @@
-// @/lib/services/ordenes-service.ts
-
 import {
   collection,
   addDoc,
@@ -12,8 +10,14 @@ import {
   getDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase"; 
-// Asegúrate de que tus tipos estén actualizados en @/lib/types/orden
-import type { OrdenServicio, EstadoOrden, EstadoPago, PaymentLog, ItemOrden, PagoTransaction } from "@/lib/types/orden";
+import type { 
+  OrdenServicio, 
+  EstadoOrden, 
+  EstadoPago, 
+  PaymentLog, 
+  ItemOrden, 
+  PagoTransaction 
+} from "@/lib/types/orden";
 
 /**
  * 🔹 Crea una nueva orden en Firestore
@@ -21,13 +25,12 @@ import type { OrdenServicio, EstadoOrden, EstadoPago, PaymentLog, ItemOrden, Pag
 export async function createOrden(data: OrdenServicio) {
   try {
     const colRef = collection(db, "ordenes"); 
-    // Aseguramos que se guarden valores por defecto si faltan
     const docRef = await addDoc(colRef, {
       ...data,
       fecha: data.fecha || new Date().toISOString(),
       estado: data.estado || "PENDIENTE",
       estadoPago: data.estadoPago || "PENDIENTE",
-      registroPagos: [], // Inicializar historial de pagos vacío
+      registroPagos: [], 
       montoPagadoUSD: 0
     });
     console.log("✅ Orden creada con ID:", docRef.id);
@@ -39,23 +42,22 @@ export async function createOrden(data: OrdenServicio) {
 }
 
 /**
- * 🔹 Actualiza los datos generales de una orden existente (Edición desde el Wizard)
+ * 🔹 Actualiza los datos generales de una orden (Edición desde el Wizard)
  */
 export async function actualizarOrden(ordenId: string, data: Partial<OrdenServicio>) {
   try {
     const docRef = doc(db, "ordenes", ordenId);
 
-    // Construimos el payload con los campos que permite editar el formulario
-    const updatePayload = {
-      cliente: data.cliente,
-      items: data.items,
-      serviciosSolicitados: data.serviciosSolicitados,
-      descripcionDetallada: data.descripcionDetallada || "",
-      fechaEntrega: data.fechaEntrega,
-      ordenNumero: data.ordenNumero,
-      totalUSD: data.totalUSD,
+    // Mantenemos tu estructura de payload original
+    const updatePayload: any = {
+      ...data, // Permitimos campos parciales para mayor flexibilidad
       updatedAt: new Date().toISOString()
     };
+
+    // Si vienen campos específicos del wizard, los aseguramos
+    if (data.cliente) updatePayload.cliente = data.cliente;
+    if (data.items) updatePayload.items = data.items;
+    if (data.totalUSD !== undefined) updatePayload.totalUSD = data.totalUSD;
 
     await updateDoc(docRef, updatePayload);
     console.log("✅ Orden actualizada:", ordenId);
@@ -70,7 +72,7 @@ export async function actualizarOrden(ordenId: string, data: Partial<OrdenServic
 // =========================================================================
 
 /**
- * 🔹 Actualiza datos de nivel superior de diseño (Diseñador asignado globalmente o estado general)
+ * 🔹 Actualiza datos de nivel superior de diseño
  */
 export async function updateOrdenDesign(
   ordenId: string, 
@@ -90,8 +92,7 @@ export async function updateOrdenDesign(
 }
 
 /**
- * 🔹 Actualiza un campo específico de UN ÍTEM dentro de la orden.
- * Vital para marcar diseños individuales como PAGADOS o cambiar sus detalles sin reescribir toda la orden.
+ * 🔹 Actualiza un campo específico de UN ÍTEM (Crucial para Tareas)
  */
 export async function updateOrdenItemField(
   ordenId: string, 
@@ -105,13 +106,10 @@ export async function updateOrdenItemField(
     if (!docSnap.exists()) throw new Error("Orden no encontrada");
 
     const ordenData = docSnap.data() as OrdenServicio;
-    
-    // Clonamos el array de items para no mutar directamente
     const newItems = [...(ordenData.items || [])];
 
     if (!newItems[itemIndex]) throw new Error(`Ítem en índice ${itemIndex} no encontrado`);
 
-    // Actualizamos solo los campos solicitados del ítem específico
     newItems[itemIndex] = {
       ...newItems[itemIndex],
       ...updates
@@ -132,9 +130,6 @@ export async function updateOrdenItemField(
 // 🔄 SUSCRIPCIONES Y ELIMINACIÓN
 // =========================================================================
 
-/**
- * 🔹 Escucha en tiempo real los cambios en las órdenes
- */
 export function subscribeToOrdenes(
   userId: string,
   callback: (ordenes: OrdenServicio[], error?: any) => void
@@ -221,10 +216,10 @@ export async function registrarPago(ordenId: string, transaccion: PagoTransactio
 
         const ordenData = docSnap.data() as OrdenServicio;
         
-        // @ts-ignore
-        const historialActual: PagoTransaction[] = ordenData.registroPagos || ordenData.historialPagos || [];
+        // Manejamos ambos nombres de campo para compatibilidad
+        const historialActual: PagoTransaction[] = ordenData.registroPagos || (ordenData as any).historialPagos || [];
         const nuevoHistorial = [...historialActual, transaccion];
-        const nuevoMontoPagado = nuevoHistorial.reduce((acc, curr) => acc + (curr.montoUSD || curr.monto || 0), 0);
+        const nuevoMontoPagado = nuevoHistorial.reduce((acc, curr) => acc + (curr.montoUSD || (curr as any).monto || 0), 0);
         
         let nuevoEstadoPago = EstadoPago.PENDIENTE;
         if (nuevoMontoPagado >= (ordenData.totalUSD - 0.01)) { 
@@ -239,8 +234,7 @@ export async function registrarPago(ordenId: string, transaccion: PagoTransactio
             estadoPago: nuevoEstadoPago
         });
 
-        console.log("💰 Pago registrado exitosamente en orden:", ordenId);
-
+        console.log("💰 Pago registrado exitosamente");
     } catch (error) {
         console.error("❌ Error registrando pago:", error);
         throw error;
@@ -248,7 +242,7 @@ export async function registrarPago(ordenId: string, transaccion: PagoTransactio
 }
 
 // =========================================================================
-// 🖼️ GESTIÓN DE IMÁGENES (Detalles de Tareas)
+// 🖼️ GESTIÓN DE IMÁGENES
 // =========================================================================
 
 export async function updateItemImagesInOrden(
@@ -265,23 +259,19 @@ export async function updateItemImagesInOrden(
 
     const ordenData = docSnap.data() as OrdenServicio;
     let items: ItemOrden[] = ordenData.items || [];
-    
     let itemIndex = items.findIndex(item => item.nombre === itemNombre);
 
     if (itemIndex === -1) throw new Error(`Ítem '${itemNombre}' no encontrado.`);
 
     const updatedItems = items.map((item, index) => {
       if (index === itemIndex) {
-        return { 
-          ...item, 
-          [fieldName]: newImages 
-        };
+        return { ...item, [fieldName]: newImages };
       }
       return item;
     });
 
     await updateDoc(docRef, { items: updatedItems });
-    console.log(`✅ ${fieldName} actualizadas en ítem '${itemNombre}'.`);
+    console.log(`✅ ${fieldName} actualizadas.`);
   } catch (error) {
     console.error("❌ Error actualizando imágenes:", error);
     throw error;

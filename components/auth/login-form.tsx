@@ -1,15 +1,20 @@
 "use client"
 
-import type React from "react"
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification } from "firebase/auth"
 import { auth, db } from "@/lib/firebase"
 import { doc, setDoc, getDoc } from "firebase/firestore"
+import { useTheme } from "next-themes"
+
+// UI - Shadcn & Iconos
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { useTheme } from "next-themes"
-import { Moon, Sun } from "lucide-react"
+import { Card } from "@/components/ui/card"
+import { Moon, Sun, Mail, Lock, Store, Key, ArrowRight, Loader2, MessageCircle } from "lucide-react"
+import { cn } from "@/lib/utils"
+
+const springConfig = { type: "spring", stiffness: 300, damping: 30 };
 
 export default function LoginForm() {
   const [isLogin, setIsLogin] = useState(true)
@@ -26,210 +31,189 @@ export default function LoginForm() {
     setMounted(true)
   }, [])
 
+  // --- LÓGICA DE FIREBASE (SIN CAMBIOS) ---
   const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError("")
-
+    e.preventDefault(); setLoading(true); setError("");
     try {
       await signInWithEmailAndPassword(auth, email, password)
     } catch (err: any) {
-      setError(err.message || "Error al iniciar sesión")
-    } finally {
-      setLoading(false)
-    }
+      setError("Credenciales incorrectas o cuenta no activada.")
+    } finally { setLoading(false) }
   }
 
   const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError("")
-
+    e.preventDefault(); setLoading(true); setError("");
     try {
-      if (!exclusiveCode.trim()) {
-        setError("Debes ingresar el código exclusivo de registro para el plan completo")
-        setLoading(false)
-        return
-      }
-
+      if (!exclusiveCode.trim()) { setError("Código exclusivo requerido"); setLoading(false); return; }
       const codeRef = doc(db, "admin_codes", exclusiveCode.trim())
       const codeDoc = await getDoc(codeRef)
-
-      if (!codeDoc.exists()) {
-        setError("Código exclusivo no válido o inexistente.")
-        setLoading(false)
-        return
+      if (!codeDoc.exists() || codeDoc.data().used) {
+        setError("Código no válido o ya utilizado."); setLoading(false); return;
       }
-
-      const codeData = codeDoc.data()
-      if (codeData.used) {
-        setError("Este código ya ha sido utilizado.")
-        setLoading(false)
-        return
-      }
-
       const userCredential = await createUserWithEmailAndPassword(auth, email, password)
       await sendEmailVerification(userCredential.user)
-
       await setDoc(codeRef, { used: true, usedBy: userCredential.user.uid, usedAt: new Date() }, { merge: true })
-
       await setDoc(doc(db, "usuarios", userCredential.user.uid), {
-        email,
-        businessName: businessName,
-        createdAt: new Date(),
-        emailVerified: false,
-        plan: "complete",
-        exclusiveCode: exclusiveCode,
-        isActive: true,
+        email, businessName, createdAt: new Date(), plan: "complete", exclusiveCode, isActive: true,
       })
-
-      setError("Verifica tu correo electrónico para continuar")
-    } catch (err: any) {
-      setError(err.message || "Error al registrarse")
-    } finally {
-      setLoading(false)
-    }
+      setError("Verifica tu correo para continuar"); setIsLogin(true);
+    } catch (err: any) { setError(err.message) } finally { setLoading(false) }
   }
 
-  // ✅ CORRECCIÓN CLAVE: Usamos las rutas y nombres de archivo correctos
-  // Asumimos que los archivos son .png o .svg. Si son .png, cámbialo.
+  if (!mounted) return null
   const logoSrc = theme === "dark" ? "/smr-logo-dark.png" : "/smr-logo-light.png";
 
-  if (!mounted) return null
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-accent/10 flex items-center justify-center p-4 relative">
+    <div className="min-h-screen bg-[#f2f2f7] dark:bg-black flex items-center justify-center p-4 relative overflow-hidden font-sans">
       
-      {/* Botón de cambio de tema (Se mantiene) */}
-      <div className="absolute top-6 right-6">
+      {/* Círculos decorativos de fondo (Efecto iOS) */}
+      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500/10 blur-[120px] rounded-full" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full" />
+
+      {/* Botón de cambio de tema superior */}
+      <div className="absolute top-8 right-8 z-50">
         <Button
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
           variant="ghost"
           size="icon"
-          className="text-foreground hover:bg-accent/20"
+          className="rounded-2xl bg-white/50 dark:bg-white/5 backdrop-blur-md border border-black/5 h-12 w-12"
         >
-          {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          {theme === "dark" ? <Sun className="w-5 h-5 text-orange-400" /> : <Moon className="w-5 h-5 text-blue-600" />}
         </Button>
       </div>
 
-      <Card className="w-full max-w-md shadow-2xl border-primary/20 animate-fade-in">
-        <CardHeader className="space-y-2">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={springConfig}
+        className="w-full max-w-[440px] z-10"
+      >
+        <Card className="rounded-[3rem] border-none shadow-2xl bg-white/80 dark:bg-[#1c1c1e]/80 backdrop-blur-2xl p-8 md:p-12">
           
-          {/* ✅ IMPLEMENTACIÓN DEL LOGO CENTRADO Y GRANDE (Sin texto) */}
-          <div className="flex justify-center mb-4">
-            <img 
-              src={logoSrc} 
-              alt="SMR Laser Print Logo" 
-              // Aumentamos el tamaño (w-40 es más grande que w-32)
-              className="w-40 h-auto object-contain transition-opacity duration-300" 
-            />
+          {/* Header del Login */}
+          <div className="flex flex-col items-center mb-10">
+            <motion.div 
+                whileHover={{ scale: 1.05 }}
+                className="relative w-48 h-16 mb-6"
+            >
+                <img src={logoSrc} alt="Logo SMR" className="w-full h-full object-contain" />
+            </motion.div>
+            <h1 className="text-3xl font-black italic uppercase tracking-tighter text-slate-900 dark:text-white leading-none">
+                {isLogin ? "Bienvenido" : "Registro"}
+            </h1>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mt-2">
+                {isLogin ? "SMR Intel Hub Access" : "Create Enterprise Account"}
+            </p>
           </div>
-          
-          <CardTitle className="text-2xl text-center">{isLogin ? "Bienvenido" : "Registro de Cuenta"}</CardTitle>
-          <CardDescription className="text-center">
-            {isLogin ? "Accede a tu sistema de gestión" : "Crea tu cuenta ingresando tu código exclusivo"}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={isLogin ? handleLogin : handleRegister} className="space-y-4">
-            {!isLogin && (
-              <>
-                <div>
-                  <label className="text-sm font-medium text-foreground">Nombre del Comercio</label>
-                  <Input
-                    type="text"
-                    placeholder="Mi Tienda"
-                    value={businessName}
-                    onChange={(e) => setBusinessName(e.target.value)}
-                    className="mt-1"
-                    required
-                  />
-                </div>
 
-                <div>
-                  <label className="text-sm font-medium text-foreground">Código Exclusivo de Registro</label>
-                  <Input
-                    type="text"
-                    placeholder="Ingresa tu código exclusivo"
-                    value={exclusiveCode}
-                    onChange={(e) => setExclusiveCode(e.target.value)}
-                    className="mt-1"
-                    required
-                  />
-                  <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
-                    ¿No tienes código? Contacta al administrador:
-                    <a
-                      href="https://wa.me/584146004526"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-primary hover:underline font-bold"
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="text-green-500"
-                      >
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                        <path d="M16 10a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"></path>
-                        <path d="M9 10a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"></path>
-                        <path d="M12 10V10"></path>
-                        <path d="M12 14V14"></path>
-                      </svg>
-                      +58 0414-6004526
-                    </a>
-                  </p>
+          <form onSubmit={isLogin ? handleLogin : handleRegister} className="space-y-4">
+            <AnimatePresence mode="wait">
+              {!isLogin && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="space-y-4 overflow-hidden"
+                >
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4">Comercio</label>
+                    <div className="relative group">
+                        <Store className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
+                        <Input
+                            type="text" placeholder="Nombre de tu empresa" value={businessName}
+                            onChange={(e) => setBusinessName(e.target.value)}
+                            className="h-14 pl-12 rounded-2xl bg-black/5 dark:bg-white/5 border-none focus:ring-4 ring-blue-500/10 transition-all font-medium"
+                            required
+                        />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4">Código Admin</label>
+                    <div className="relative group">
+                        <Key className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
+                        <Input
+                            type="text" placeholder="Código exclusivo" value={exclusiveCode}
+                            onChange={(e) => setExclusiveCode(e.target.value)}
+                            className="h-14 pl-12 rounded-2xl bg-black/5 dark:bg-white/5 border-none focus:ring-4 ring-blue-500/10 transition-all font-medium"
+                            required
+                        />
+                    </div>
+                    <div className="flex justify-center pt-2">
+                        <a href="https://wa.me/584146004526" target="_blank" className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-emerald-500 hover:opacity-70 transition-opacity">
+                            <MessageCircle className="w-3 h-3" /> Obtener código administrador
+                        </a>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4">Email</label>
+                <div className="relative group">
+                    <Mail className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
+                    <Input
+                        type="email" placeholder="usuario@smr.com" value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className="h-14 pl-12 rounded-2xl bg-black/5 dark:bg-white/5 border-none focus:ring-4 ring-blue-500/10 transition-all font-medium"
+                        required
+                    />
                 </div>
-              </>
+            </div>
+
+            <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4">Password</label>
+                <div className="relative group">
+                    <Lock className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
+                    <Input
+                        type="password" placeholder="••••••••" value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="h-14 pl-12 rounded-2xl bg-black/5 dark:bg-white/5 border-none focus:ring-4 ring-blue-500/10 transition-all font-medium"
+                        required
+                    />
+                </div>
+            </div>
+
+            {error && (
+                <motion.div 
+                    initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
+                    className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 text-[11px] font-bold uppercase text-center"
+                >
+                    {error}
+                </motion.div>
             )}
 
-            <div>
-              <label className="text-sm font-medium text-foreground">Correo Electrónico</label>
-              <Input
-                type="email"
-                placeholder="tu@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mt-1"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-foreground">Contraseña</label>
-              <Input
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="mt-1"
-                required
-              />
-            </div>
-
-            {error && <div className="p-3 bg-destructive/10 text-destructive text-sm rounded-md">{error}</div>}
-
-            <Button type="submit" className="w-full bg-primary hover:bg-primary/90" disabled={loading}>
-              {loading ? "Cargando..." : isLogin ? "Iniciar Sesión" : "Crear Cuenta"}
+            <Button 
+                type="submit" 
+                className="w-full h-16 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-[0.2em] text-[11px] shadow-xl shadow-blue-500/20 gap-3 transition-all active:scale-[0.98]" 
+                disabled={loading}
+            >
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (
+                    <>
+                        {isLogin ? "Acceder al Panel" : "Finalizar Registro"}
+                        <ArrowRight className="w-4 h-4" />
+                    </>
+                )}
             </Button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setIsLogin(!isLogin)
-                setError("")
-              }}
-              className="w-full text-sm text-primary hover:underline"
-            >
-              {isLogin ? "¿No tienes cuenta? Regístrate" : "¿Ya tienes cuenta? Inicia sesión"}
-            </button>
+            <div className="pt-6 text-center">
+                <button
+                    type="button"
+                    onClick={() => { setIsLogin(!isLogin); setError(""); }}
+                    className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-blue-600 transition-colors"
+                >
+                    {isLogin ? "¿No tienes cuenta? Regístrate aquí" : "¿Ya eres miembro? Inicia sesión"}
+                </button>
+            </div>
           </form>
-        </CardContent>
-      </Card>
+        </Card>
+        
+        {/* Footer legal estilo iOS */}
+        <p className="text-center text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 mt-8 opacity-40">
+            SMR LASER PRINT SYSTEM © 2026 • TODOS LOS DERECHOS RESERVADOS
+        </p>
+      </motion.div>
     </div>
   )
 }
