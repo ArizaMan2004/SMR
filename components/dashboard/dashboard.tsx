@@ -101,7 +101,7 @@ export default function Dashboard() {
                 { id: 'tasks_INSTALACION', label: 'Instalación' },
             ]
         },
-        { id: 'design_production', label: 'Nómina Taller', icon: <Palette className="w-4 h-4" /> }, 
+        { id: 'design_production', label: 'Nómina de Diseño', icon: <Palette className="w-4 h-4" /> }, 
         {
             id: 'finance_group',
             label: 'Cuentas',
