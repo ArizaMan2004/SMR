@@ -35,7 +35,7 @@ import {
     LayoutDashboard, FileSpreadsheet, Clock, Zap, Hammer, 
     DollarSign, Menu, Building2, Bell, TrendingUp, Euro, 
     Coins, CheckCircle2, MessageSquareText, Trash2, MailOpen, 
-    ChevronRight, ChevronLeft, Filter, ChevronDown
+    ChevronRight, ChevronLeft, Filter, ChevronDown, X
 } from "lucide-react" 
 
 // Servicios
@@ -70,6 +70,7 @@ export default function Dashboard() {
     const [isWizardOpen, setIsWizardOpen] = useState(false)
     const [editingOrder, setEditingOrder] = useState<OrdenServicio | null>(null)
     
+    // ESTADOS DEL TOAST
     const [showRateToast, setShowRateToast] = useState(false)
     const [rateToastMessage, setRateToastMessage] = useState("")
 
@@ -101,7 +102,7 @@ export default function Dashboard() {
                 { id: 'tasks_INSTALACION', label: 'Instalación' },
             ]
         },
-        { id: 'design_production', label: 'Nómina de Diseño', icon: <Palette className="w-4 h-4" /> }, 
+        { id: 'design_production', label: 'Nómina Taller', icon: <Palette className="w-4 h-4" /> }, 
         {
             id: 'finance_group',
             label: 'Cuentas',
@@ -122,7 +123,7 @@ export default function Dashboard() {
         },
     ], []);
 
-    // --- 4. MANEJADORES DE ACTIVOS ---
+    // --- 4. MANEJADORES ---
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'firma' | 'sello') => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -144,7 +145,6 @@ export default function Dashboard() {
         setAssets(prev => ({ ...prev, [type]: "" }));
     };
 
-    // --- MANEJADORES DE NOTIFICACIONES ---
     const handleDeleteNotification = useCallback((id: string) => {
         setSystemEvents(prev => prev.filter(n => n.id !== id));
     }, []);
@@ -168,11 +168,12 @@ export default function Dashboard() {
             const msg = `Valor ${label} actualizado a Bs. ${newValue.toFixed(2)}`;
             setRateToastMessage(msg); setShowRateToast(true);
             setTimeout(() => setShowRateToast(false), 4000);
-            setSystemEvents(prev => [{
+            const newEvent: Notification = {
                 id: `bcv-up-${label}-${Date.now()}`, title: `Sincronización ${label}`,
-                description: msg, type: 'warning', icon: <TrendingUp className="w-4 h-4 text-white"/>, timestamp: new Date(), isRead: false
-            }, ...prev]);
-            setHasUnseenNotifications(true);
+                description: msg, type: 'warning', icon: <TrendingUp className="text-white w-4 h-4" />, 
+                timestamp: new Date(), isRead: false
+            };
+            setSystemEvents(prev => [newEvent, ...prev]); setHasUnseenNotifications(true);
         } catch (error) { console.error(error); }
     }, []);
 
@@ -181,18 +182,16 @@ export default function Dashboard() {
         if (!currentUserId) return 
         fetchBCVRateFromAPI().then(data => { setCurrentBcvRate(data.usdRate); setEurRate(data.eurRate || 0); });
         fetch('https://ve.dolarapi.com/v1/dolares/paralelo').then(res => res.json()).then(data => { if (data?.promedio) setParallelRate(data.promedio); });
-        
         Promise.all([getLogoBase64(), getFirmaBase64(), getSelloBase64()]).then(([l, f, s]) => { 
             setAssets({ logo: l || "", firma: f || "", sello: s || "" }); 
         });
-        
         const unsubOrdenes = subscribeToOrdenes(currentUserId, (data) => setOrdenes(data));
         const unsubDesigners = subscribeToDesigners((data) => setDesigners(data));
         const unsubGastos = subscribeToGastos((data) => setGastos(data));
         return () => { unsubOrdenes(); unsubDesigners(); unsubGastos(); };
     }, [currentUserId]);
 
-    // --- 6. LÓGICA DE ACTIVIDADES ---
+    // --- 6. LÓGICA DE ACTIVIDADES (RESTAURADA) ---
     const allNotifications = useMemo(() => {
         let all: Notification[] = [...systemEvents];
         ordenes.forEach(o => {
@@ -208,9 +207,41 @@ export default function Dashboard() {
                     });
                 }
             }
+            const pagos = (o as any).registroPagos || [];
+            pagos.forEach((p: any, idx: number) => {
+                const rawFecha = p.fechaRegistro || p.fecha || p.fechaPago;
+                if (rawFecha && typeof rawFecha === 'string') {
+                    const date = new Date(rawFecha);
+                    if (!isNaN(date.getTime())) {
+                        all.push({
+                            id: `pago-${o.id}-${idx}`, title: "Abono Procesado",
+                            description: `Recibido: $${p.montoUSD} — #${nOrdenStr} (${clienteFinal})`,
+                            type: 'success', icon: <CheckCircle2 />, timestamp: date, isRead: false
+                        });
+                    }
+                }
+            });
         });
         return all.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
     }, [ordenes, systemEvents]);
+
+    const paginatedNotis = useMemo(() => {
+        const filtered = allNotifications.filter(n => {
+            const matchesSearch = n.description.toLowerCase().includes(notiSearch.toLowerCase()) || 
+                                n.title.toLowerCase().includes(notiSearch.toLowerCase());
+            const matchesFilter = notiFilter === "all" || n.type === notiFilter;
+            return matchesSearch && matchesFilter;
+        });
+        const start = (currentPage - 1) * itemsPerPage;
+        return filtered.slice(start, start + itemsPerPage);
+    }, [allNotifications, notiSearch, notiFilter, currentPage]);
+
+    const totalPages = Math.ceil(allNotifications.filter(n => {
+        const matchesSearch = n.description.toLowerCase().includes(notiSearch.toLowerCase()) || 
+                            n.title.toLowerCase().includes(notiSearch.toLowerCase());
+        const matchesFilter = notiFilter === "all" || n.type === notiFilter;
+        return matchesSearch && matchesFilter;
+    }).length / itemsPerPage);
 
     const filteredOrdenes = useMemo(() => {
         const term = searchTerm.toLowerCase();
@@ -292,7 +323,28 @@ export default function Dashboard() {
                     </div>
                 )}
 
-                {/* VISTA DE PRESUPUESTOS - MAPEADO EXACTO DE PROPS */}
+                {activeView === "notifications_full" && (
+                    <div className="max-w-5xl mx-auto space-y-8 pb-20 px-2 sm:px-4">
+                        <h1 className="text-3xl sm:text-4xl font-black italic tracking-tighter uppercase text-slate-900 dark:text-white">Centro de <span className="text-blue-600">Actividades</span></h1>
+                        <div className="relative">
+                            <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 opacity-20" />
+                            <input 
+                                type="text" placeholder="Buscar por cliente, orden o detalle..." 
+                                value={notiSearch} onChange={(e) => {setNotiSearch(e.target.value); setCurrentPage(1);}} 
+                                className="w-full pl-12 pr-6 py-4 bg-white dark:bg-white/5 border border-black/5 rounded-[2rem] text-sm outline-none shadow-sm focus:ring-4 focus:ring-blue-500/10 transition-all" 
+                            />
+                        </div>
+                        <div className="space-y-4">
+                            {paginatedNotis.map((n) => <ActivityRow key={n.id} n={n} />)}
+                        </div>
+                        <div className="flex items-center justify-center gap-4 pt-8">
+                            <Button variant="ghost" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="rounded-xl gap-2 font-bold uppercase text-[10px]"><ChevronLeft className="w-4 h-4" /> Anterior</Button>
+                            <span className="text-[10px] font-black uppercase tracking-widest opacity-40">Página {currentPage} de {totalPages || 1}</span>
+                            <Button variant="ghost" disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)} className="rounded-xl gap-2 font-bold uppercase text-[10px]">Siguiente <ChevronRight className="w-4 h-4" /></Button>
+                        </div>
+                    </div>
+                )}
+
                 {activeView === "calculator" && (
                     <BudgetEntryView 
                         currentBcvRate={currentBcvRate} 
@@ -321,7 +373,6 @@ export default function Dashboard() {
 
         <CurrencyToast show={showRateToast} message={rateToastMessage} onClose={() => setShowRateToast(false)} />
 
-        {/* MODAL WIZARD - SE MANTIENE EL FIX DE TAMAÑO */}
         <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
           <DialogContent className="w-full max-w-[95vw] lg:max-w-7xl h-auto p-0 border-none bg-transparent shadow-none focus:outline-none overflow-visible">
             <DialogTitle className="sr-only">{editingOrder ? "Editar Orden" : "Nueva Orden"}</DialogTitle>
@@ -359,5 +410,23 @@ function StatCard({ label, value, icon, subtext, color, className }: any) {
                 </div>
             </CardContent>
         </Card>
+    )
+}
+
+function ActivityRow({ n }: { n: Notification }) {
+    const colors: any = { success: "bg-emerald-500 shadow-emerald-500/20", info: "bg-blue-500 shadow-blue-500/20", warning: "bg-orange-500 shadow-orange-500/20", urgent: "bg-red-500 shadow-red-500/20", neutral: "bg-slate-500" };
+    return (
+        <div className="group flex items-center gap-4 sm:gap-6 p-4 sm:p-6 bg-white dark:bg-[#1c1c1e] rounded-[1.8rem] sm:rounded-[2.5rem] border border-black/5 shadow-sm hover:shadow-xl transition-all w-full min-w-0">
+            <div className={cn("w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center text-white shadow-lg shrink-0", colors[n.type] || colors.neutral)}>
+                {n.icon && React.isValidElement(n.icon) ? React.cloneElement(n.icon as React.ReactElement, { className: "w-4 h-4 sm:w-5 sm:h-5 text-white" }) : null}
+            </div>
+            <div className="flex-1 min-w-0 overflow-hidden">
+                <div className="flex justify-between items-center mb-1 gap-2">
+                    <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-widest opacity-40 truncate">{n.title}</span>
+                    <time className="text-[9px] sm:text-[10px] font-bold opacity-30 shrink-0">{n.timestamp.toLocaleDateString('es-VE')}</time>
+                </div>
+                <h4 className="text-xs sm:text-sm font-bold truncate text-slate-900 dark:text-white">{n.description}</h4>
+            </div>
+        </div>
     )
 }
