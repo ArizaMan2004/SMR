@@ -19,13 +19,13 @@ import { cn } from "@/lib/utils"
 
 // Iconos
 import { 
-    X, Sparkles, MoveVertical, Timer, Layers, Scissors, 
+    X, Sparkles, MoveVertical, Scissors, 
     Hash, DollarSign, Box, FileCode, FileImage, PenTool,
-    Type, User, AlertCircle, HardHat
+    Type, User, AlertCircle
 } from "lucide-react"
 
 // Tipos
-import { type ItemOrden, type UnidadItem, type TipoServicio } from "@/lib/types/orden" 
+import { type UnidadItem, type TipoServicio } from "@/lib/types/orden" 
 
 // --- CONSTANTES DE NEGOCIO ---
 const PRECIO_LASER_POR_MINUTO = 0.80
@@ -87,7 +87,6 @@ export function ItemFormModal({ isOpen, onClose, onAddItem, itemToEdit, designer
   const [minutosInput, setMinutosInput] = useState('0');
   const [segundosInput, setSegundosInput] = useState('00');
 
-  // 1. CARGA DE DATOS
   useEffect(() => {
     if (isOpen) {
       if (itemToEdit) {
@@ -110,30 +109,16 @@ export function ItemFormModal({ isOpen, onClose, onAddItem, itemToEdit, designer
           }
 
           setMinutosInput(mins); setSegundosInput(secs);
-          setState({
-              ...getInitialState(),
-              ...itemToEdit,
-              materialDeCorte: matCorte,
-              grosorMaterial: grosor,
-              colorAcrilico: color,
-              archivoTipo: itemToEdit.archivoTipo || "vector",
-              archivoFormato: itemToEdit.archivoFormato || "CDR",
-              suministrarMaterial: itemToEdit.suministrarMaterial || false,
-              costoMaterialExtra: itemToEdit.costoMaterialExtra || 0,
-              empleadoAsignado: itemToEdit.empleadoAsignado || "N/A"
-          });
+          setState({ ...getInitialState(), ...itemToEdit, materialDeCorte: matCorte, grosorMaterial: grosor, colorAcrilico: color, archivoTipo: itemToEdit.archivoTipo || "vector", archivoFormato: itemToEdit.archivoFormato || "CDR", suministrarMaterial: itemToEdit.suministrarMaterial || false, costoMaterialExtra: itemToEdit.costoMaterialExtra || 0, empleadoAsignado: itemToEdit.empleadoAsignado || "N/A" });
       } else {
-          setState(getInitialState());
-          setMinutosInput('0'); setSegundosInput('00');
+          setState(getInitialState()); setMinutosInput('0'); setSegundosInput('00');
       }
     }
   }, [isOpen, itemToEdit]);
 
-  // 2. CÁLCULO DE SUBTOTAL
   useEffect(() => {
     let costoBaseUnitario = 0;
     const { cantidad, precioUnitario, unidad, medidaXCm, medidaYCm, suministrarMaterial, costoMaterialExtra } = state; 
-
     if (cantidad > 0) {
         if (unidad === 'und') costoBaseUnitario = precioUnitario;
         else if (unidad === 'm2' && medidaXCm > 0 && medidaYCm > 0) {
@@ -142,13 +127,11 @@ export function ItemFormModal({ isOpen, onClose, onAddItem, itemToEdit, designer
             const totalMinutes = (parseFloat(minutosInput) || 0) + ((parseFloat(segundosInput) || 0) / 60);
             costoBaseUnitario = totalMinutes * PRECIO_LASER_POR_MINUTO;
         }
-        
         const totalUnit = costoBaseUnitario + (suministrarMaterial ? costoMaterialExtra : 0);
         setState((prev: any) => ({ ...prev, subtotal: totalUnit * cantidad }));
     }
   }, [state.cantidad, state.precioUnitario, state.unidad, state.medidaXCm, state.medidaYCm, minutosInput, segundosInput, state.suministrarMaterial, state.costoMaterialExtra]);
 
-  // 3. AUTO-CONFIGURACIÓN
   useEffect(() => {
     if (state.tipoServicio === 'DISENO') setState((p: any) => ({ ...p, unidad: 'und', archivoTipo: 'imagen', archivoFormato: 'JPG' }));
     else if (state.tipoServicio === 'CORTE') setState((p: any) => ({ ...p, unidad: 'tiempo', archivoTipo: 'vector', archivoFormato: 'CDR' }));
@@ -160,188 +143,174 @@ export function ItemFormModal({ isOpen, onClose, onAddItem, itemToEdit, designer
     if (!state.nombre.trim() || state.cantidad <= 0) {
         setState((p: any) => ({ ...p, error: "Faltan datos obligatorios." })); return;
     }
-    
     let materialDetalleCorte = '';
     if (state.tipoServicio === 'CORTE') {
         const col = COLORES_ACRILICO.find(c => c.value === state.colorAcrilico)?.label;
         materialDetalleCorte = `${state.materialDeCorte} ${state.grosorMaterial} ${col || ''}`.trim();
     }
-
     let tiempoCorteFinal = state.unidad === 'tiempo' ? `${minutosInput}:${segundosInput.padStart(2, '0')}` : null;
-    let precioUnitarioCalculado = state.unidad === 'tiempo' 
-        ? (parseInt(minutosInput) + (parseInt(segundosInput) / 60)) * PRECIO_LASER_POR_MINUTO
-        : state.precioUnitario;
-    
+    let precioUnitarioCalculado = state.unidad === 'tiempo' ? (parseInt(minutosInput) + (parseInt(segundosInput) / 60)) * PRECIO_LASER_POR_MINUTO : state.precioUnitario;
     if (state.suministrarMaterial) precioUnitarioCalculado += state.costoMaterialExtra;
-
-    onAddItem({
-      ...state,
-      nombre: state.nombre.trim(),
-      precioUnitario: precioUnitarioCalculado, 
-      tiempoCorte: tiempoCorteFinal,
-      materialDetalleCorte: materialDetalleCorte || null,
-      empleadoAsignado: state.empleadoAsignado
-    });
+    onAddItem({ ...state, nombre: state.nombre.trim(), precioUnitario: precioUnitarioCalculado, tiempoCorte: tiempoCorteFinal, materialDetalleCorte: materialDetalleCorte || null, empleadoAsignado: state.empleadoAsignado });
     onClose();
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-[95vw] md:max-w-5xl h-[90vh] p-0 border-none bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-3xl overflow-hidden rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl flex flex-col">
+      <DialogContent className="max-w-[95vw] md:max-w-4xl h-[85vh] p-0 border-none bg-white dark:bg-slate-950 overflow-hidden rounded-[2rem] md:rounded-[2.5rem] shadow-2xl flex flex-col transition-all">
         
-        <header className="shrink-0 p-6 md:p-10 bg-white/50 dark:bg-slate-900/50 border-b border-slate-200/50 flex justify-between items-center">
-            <div className="flex items-center gap-5">
-                <div className="h-14 w-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-500/30">
-                    <Sparkles className="w-7 h-7" />
+        <header className="shrink-0 p-5 md:px-8 md:py-6 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+            <div className="flex items-center gap-4">
+                <div className="h-11 w-11 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
+                    <Sparkles className="w-5 h-5" />
                 </div>
                 <div>
-                    <DialogTitle className="text-xl md:text-3xl font-black tracking-tighter uppercase text-slate-900 dark:text-white leading-none">
-                        {itemToEdit ? "Editar Ítem" : "Nuevo Producto"}
+                    <DialogTitle className="text-xl md:text-2xl font-black tracking-tight uppercase text-slate-900 dark:text-white leading-none">
+                        {itemToEdit ? "Editar Ítem" : "Nuevo Ítem"}
                     </DialogTitle>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Especificaciones de Taller</p>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1.5 opacity-70">Parámetros de Producción</p>
                 </div>
             </div>
-            <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full h-12 w-12 hover:bg-slate-200/50 transition-colors">
-                <X className="w-6 h-6" />
+            <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full h-9 w-9 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                <X className="w-5 h-5" />
             </Button>
         </header>
 
-        <div className="flex-1 min-h-0 relative">
+        <div className="flex-1 min-h-0 relative bg-slate-50/30 dark:bg-slate-950/30">
             <ScrollArea className="h-full">
-                <div className="p-6 md:p-12 space-y-10">
+                <div className="p-6 md:p-8 space-y-8">
                     
-                    {/* BLOQUE: IDENTIFICACIÓN Y RESPONSABLE */}
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                    {/* FILA 1: NOMBRE Y SERVICIO */}
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
                         <div className="md:col-span-6 space-y-2">
-                            <Label className="text-[10px] font-black uppercase ml-2 text-slate-400 tracking-widest">Descripción del Trabajo</Label>
+                            <Label className="text-[9px] font-black uppercase ml-2 text-slate-400 tracking-wider">Descripción del Ítem</Label>
                             <div className="relative">
-                                <Type className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
+                                <Type className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
                                 <Input 
                                     value={state.nombre} 
                                     onChange={e => setState({...state, nombre: e.target.value})}
-                                    className="h-14 pl-12 rounded-2xl bg-white dark:bg-slate-900 border-none shadow-sm font-bold text-lg focus:ring-4 focus:ring-blue-500/10 transition-all"
-                                    placeholder="Nombre del trabajo..."
+                                    className="h-11 pl-11 rounded-xl bg-white dark:bg-slate-900 border-slate-200/60 dark:border-slate-800 shadow-sm font-bold text-sm focus:ring-4 focus:ring-blue-500/5 transition-all"
+                                    placeholder="Ej: Letrero Acrílico..."
                                 />
                             </div>
                         </div>
                         <div className="md:col-span-3 space-y-2">
-                            <Label className="text-[10px] font-black uppercase ml-2 text-slate-400 tracking-widest">Servicio</Label>
+                            <Label className="text-[9px] font-black uppercase ml-2 text-slate-400 tracking-wider">Categoría</Label>
                             <Select value={state.tipoServicio} onValueChange={v => setState({...state, tipoServicio: v})}>
-                                <SelectTrigger className="h-14 rounded-2xl bg-white dark:bg-slate-900 border-none shadow-sm font-black text-blue-600">
+                                <SelectTrigger className="h-11 rounded-xl bg-white dark:bg-slate-900 border-slate-200/60 dark:border-slate-800 shadow-sm font-black text-blue-600 text-xs">
                                     <SelectValue />
                                 </SelectTrigger>
-                                <SelectContent className="rounded-2xl border-none shadow-2xl">
-                                    <SelectItem value="DISENO">🎨 Diseño Gráfico</SelectItem>
+                                <SelectContent className="rounded-xl border-none shadow-2xl">
+                                    <SelectItem value="DISENO">🎨 Diseño</SelectItem>
                                     <SelectItem value="IMPRESION">🖨️ Impresión</SelectItem>
-                                    <SelectItem value="CORTE">✂️ Corte / Grabado</SelectItem>
+                                    <SelectItem value="CORTE">✂️ Corte Láser</SelectItem>
                                     <SelectItem value="ROTULACION">🚗 Rotulación</SelectItem>
-                                    <SelectItem value="AVISO_CORPOREO">🏢 Aviso Corpóreo</SelectItem>
+                                    <SelectItem value="AVISO_CORPOREO">🏢 Corpóreo</SelectItem>
                                     <SelectItem value="OTROS">📦 Otros</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
-
-                        {/* SELECTOR DE ENCARGADO / RESPONSABLE */}
                         <div className="md:col-span-3 space-y-2">
-                            <Label className="text-[10px] font-black uppercase text-orange-600 ml-2 tracking-widest">Responsable</Label>
+                            <Label className="text-[9px] font-black uppercase text-orange-600/70 ml-2 tracking-wider">Operador</Label>
                             <Select value={state.empleadoAsignado} onValueChange={v => setState({...state, empleadoAsignado: v})}>
-                                <SelectTrigger className="h-14 rounded-2xl bg-white dark:bg-slate-900 border-none shadow-sm font-black text-slate-800 dark:text-white">
-                                    <div className="flex items-center gap-2"><User className="w-4 h-4 text-orange-500"/> <SelectValue /></div>
+                                <SelectTrigger className="h-11 rounded-xl bg-white dark:bg-slate-900 border-slate-200/60 dark:border-slate-800 shadow-sm font-bold text-xs">
+                                    <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 text-orange-500"/> <SelectValue /></div>
                                 </SelectTrigger>
-                                <SelectContent className="rounded-2xl border-none shadow-2xl">
+                                <SelectContent className="rounded-xl border-none shadow-2xl">
                                     <SelectItem value="N/A">Sin Asignar</SelectItem>
-                                    <Separator className="my-2"/>
-                                    <div className="px-2 py-1.5 text-[9px] font-black text-slate-400 uppercase tracking-widest">Equipo Taller</div>
+                                    <Separator className="my-1.5 opacity-50"/>
                                     {PERSONAL_TALLER.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                                    <Separator className="my-2"/>
-                                    <div className="px-2 py-1.5 text-[9px] font-black text-slate-400 uppercase tracking-widest">Diseñadores</div>
                                     {designers.map((d: any) => <SelectItem key={d.id} value={d.name}>{d.name}</SelectItem>)}
                                 </SelectContent>
                             </Select>
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                    {/* FILA 2: CANTIDAD, UNIDAD Y PRECIO */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
                         <SectionField label="Cantidad" icon={<Hash className="w-3 h-3"/>}>
-                            <Input type="number" value={state.cantidad} onChange={e => setState({...state, cantidad: parseInt(e.target.value) || 1})} className="h-12 rounded-xl bg-white dark:bg-slate-900 border-none font-black text-center text-lg" />
+                            <Input type="number" value={state.cantidad} onChange={e => setState({...state, cantidad: parseInt(e.target.value) || 1})} className="h-11 rounded-xl bg-white dark:bg-slate-900 border-slate-200/60 dark:border-slate-800 font-black text-center text-sm" />
                         </SectionField>
-                        <SectionField label="Unidad" icon={<Layers className="w-3 h-3"/>}>
+                        <SectionField label="Unidad" icon={<Box className="w-3 h-3"/>}>
                             <Select value={state.unidad} onValueChange={v => setState({...state, unidad: v})} disabled={state.tipoServicio === 'CORTE'}>
-                                <SelectTrigger className="h-12 rounded-xl bg-white dark:bg-slate-900 border-none font-bold"><SelectValue /></SelectTrigger>
+                                <SelectTrigger className="h-11 rounded-xl bg-white dark:bg-slate-900 border-slate-200/60 dark:border-slate-800 font-bold text-xs"><SelectValue /></SelectTrigger>
                                 <SelectContent>{UNIDADES_DISPONIBLES.map(u => <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>)}</SelectContent>
                             </Select>
                         </SectionField>
                         {state.unidad !== 'tiempo' && (
-                            <SectionField label="Precio Base (USD)" icon={<DollarSign className="w-3 h-3"/>} className="col-span-2">
-                                <Input type="number" step="0.01" value={state.precioUnitario} onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})} className="h-12 rounded-xl bg-white dark:bg-slate-900 border-none font-black text-emerald-600 text-xl" />
+                            <SectionField label="Precio Unitario" icon={<DollarSign className="w-3 h-3"/>} className="col-span-2">
+                                <div className="relative">
+                                    <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-500" />
+                                    <Input type="number" step="0.01" value={state.precioUnitario} onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})} className="h-11 pl-10 rounded-xl bg-white dark:bg-slate-900 border-slate-200/60 dark:border-slate-800 font-black text-emerald-600 text-lg" />
+                                </div>
                             </SectionField>
                         )}
                     </div>
 
                     <AnimatePresence mode="wait">
                         {state.tipoServicio === 'DISENO' && (
-                            <motion.div key="panel-diseno" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="bg-indigo-500/5 p-8 rounded-[2.5rem] border border-indigo-200/50 space-y-6">
-                                <div className="flex items-center gap-2"><PenTool className="w-4 h-4 text-indigo-500"/> <h4 className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Archivos Digitales</h4></div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <SectionField label="Entrega"><Select value={state.archivoTipo} onValueChange={v => setState({...state, archivoTipo: v})}><SelectTrigger className="bg-white dark:bg-slate-900 border-none rounded-xl h-12 font-bold"><SelectValue /></SelectTrigger><SelectContent>{TIPOS_ARCHIVO.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select></SectionField>
-                                    <SectionField label="Extensión"><Select value={state.archivoFormato} onValueChange={v => setState({...state, archivoFormato: v})}><SelectTrigger className="bg-white dark:bg-slate-900 border-none rounded-xl h-12 font-bold"><SelectValue /></SelectTrigger><SelectContent>{FORMATOS_ARCHIVO[state.archivoTipo as 'vector' | 'imagen'].map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent></Select></SectionField>
+                            <motion.div key="panel-diseno" initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="bg-indigo-50/50 dark:bg-indigo-500/5 p-6 rounded-[1.8rem] border border-indigo-100 dark:border-indigo-900/30 space-y-4">
+                                <h4 className="text-[9px] font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2"><PenTool className="w-3.5 h-3.5"/> Configuración de Archivo</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                    <SectionField label="Tipo Archivo"><Select value={state.archivoTipo} onValueChange={v => setState({...state, archivoTipo: v})}><SelectTrigger className="bg-white dark:bg-slate-900 border-none rounded-lg h-10 text-xs font-bold"><SelectValue /></SelectTrigger><SelectContent>{TIPOS_ARCHIVO.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select></SectionField>
+                                    <SectionField label="Formato Final"><Select value={state.archivoFormato} onValueChange={v => setState({...state, archivoFormato: v})}><SelectTrigger className="bg-white dark:bg-slate-900 border-none rounded-lg h-10 text-xs font-bold"><SelectValue /></SelectTrigger><SelectContent>{FORMATOS_ARCHIVO[state.archivoTipo as 'vector' | 'imagen'].map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent></Select></SectionField>
                                 </div>
                             </motion.div>
                         )}
                         {state.tipoServicio === 'CORTE' && (
-                            <motion.div key="panel-corte" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="bg-orange-500/5 p-8 rounded-[2.5rem] border border-orange-200/50 space-y-6">
-                                <div className="flex items-center gap-2"><Scissors className="w-4 h-4 text-orange-500"/> <h4 className="text-[10px] font-black uppercase tracking-widest text-orange-600">Material y Tiempo</h4></div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <SectionField label="Material"><Select value={state.materialDeCorte} onValueChange={v => setState({...state, materialDeCorte: v})}><SelectTrigger className="bg-white dark:bg-slate-900 border-none h-12 rounded-xl font-bold"><SelectValue /></SelectTrigger><SelectContent>{MATERIALES_CORTE.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent></Select></SectionField>
-                                    {state.materialDeCorte === 'Acrilico' && (<SectionField label="Color"><Select value={state.colorAcrilico} onValueChange={v => setState({...state, colorAcrilico: v})}><SelectTrigger className="bg-white dark:bg-slate-900 border-none h-12 rounded-xl font-bold"><SelectValue /></SelectTrigger><SelectContent>{COLORES_ACRILICO.map(c => <SelectItem key={c.value} value={c.value}>{c.emoji} {c.label}</SelectItem>)}</SelectContent></Select></SectionField>)}
-                                    <SectionField label="Tiempo Estimado"><div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-1 rounded-xl h-12 px-4 border border-slate-100 dark:border-slate-800"><Input value={minutosInput} onChange={e => setMinutosInput(e.target.value)} className="border-none text-center font-black h-10" placeholder="0" /><span>:</span><Input value={segundosInput} onChange={e => setSegundosInput(e.target.value)} className="border-none text-center font-black h-10" placeholder="00" /></div></SectionField>
+                            <motion.div key="panel-corte" initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="bg-orange-50/50 dark:bg-orange-500/5 p-6 rounded-[1.8rem] border border-orange-100 dark:border-orange-900/30 space-y-4">
+                                <h4 className="text-[9px] font-black uppercase tracking-widest text-orange-600 flex items-center gap-2"><Scissors className="w-3.5 h-3.5"/> Detalles de Corte</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                    <SectionField label="Sustrato"><Select value={state.materialDeCorte} onValueChange={v => setState({...state, materialDeCorte: v})}><SelectTrigger className="bg-white dark:bg-slate-900 border-none h-10 rounded-lg text-xs font-bold"><SelectValue /></SelectTrigger><SelectContent>{MATERIALES_CORTE.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent></Select></SectionField>
+                                    {state.materialDeCorte === 'Acrilico' && (<SectionField label="Color Acrílico"><Select value={state.colorAcrilico} onValueChange={v => setState({...state, colorAcrilico: v})}><SelectTrigger className="bg-white dark:bg-slate-900 border-none h-10 rounded-lg text-xs font-bold"><SelectValue /></SelectTrigger><SelectContent>{COLORES_ACRILICO.map(c => <SelectItem key={c.value} value={c.value}>{c.emoji} {c.label}</SelectItem>)}</SelectContent></Select></SectionField>)}
+                                    <SectionField label="Tiempo (MM:SS)"><div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-1 rounded-lg h-10 px-3 border border-slate-100 dark:border-slate-800"><Input value={minutosInput} onChange={e => setMinutosInput(e.target.value)} className="border-none text-center font-black h-8 text-xs p-0 w-8" placeholder="0" /><span>:</span><Input value={segundosInput} onChange={e => setSegundosInput(e.target.value)} className="border-none text-center font-black h-8 text-xs p-0 w-8" placeholder="00" /></div></SectionField>
                                 </div>
                             </motion.div>
                         )}
                         {state.unidad === 'm2' && (
-                            <motion.div key="panel-medidas" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="bg-blue-500/5 p-8 rounded-[2.5rem] border border-blue-200/50 space-y-6">
-                                <div className="flex items-center gap-2"><MoveVertical className="w-4 h-4 text-blue-500"/> <h4 className="text-[10px] font-black uppercase tracking-widest text-blue-600">Medidas (cm)</h4></div>
-                                <div className="grid grid-cols-2 gap-8">
-                                    <SectionField label="Ancho (X)"><Input type="number" value={state.medidaXCm} onChange={e => setState({...state, medidaXCm: parseFloat(e.target.value) || 0})} className="h-12 rounded-xl border-none bg-white dark:bg-slate-900 font-black text-center" /></SectionField>
-                                    <SectionField label="Alto (Y)"><Input type="number" value={state.medidaYCm} onChange={e => setState({...state, medidaYCm: parseFloat(e.target.value) || 0})} className="h-12 rounded-xl border-none bg-white dark:bg-slate-900 font-black text-center" /></SectionField>
+                            <motion.div key="panel-medidas" initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="bg-blue-50/50 dark:bg-blue-500/5 p-6 rounded-[1.8rem] border border-blue-100 dark:border-blue-900/30 space-y-4">
+                                <h4 className="text-[9px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2"><MoveVertical className="w-3.5 h-3.5"/> Dimensiones</h4>
+                                <div className="grid grid-cols-2 gap-6">
+                                    <SectionField label="Base (cm)"><Input type="number" value={state.medidaXCm} onChange={e => setState({...state, medidaXCm: parseFloat(e.target.value) || 0})} className="h-10 rounded-lg border-none bg-white dark:bg-slate-900 font-black text-center text-xs" /></SectionField>
+                                    <SectionField label="Altura (cm)"><Input type="number" value={state.medidaYCm} onChange={e => setState({...state, medidaYCm: parseFloat(e.target.value) || 0})} className="h-10 rounded-lg border-none bg-white dark:bg-slate-900 font-black text-center text-xs" /></SectionField>
                                 </div>
                             </motion.div>
                         )}
                     </AnimatePresence>
 
-                    {/* BLOQUE: SUMINISTRO MATERIAL */}
-                    <div className={cn("p-8 rounded-[2.5rem] border transition-all", state.suministrarMaterial ? "bg-emerald-500/5 border-emerald-200 shadow-inner" : "bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800")}>
+                    {/* SUMINISTRO MATERIAL */}
+                    <div className={cn("p-5 rounded-[2rem] border transition-all duration-300", state.suministrarMaterial ? "bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200" : "bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800")}>
                         <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                                <div className={cn("p-3 rounded-2xl", state.suministrarMaterial ? "bg-emerald-500 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-400")}><Box /></div>
-                                <div><p className="font-black text-sm uppercase">Suministrar Material</p><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Incluir costo en la orden</p></div>
+                            <div className="flex items-center gap-3">
+                                <div className={cn("p-2.5 rounded-xl transition-colors", state.suministrarMaterial ? "bg-emerald-500 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-400")}><Box className="w-4 h-4" /></div>
+                                <div><p className="font-black text-xs uppercase text-slate-700 dark:text-slate-200">Suministrar Material</p><p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Añadir costo del sustrato</p></div>
                             </div>
-                            <input type="checkbox" checked={state.suministrarMaterial} onChange={e => setState({...state, suministrarMaterial: e.target.checked})} className="w-7 h-7 rounded-lg text-emerald-500 cursor-pointer" />
+                            <input type="checkbox" checked={state.suministrarMaterial} onChange={e => setState({...state, suministrarMaterial: e.target.checked})} className="w-6 h-6 rounded-lg accent-emerald-500 cursor-pointer" />
                         </div>
                         <AnimatePresence>
                             {state.suministrarMaterial && (
-                                <motion.div key="material-input" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-6 pt-6 border-t border-emerald-100 dark:border-emerald-900/30">
-                                    <Label className="text-[10px] font-black uppercase text-emerald-600 ml-2">Costo Extra por Unidad</Label>
-                                    <div className="relative mt-2"><DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-400"/><Input type="number" step="0.01" value={state.costoMaterialExtra} onChange={e => setState({...state, costoMaterialExtra: parseFloat(e.target.value) || 0})} className="h-12 pl-10 rounded-xl border-none bg-emerald-500/10 font-black text-emerald-700 text-lg" /></div>
+                                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-4 pt-4 border-t border-emerald-100 dark:border-emerald-900/20 overflow-hidden">
+                                    <Label className="text-[8px] font-black uppercase text-emerald-600 ml-2">Costo Extra Material (USD)</Label>
+                                    <div className="relative mt-1.5"><DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-3 h-3 text-emerald-400"/><Input type="number" step="0.01" value={state.costoMaterialExtra} onChange={e => setState({...state, costoMaterialExtra: parseFloat(e.target.value) || 0})} className="h-10 pl-9 rounded-lg border-none bg-emerald-500/10 font-black text-emerald-700 dark:text-emerald-400 text-base" /></div>
                                 </motion.div>
                             )}
                         </AnimatePresence>
                     </div>
 
-                    {state.error && (<Alert variant="destructive" className="rounded-[1.5rem] bg-red-50 border-red-200"><AlertCircle className="h-5 w-5" /><AlertTitle className="font-black">Error</AlertTitle><AlertDescription className="font-medium">{state.error}</AlertDescription></Alert>)}
+                    {state.error && (<Alert variant="destructive" className="rounded-2xl bg-red-50 dark:bg-red-500/10 border-red-100 py-3"><AlertCircle className="h-4 w-4" /><AlertTitle className="text-xs font-black">Error</AlertTitle><AlertDescription className="text-[10px] font-bold">{state.error}</AlertDescription></Alert>)}
                 </div>
             </ScrollArea>
         </div>
 
-        <footer className="shrink-0 p-8 md:px-12 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-t border-slate-100 dark:border-slate-800 flex flex-col md:flex-row justify-between items-center gap-8">
-            <div className="text-center md:text-left">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Subtotal Estimado</p>
-                <div className="flex items-baseline gap-2"><span className="text-4xl font-black text-blue-600 tracking-tighter">${state.subtotal.toFixed(2)}</span><span className="text-sm font-black text-slate-300 uppercase">USD</span></div>
+        <footer className="shrink-0 p-6 md:px-8 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-4">
+            <div className="hidden md:block">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 opacity-60">Subtotal del Ítem</p>
+                <div className="flex items-baseline gap-1.5"><span className="text-3xl font-black text-blue-600 tracking-tighter">${state.subtotal.toFixed(2)}</span><span className="text-[10px] font-black text-slate-300 dark:text-slate-700 uppercase">USD</span></div>
             </div>
-            <div className="flex gap-4 w-full md:w-auto">
-                <Button variant="ghost" onClick={onClose} className="rounded-2xl h-14 px-8 font-black text-slate-400 hover:text-slate-600">Cancelar</Button>
-                <Button onClick={handleSave} className="flex-1 md:flex-none rounded-2xl h-14 px-12 bg-blue-600 hover:bg-blue-700 text-white font-black text-lg shadow-2xl transition-all hover:scale-105">
-                    {itemToEdit ? "Guardar Cambios" : "Agregar Ítem"}
+            <div className="flex gap-3 w-full md:w-auto">
+                <Button variant="ghost" onClick={onClose} className="flex-1 md:flex-none rounded-xl h-11 px-6 font-black text-slate-400 hover:text-slate-600 text-xs uppercase tracking-widest transition-all">Cancelar</Button>
+                <Button onClick={handleSave} className="flex-[2] md:flex-none rounded-xl h-11 px-10 bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-wider shadow-lg shadow-blue-500/20 transition-all active:scale-95">
+                    {itemToEdit ? "Actualizar" : "Añadir Ítem"}
                 </Button>
             </div>
         </footer>
@@ -352,8 +321,8 @@ export function ItemFormModal({ isOpen, onClose, onAddItem, itemToEdit, designer
 
 function SectionField({ label, icon, children, className }: any) {
     return (
-        <div className={cn("space-y-2.5", className)}>
-            <Label className="text-[10px] font-black uppercase ml-2 text-slate-400 flex items-center gap-1.5 tracking-widest">{icon} {label}</Label>
+        <div className={cn("space-y-2", className)}>
+            <Label className="text-[9px] font-black uppercase ml-1.5 text-slate-400 flex items-center gap-1.5 tracking-wider">{icon} {label}</Label>
             {children}
         </div>
     )
