@@ -1,7 +1,7 @@
-// @/components/dashboard/AccountsPayableView.tsx
+// @/components/dashboard/SMR_Finance_v3.tsx
 "use client"
 
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from "framer-motion"
 
 // UI Components - Shadcn
@@ -17,330 +17,313 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 // Iconos - Lucide
 import { 
-    Building2, Plus, Search, Wallet, Landmark, 
-    Calendar, Filter, CreditCard, ArrowUpRight, 
-    ShoppingCart, Hammer, Home, TrendingUp, 
-    Loader2, Repeat, Zap, Globe, HardDrive, 
-    FileText, Coins, ArrowRightLeft
+    Plus, Search, Repeat, Zap, Trash2, Edit3, Bell, 
+    Package, UserCircle, DollarSign, CheckCircle2, 
+    Clock, AlertTriangle, Wallet, ArrowUpRight
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-// --- DEFINICIÓN DE TIPOS ---
-export type GastoType = 'FIJO' | 'VARIABLE';
-export type CategoryType = 'Produccion' | 'Viveres' | 'Alquiler' | 'ServiciosPublicos' | 'Software' | 'Mantenimiento' | 'Impuestos';
+// --- TIPOS ---
+export type GastoType = 'FIJO' | 'VARIABLE' | 'NOMINA';
+export type CategoryType = 'Insumos' | 'Materiales' | 'Servicios' | 'Nomina' | 'Impuestos';
 
-export interface Gasto {
+export interface Registro {
     id: string;
-    proveedor: string;
+    beneficiario: string; // Proveedor o Nombre de Empleado
     descripcion: string;
-    monto: number; // Siempre se guarda en USD para consistencia
-    montoBs?: number;
+    monto: number;
+    montoBs: number;
     fecha: string;
     categoria: CategoryType;
     tipo: GastoType;
+    diaRecordatorio: number;
     estado: 'PENDIENTE' | 'PAGADO';
 }
 
-interface AccountsPayableProps {
-    gastos?: Gasto[];
+interface Props {
     bcvRate: number;
-    onAddGasto: (data: Omit<Gasto, 'id'>) => Promise<void>;
+    initialData?: Registro[];
 }
 
-export function AccountsPayableView({ gastos = [], bcvRate, onAddGasto }: AccountsPayableProps) {
-    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-    const [isSubmitting, setIsSubmitting] = useState(false);
+export function AccountsPayableView({ bcvRate, initialData = [] }: Props) {
+    const [registros, setRegistros] = useState<Registro[]>(initialData);
+    const [isMainModalOpen, setIsMainModalOpen] = useState(false);
+    const [isPayModalOpen, setIsPayModalOpen] = useState(false);
+    const [selectedRecord, setSelectedRecord] = useState<Registro | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
-    const [currencyMode, setCurrencyMode] = useState<'USD' | 'BS'>('USD');
-
-    // ✨ ESTADO DEL FORMULARIO CON CONVERSIÓN DINÁMICA
-    const [formData, setFormData] = useState({
-        tipo: 'VARIABLE' as GastoType,
-        proveedor: "",
-        descripcion: "",
-        monto: "", // USD
-        montoBs: "", // BS
-        categoria: 'Produccion' as CategoryType,
-        fecha: new Date().toISOString().split('T')[0]
+    
+    // Formulario Base
+    const [formData, setFormData] = useState<Omit<Registro, 'id'>>({
+        beneficiario: "", descripcion: "", monto: 0, montoBs: 0,
+        fecha: new Date().toISOString().split('T')[0],
+        categoria: 'Insumos', tipo: 'VARIABLE', diaRecordatorio: 1, estado: 'PAGADO'
     });
 
-    // ✨ Efecto para convertir montos automáticamente
-    const handleAmountChange = (val: string, type: 'USD' | 'BS') => {
-        if (type === 'USD') {
-            const bs = val ? (parseFloat(val) * bcvRate).toFixed(2) : "";
-            setFormData(prev => ({ ...prev, monto: val, montoBs: bs }));
+    // Formulario de Pago (Manual)
+    const [payAmount, setPayAmount] = useState({ usd: "", bs: "" });
+
+    // --- LÓGICA DE RECORDATORIOS (Nómina y Fijos) ---
+    const reminders = useMemo(() => {
+        const today = new Date().getDate();
+        return registros.filter(r => {
+            if (r.estado === 'PAGADO') return false;
+            const diff = r.diaRecordatorio - today;
+            return (diff >= 0 && diff <= 5) || today > r.diaRecordatorio;
+        });
+    }, [registros]);
+
+    // --- MANEJO DE PRECIOS ---
+    const handleAmountUpdate = (val: string, source: 'USD' | 'BS', target: 'FORM' | 'PAY') => {
+        const num = parseFloat(val) || 0;
+        const converted = source === 'USD' ? (num * bcvRate).toFixed(2) : (num / bcvRate).toFixed(2);
+        
+        if (target === 'FORM') {
+            setFormData(prev => ({
+                ...prev,
+                monto: source === 'USD' ? num : parseFloat(converted),
+                montoBs: source === 'BS' ? num : parseFloat(converted)
+            }));
         } else {
-            const usd = val ? (parseFloat(val) / bcvRate).toFixed(2) : "";
-            setFormData(prev => ({ ...prev, montoBs: val, monto: usd }));
-        }
-    };
-
-    const fixedServices = [
-        { id: 'alquiler', label: 'Alquiler del Local', cat: 'Alquiler', prov: 'Inmobiliaria SMR' },
-        { id: 'internet', label: 'Internet Fibra', cat: 'ServiciosPublicos', prov: 'Proveedor Local' },
-        { id: 'adobe', label: 'Adobe Creative Cloud', cat: 'Software', prov: 'Adobe Systems' },
-        { id: 'seniat', label: 'Impuestos SENIAT', cat: 'Impuestos', prov: 'SENIAT' },
-        { id: 'alcaldia', label: 'Impuestos Municipales', cat: 'Impuestos', prov: 'Alcaldía' },
-    ];
-
-    const handleSelectFixed = (val: string) => {
-        const service = fixedServices.find(s => s.id === val);
-        if (service) {
-            setFormData({
-                ...formData,
-                proveedor: service.prov,
-                descripcion: service.label,
-                categoria: service.cat as CategoryType
+            setPayAmount({
+                usd: source === 'USD' ? val : converted.toString(),
+                bs: source === 'BS' ? val : converted.toString()
             });
         }
     };
 
-    const handleRegister = async () => {
-        if (!formData.proveedor || !formData.monto) return;
-        setIsSubmitting(true);
-        try {
-            await onAddGasto({
-                ...formData,
-                monto: parseFloat(formData.monto),
-                montoBs: parseFloat(formData.montoBs),
-                estado: 'PAGADO'
-            });
-            setIsAddModalOpen(false);
-            setFormData({ tipo: 'VARIABLE', proveedor: "", descripcion: "", monto: "", montoBs: "", categoria: 'Produccion', fecha: new Date().toISOString().split('T')[0] });
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setIsSubmitting(false);
-        }
+    // --- ACCIONES ---
+    const saveNewRecord = () => {
+        const newRecord: Registro = { 
+            ...formData, 
+            id: Math.random().toString(36).substr(2, 9),
+            // Si es Nómina, forzamos estado Pendiente para que el recordatorio funcione
+            estado: formData.tipo === 'NOMINA' ? 'PENDIENTE' : formData.estado 
+        };
+        setRegistros(prev => [newRecord, ...prev]);
+        setIsMainModalOpen(false);
+        resetForm();
     };
 
-    const filteredGastos = useMemo(() => {
-        return gastos.filter(g => 
-            g.proveedor.toLowerCase().includes(searchTerm.toLowerCase()) || 
-            g.descripcion.toLowerCase().includes(searchTerm.toLowerCase())
-        ).sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
-    }, [gastos, searchTerm]);
+    const processPayment = () => {
+        if (!selectedRecord) return;
+        setRegistros(prev => prev.map(r => 
+            r.id === selectedRecord.id 
+                ? { ...r, estado: 'PAGADO', monto: parseFloat(payAmount.usd), montoBs: parseFloat(payAmount.bs), fecha: new Date().toISOString().split('T')[0] } 
+                : r
+        ));
+        setIsPayModalOpen(false);
+        setSelectedRecord(null);
+    };
 
-    const totals = useMemo(() => {
-        return filteredGastos.reduce((acc, curr) => {
-            if (curr.tipo === 'FIJO') acc.fijos += curr.monto;
-            else acc.variables += curr.monto;
-            acc.total += curr.monto;
-            return acc;
-        }, { fijos: 0, variables: 0, total: 0 });
-    }, [filteredGastos]);
+    const resetForm = () => {
+        setFormData({ beneficiario: "", descripcion: "", monto: 0, montoBs: 0, fecha: new Date().toISOString().split('T')[0], categoria: 'Insumos', tipo: 'VARIABLE', diaRecordatorio: 1, estado: 'PAGADO' });
+    };
 
     return (
-        <div className="space-y-4 lg:space-y-6 pb-10">
+        <div className="max-w-7xl mx-auto p-4 lg:p-10 space-y-8">
             
-            <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white dark:bg-slate-900 p-4 lg:p-6 rounded-3xl lg:rounded-[2rem] border shadow-sm">
-                <div>
-                    <h1 className="text-xl lg:text-3xl font-black text-slate-900 dark:text-white tracking-tighter flex items-center gap-2 lg:gap-3">
-                        <Building2 className="w-6 h-6 lg:w-8 h-8 text-amber-600" /> Cuentas por Pagar
+            {/* CABECERA */}
+            <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border shadow-sm">
+                <div className="space-y-1">
+                    <h1 className="text-4xl font-black italic tracking-tighter uppercase leading-none text-slate-900 dark:text-white">
+                        SMR <span className="text-amber-600">Payroll & Expenses</span>
                     </h1>
-                    <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest mt-1 px-1">Control de Egresos SMR</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Gestión Integral de Nómina y Egresos</p>
                 </div>
-                <Button onClick={() => setIsAddModalOpen(true)} className="w-full lg:w-auto bg-amber-600 hover:bg-amber-700 text-white rounded-xl lg:rounded-2xl h-11 lg:h-12 px-6 font-bold shadow-lg shadow-amber-500/20 gap-2">
-                    <Plus className="w-5 h-5" /> Registrar Gasto
-                </Button>
+                <div className="flex flex-wrap gap-3">
+                    <div className="bg-slate-100 dark:bg-slate-800 px-4 py-2 rounded-xl flex flex-col justify-center">
+                        <span className="text-[8px] font-black text-slate-500 uppercase">Tasa del día</span>
+                        <span className="font-black text-sm text-slate-900 dark:text-white">${bcvRate}</span>
+                    </div>
+                    <Button onClick={() => setIsMainModalOpen(true)} className="bg-amber-600 hover:bg-amber-700 h-14 px-8 rounded-2xl font-black uppercase italic tracking-widest text-white shadow-lg transition-transform active:scale-95">
+                        <Plus className="mr-2" /> Registrar Nuevo
+                    </Button>
+                </div>
             </header>
 
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                <StatCard label="Gastos Fijos" value={`$${totals.fijos.toFixed(2)}`} icon={<Repeat />} color="blue" />
-                <StatCard label="Gastos Variables" value={`$${totals.variables.toFixed(2)}`} icon={<Zap />} color="orange" />
-                <div className="col-span-2 lg:col-span-1">
-                    <StatCard label="Total USD" value={`$${totals.total.toFixed(2)}`} icon={<TrendingUp />} color="emerald" primary />
-                </div>
-            </div>
-
-            <Card className="rounded-[2rem] border-none shadow-sm overflow-hidden bg-white dark:bg-slate-900">
-                <div className="p-6 border-b border-slate-50 dark:border-slate-800 flex flex-col md:flex-row justify-between gap-4">
-                    <div className="relative w-full md:w-80">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                        <Input placeholder="Buscar..." className="pl-10 rounded-xl border-none bg-slate-100 dark:bg-slate-800 h-11 font-bold" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                    </div>
-                    <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
-                        <div className="px-3 py-1 text-[10px] font-black uppercase text-slate-500">Tasa BCV: {bcvRate.toFixed(2)}</div>
-                    </div>
-                </div>
-                <Table>
-                    <TableHeader className="bg-slate-50 dark:bg-slate-800/50 h-14">
-                        <TableRow className="border-none">
-                            <TableHead className="px-6 font-black text-[10px] uppercase tracking-widest text-slate-500">Proveedor / Motivo</TableHead>
-                            <TableHead className="font-black text-[10px] uppercase tracking-widest text-center text-slate-500">Categoría</TableHead>
-                            <TableHead className="text-right font-black text-[10px] uppercase tracking-widest px-6 text-slate-500">Monto Final</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {filteredGastos.map((g) => (
-                            <TableRow key={g.id} className="h-20 border-slate-50 dark:border-slate-800/50 hover:bg-slate-50/50 transition-colors">
-                                <TableCell className="px-6">
-                                    <div className="flex items-center gap-2">
-                                        {g.tipo === 'FIJO' ? <Repeat className="w-3 h-3 text-blue-500" /> : <Zap className="w-3 h-3 text-orange-500" />}
-                                        <div className="font-black text-slate-900 dark:text-white text-xs lg:text-sm uppercase tracking-tighter">{g.proveedor}</div>
+            {/* RECORDATORIOS INTELIGENTES */}
+            <AnimatePresence>
+                {reminders.length > 0 && (
+                    <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {reminders.map(r => (
+                            <div key={r.id} className="bg-amber-500 text-white p-5 rounded-3xl shadow-xl flex items-center justify-between border-b-4 border-amber-700">
+                                <div className="flex items-center gap-4">
+                                    <div className="bg-white/20 p-2 rounded-xl"><Bell className="w-5 h-5 animate-bounce" /></div>
+                                    <div>
+                                        <p className="text-[9px] font-black uppercase opacity-80">Por Pagar (Día {r.diaRecordatorio})</p>
+                                        <h4 className="font-black uppercase italic text-sm">{r.beneficiario}</h4>
                                     </div>
-                                    <div className="text-[9px] font-bold text-slate-400 uppercase mt-1 ml-5">{g.descripcion}</div>
-                                </TableCell>
-                                <TableCell><CategoryBadge category={g.categoria} /></TableCell>
-                                <TableCell className="text-right px-6">
-                                    <div className="font-black text-slate-900 dark:text-white text-sm lg:text-lg">${g.monto.toFixed(2)}</div>
-                                    <div className="text-[10px] font-black text-amber-600">Bs. {(g.monto * bcvRate).toLocaleString()}</div>
-                                </TableCell>
-                            </TableRow>
+                                </div>
+                                <Button 
+                                    onClick={() => { setSelectedRecord(r); setIsPayModalOpen(true); }}
+                                    className="bg-white text-amber-600 hover:bg-slate-100 font-black uppercase text-[10px] px-4 rounded-xl h-10"
+                                >
+                                    Pagar Ahora
+                                </Button>
+                            </div>
                         ))}
-                    </TableBody>
-                </Table>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* TABLA DE OPERACIONES */}
+            <Card className="rounded-[3rem] border-none shadow-2xl bg-white dark:bg-slate-900 overflow-hidden">
+                <div className="p-8 border-b border-slate-50 dark:border-slate-800 flex flex-col md:flex-row justify-between gap-4">
+                    <div className="relative w-full md:w-96">
+                        <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <Input 
+                            placeholder="Buscar pago, empleado o insumo..." 
+                            className="pl-14 h-14 rounded-2xl border-none bg-slate-100 dark:bg-slate-800 font-bold"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                    <Tabs defaultValue="TODO" className="w-full md:w-auto">
+                        <TabsList className="bg-slate-100 dark:bg-slate-800 h-14 p-1 rounded-2xl">
+                            <TabsTrigger value="TODO" className="rounded-xl px-6 font-black text-[10px] uppercase">Todo</TabsTrigger>
+                            <TabsTrigger value="NOMINA" className="rounded-xl px-6 font-black text-[10px] uppercase">Nómina</TabsTrigger>
+                        </TabsList>
+                    </Tabs>
+                </div>
+
+                <div className="overflow-x-auto">
+                    <Table>
+                        <TableHeader className="bg-slate-50/50 dark:bg-slate-800/30">
+                            <TableRow className="h-16 border-none">
+                                <TableHead className="px-10 font-black text-[10px] uppercase text-slate-400 tracking-widest">Identificación</TableHead>
+                                <TableHead className="font-black text-[10px] uppercase text-slate-400 text-center">Tipo</TableHead>
+                                <TableHead className="font-black text-[10px] uppercase text-slate-400 text-right">Monto</TableHead>
+                                <TableHead className="font-black text-[10px] uppercase text-slate-400 text-right px-10">Estado</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {registros.filter(r => r.beneficiario.toLowerCase().includes(searchTerm.toLowerCase())).map((r) => (
+                                <TableRow key={r.id} className="h-28 border-slate-50 dark:border-slate-800 hover:bg-slate-50/50 transition-all">
+                                    <TableCell className="px-10">
+                                        <div className="flex items-center gap-4">
+                                            <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center", 
+                                                r.tipo === 'NOMINA' ? "bg-indigo-100 text-indigo-600" : "bg-amber-100 text-amber-600"
+                                            )}>
+                                                {r.tipo === 'NOMINA' ? <UserCircle className="w-7 h-7" /> : <Package className="w-7 h-7" />}
+                                            </div>
+                                            <div>
+                                                <h3 className="font-black text-slate-900 dark:text-white uppercase italic text-lg leading-none">{r.beneficiario}</h3>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase mt-1 tracking-tighter">{r.descripcion}</p>
+                                            </div>
+                                        </div>
+                                    </TableCell>
+                                    <TableCell className="text-center">
+                                        <Badge className="bg-slate-900 dark:bg-white dark:text-slate-900 font-black text-[9px] uppercase px-3 rounded-lg">{r.categoria}</Badge>
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                        <div className="font-black text-2xl text-slate-900 dark:text-white leading-none">${r.monto.toFixed(2)}</div>
+                                        <div className="text-[11px] font-black text-amber-600 uppercase">Bs. {r.montoBs.toLocaleString()}</div>
+                                    </TableCell>
+                                    <TableCell className="px-10 text-right">
+                                        {r.estado === 'PAGADO' ? (
+                                            <div className="flex items-center justify-end gap-2 text-emerald-600 font-black text-[10px] uppercase tracking-widest">
+                                                <CheckCircle2 className="w-4 h-4" /> Pagado
+                                            </div>
+                                        ) : (
+                                            <Button 
+                                                onClick={() => { setSelectedRecord(r); setIsPayModalOpen(true); }}
+                                                className="bg-slate-100 dark:bg-slate-800 text-slate-600 hover:bg-amber-600 hover:text-white h-10 px-4 rounded-xl font-black text-[9px] uppercase transition-all"
+                                            >
+                                                Procesar Pago
+                                            </Button>
+                                        )}
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </div>
             </Card>
 
-            <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
-                <DialogContent className="max-w-md rounded-[2.5rem] p-8 bg-white dark:bg-slate-950 border-none shadow-2xl w-[95vw]">
+            {/* MODAL: REGISTRO INICIAL */}
+            <Dialog open={isMainModalOpen} onOpenChange={setIsMainModalOpen}>
+                <DialogContent className="max-w-md rounded-[3rem] p-10 bg-white dark:bg-slate-950 border-none shadow-2xl">
                     <DialogHeader>
-                        <DialogTitle className="text-2xl font-black uppercase italic tracking-tighter flex items-center gap-3 text-amber-600 leading-none">
-                            <ArrowUpRight className="w-8 h-8"/> Registro de Egreso
-                        </DialogTitle>
+                        <DialogTitle className="text-3xl font-black italic uppercase tracking-tighter text-amber-600 leading-none">Configurar Registro</DialogTitle>
                     </DialogHeader>
-                    
-                    <div className="space-y-5 py-4">
-                        {/* Selector de Tipo */}
-                        <div className="space-y-2">
-                            <Label className="text-[10px] font-black uppercase text-slate-400 ml-1">Tipo de Gasto</Label>
-                            <Tabs value={formData.tipo} onValueChange={(v: any) => setFormData({...formData, tipo: v})} className="w-full">
-                                <TabsList className="grid grid-cols-2 w-full h-12 rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
-                                    <TabsTrigger value="VARIABLE" className="rounded-lg font-black text-[10px] uppercase data-[state=active]:bg-white data-[state=active]:text-orange-600 transition-all">Variable</TabsTrigger>
-                                    <TabsTrigger value="FIJO" className="rounded-lg font-black text-[10px] uppercase data-[state=active]:bg-white data-[state=active]:text-blue-600 transition-all">Fijo</TabsTrigger>
-                                </TabsList>
-                            </Tabs>
-                        </div>
+                    <div className="space-y-6 py-4">
+                        <Tabs value={formData.tipo} onValueChange={(v: any) => setFormData({...formData, tipo: v, categoria: v === 'NOMINA' ? 'Nomina' : 'Insumos'})}>
+                            <TabsList className="grid grid-cols-2 h-14 bg-slate-100 dark:bg-slate-800 rounded-2xl p-1">
+                                <TabsTrigger value="VARIABLE" className="rounded-xl font-black text-[10px] uppercase">Gasto Gral</TabsTrigger>
+                                <TabsTrigger value="NOMINA" className="rounded-xl font-black text-[10px] uppercase">Empleado</TabsTrigger>
+                            </TabsList>
+                        </Tabs>
 
-                        <AnimatePresence mode="wait">
-                            {formData.tipo === 'FIJO' ? (
-                                <motion.div key="fijo" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-4">
-                                    <div className="space-y-1">
-                                        <Label className="text-[10px] font-black uppercase text-slate-400 ml-1">Servicio Mensual / Impuestos</Label>
-                                        <Select onValueChange={handleSelectFixed}>
-                                            <SelectTrigger className="rounded-xl bg-slate-100 dark:bg-slate-800 border-none h-12 font-bold"><SelectValue placeholder="Elegir..." /></SelectTrigger>
-                                            <SelectContent className="rounded-xl font-bold border-none shadow-2xl">
-                                                {fixedServices.map(s => <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </motion.div>
-                            ) : (
-                                <motion.div key="variable" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-4">
-                                    <Input value={formData.proveedor} onChange={(e) => setFormData({...formData, proveedor: e.target.value})} className="rounded-xl bg-slate-100 dark:bg-slate-800 border-none h-12 font-bold" placeholder="Proveedor" />
-                                    <Input value={formData.descripcion} onChange={(e) => setFormData({...formData, descripcion: e.target.value})} className="rounded-xl bg-slate-100 dark:bg-slate-800 border-none h-12 font-bold" placeholder="Descripción" />
+                        <div className="space-y-4">
+                            <div className="space-y-1">
+                                <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">{formData.tipo === 'NOMINA' ? "Nombre del Empleado" : "Beneficiario / Tienda"}</Label>
+                                <Input value={formData.beneficiario} onChange={(e) => setFormData({...formData, beneficiario: e.target.value})} className="h-12 rounded-xl border-none bg-slate-100 dark:bg-slate-800 font-bold" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                    <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría</Label>
                                     <Select value={formData.categoria} onValueChange={(v: any) => setFormData({...formData, categoria: v})}>
-                                        <SelectTrigger className="rounded-xl bg-slate-100 dark:bg-slate-800 border-none h-12 font-bold"><SelectValue /></SelectTrigger>
-                                        <SelectContent className="rounded-xl font-bold">
-                                            <SelectItem value="Produccion">Producción</SelectItem>
-                                            <SelectItem value="Viveres">Víveres</SelectItem>
-                                            <SelectItem value="Mantenimiento">Mantenimiento</SelectItem>
-                                            <SelectItem value="Impuestos">Impuestos</SelectItem>
+                                        <SelectTrigger className="h-12 border-none bg-slate-100 dark:bg-slate-800 rounded-xl font-bold"><SelectValue /></SelectTrigger>
+                                        <SelectContent className="font-bold rounded-xl">
+                                            <SelectItem value="Insumos">Insumos</SelectItem>
+                                            <SelectItem value="Nomina">Nómina</SelectItem>
+                                            <SelectItem value="Servicios">Servicios</SelectItem>
                                         </SelectContent>
                                     </Select>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-
-                        {/* ✨ SECCIÓN DE MONTOS BI-MONETARIA ✨ */}
-                        <div className="bg-slate-50 dark:bg-slate-900 p-4 rounded-3xl space-y-4 border border-slate-100 dark:border-slate-800 shadow-inner">
-                            <div className="flex justify-between items-center mb-1">
-                                <Label className="text-[10px] font-black uppercase text-slate-400 ml-1">Ingreso de Monto</Label>
-                                <Tabs value={currencyMode} onValueChange={(v: any) => setCurrencyMode(v)} className="h-8">
-                                    <TabsList className="bg-slate-200 dark:bg-slate-800 h-8 rounded-lg">
-                                        <TabsTrigger value="USD" className="text-[9px] font-black h-6">USD</TabsTrigger>
-                                        <TabsTrigger value="BS" className="text-[9px] font-black h-6">BS</TabsTrigger>
-                                    </TabsList>
-                                </Tabs>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Día Recordatorio</Label>
+                                    <Input type="number" value={formData.diaRecordatorio} onChange={(e) => setFormData({...formData, diaRecordatorio: parseInt(e.target.value)})} className="h-12 rounded-xl border-none bg-slate-100 dark:bg-slate-800 font-bold" />
+                                </div>
                             </div>
-                            
-                            <div className="grid grid-cols-1 gap-3">
-                                {currencyMode === 'USD' ? (
-                                    <div className="space-y-1">
-                                        <div className="relative">
-                                            <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-amber-600 text-lg">$</span>
-                                            <Input 
-                                                type="number" 
-                                                value={formData.monto} 
-                                                onChange={(e) => handleAmountChange(e.target.value, 'USD')}
-                                                className="pl-8 rounded-xl bg-white dark:bg-slate-800 border-none h-12 font-black text-amber-600 text-xl" 
-                                                placeholder="0.00"
-                                            />
-                                        </div>
-                                        <p className="text-[10px] font-black text-slate-400 ml-2 italic">Equivale a: Bs. {formData.montoBs || "0.00"}</p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-1">
-                                        <div className="relative">
-                                            <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-blue-600 text-lg">Bs</span>
-                                            <Input 
-                                                type="number" 
-                                                value={formData.montoBs} 
-                                                onChange={(e) => handleAmountChange(e.target.value, 'BS')}
-                                                className="pl-12 rounded-xl bg-white dark:bg-slate-800 border-none h-12 font-black text-blue-600 text-xl" 
-                                                placeholder="0.00"
-                                            />
-                                        </div>
-                                        <p className="text-[10px] font-black text-slate-400 ml-2 italic">Equivale a: $ {formData.monto || "0.00"}</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="space-y-1">
-                            <Label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fecha</Label>
-                            <Input type="date" value={formData.fecha} onChange={(e) => setFormData({...formData, fecha: e.target.value})} className="rounded-xl bg-slate-100 dark:bg-slate-800 border-none h-12 font-bold text-sm" />
                         </div>
                     </div>
-
                     <DialogFooter>
-                        <Button onClick={handleRegister} disabled={isSubmitting || !formData.monto} className="w-full h-16 bg-amber-600 hover:bg-amber-700 text-white rounded-2xl font-black text-xl uppercase tracking-widest shadow-xl transition-all active:scale-95">
-                            {isSubmitting ? <Loader2 className="animate-spin" /> : "Guardar Registro"}
-                        </Button>
+                        <Button onClick={saveNewRecord} className="w-full h-16 bg-slate-900 dark:bg-white dark:text-slate-900 rounded-2xl font-black uppercase text-lg tracking-widest italic">Confirmar Alta</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* MODAL: PROCESAR PAGO (MONTO MANUAL) */}
+            <Dialog open={isPayModalOpen} onOpenChange={setIsPayModalOpen}>
+                <DialogContent className="max-w-sm rounded-[3rem] p-10 bg-slate-900 text-white border-none shadow-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-2xl font-black italic uppercase tracking-tighter text-amber-500 leading-none">Confirmar Pago</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-6 py-6">
+                        <div className="text-center space-y-1">
+                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Pagando a:</p>
+                            <h2 className="text-3xl font-black uppercase italic leading-none">{selectedRecord?.beneficiario}</h2>
+                        </div>
+
+                        <div className="space-y-4 bg-slate-800 p-6 rounded-[2rem] border border-slate-700">
+                            <div className="space-y-2">
+                                <Label className="text-[9px] font-black uppercase text-slate-500">Monto Final USD</Label>
+                                <div className="relative">
+                                    <DollarSign className="absolute left-0 top-1/2 -translate-y-1/2 text-amber-500" />
+                                    <Input 
+                                        type="number" 
+                                        placeholder="0.00" 
+                                        value={payAmount.usd}
+                                        onChange={(e) => handleAmountUpdate(e.target.value, 'USD', 'PAY')}
+                                        className="bg-transparent border-none text-3xl font-black p-0 pl-7 h-auto focus-visible:ring-0 text-white" 
+                                    />
+                                </div>
+                            </div>
+                            <div className="pt-4 border-t border-slate-700 flex justify-between items-center">
+                                <span className="text-[10px] font-black text-slate-500">BOLÍVARES:</span>
+                                <span className="font-black text-amber-500 text-lg">Bs. {parseFloat(payAmount.bs).toLocaleString()}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter className="flex-col gap-3">
+                        <Button onClick={processPayment} className="w-full h-16 bg-amber-600 hover:bg-amber-700 rounded-2xl font-black uppercase text-lg italic tracking-widest">Marcar como Pagado</Button>
+                        <Button variant="ghost" onClick={() => setIsPayModalOpen(false)} className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Cancelar</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
         </div>
-    );
-}
-
-function CategoryBadge({ category }: { category: CategoryType }) {
-    const config = {
-        Produccion: { label: 'Producción', class: 'bg-orange-50 text-orange-600 border-orange-100', icon: <Hammer className="w-2.5 h-2.5" /> },
-        Viveres: { label: 'Víveres', class: 'bg-blue-50 text-blue-600 border-blue-100', icon: <ShoppingCart className="w-2.5 h-2.5" /> },
-        Alquiler: { label: 'Alquiler', class: 'bg-amber-50 text-amber-600 border-amber-100', icon: <Home className="w-2.5 h-2.5" /> },
-        ServiciosPublicos: { label: 'Servicios', class: 'bg-purple-50 text-purple-600 border-purple-100', icon: <Globe className="w-2.5 h-2.5" /> },
-        Software: { label: 'Software', class: 'bg-indigo-50 text-indigo-600 border-indigo-100', icon: <HardDrive className="w-2.5 h-2.5" /> },
-        Mantenimiento: { label: 'Mantenimiento', class: 'bg-red-50 text-red-600 border-red-100', icon: <Hammer className="w-2.5 h-2.5" /> },
-        Impuestos: { label: 'Impuestos', class: 'bg-emerald-50 text-emerald-600 border-emerald-100', icon: <FileText className="w-2.5 h-2.5" /> }
-    };
-    const c = config[category] || config['Produccion'];
-    return (
-        <Badge variant="outline" className={cn("font-black text-[8px] uppercase rounded-lg px-2 py-0.5 border flex items-center gap-1 w-fit mx-auto", c.class)}>
-            {c.icon} {c.label}
-        </Badge>
-    );
-}
-
-function StatCard({ label, value, icon, color, primary }: any) {
-    const variants: any = { 
-        blue: "bg-blue-50 text-blue-600", 
-        orange: "bg-orange-50 text-orange-600",
-        emerald: "bg-emerald-50 text-emerald-600"
-    };
-    return (
-        <Card className={cn(
-            "border-none shadow-sm rounded-2xl lg:rounded-[2rem] p-4 lg:p-6 flex items-center gap-4 transition-all hover:scale-[1.02]",
-            primary ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xl shadow-slate-200" : "bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-        )}>
-            <div className={cn("p-3 lg:p-4 rounded-xl lg:rounded-2xl shrink-0", variants[color])}>
-                {React.cloneElement(icon, { className: "w-5 h-5 lg:w-6 h-6" })}
-            </div>
-            <div className="min-w-0">
-                <p className="text-[8px] lg:text-[9px] font-black uppercase tracking-widest text-slate-400">{label}</p>
-                <h3 className="text-lg lg:text-2xl font-black tracking-tighter truncate">{value}</h3>
-            </div>
-        </Card>
-    );
+    )
 }

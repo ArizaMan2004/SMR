@@ -5,6 +5,10 @@ import React, { useEffect, useState, useMemo, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useAuth } from "@/lib/auth-context"
 
+// --- IMPORTACIONES PARA FIREBASE ---
+import { db } from "@/lib/firebase"
+import { doc, updateDoc, arrayUnion } from "firebase/firestore"
+
 // UI - Shadcn
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -23,11 +27,18 @@ import { ClientsAndPaymentsView } from "@/components/dashboard/ClientsAndPayment
 import { NotificationCenter, type Notification } from "@/components/dashboard/NotificationCenter"
 import { OrderFormWizardV2 } from "@/components/orden/order-form-wizard"
 import { DesignerPayrollView } from "@/components/dashboard/DesignerPayrollView" 
-import { AccountsPayableView, type Gasto } from "@/components/dashboard/AccountsPayableView"
+// CORRECCIÓN: Se eliminó AccountsPayableView
 import TasksView from "@/components/dashboard/tasks-view"
 import BudgetEntryView from "@/components/dashboard/BudgetEntryView" 
 import CalculatorView from "@/components/dashboard/CalculatorView" 
 import { CurrencyToast } from "@/components/dashboard/CurrencyToast" 
+
+// Componentes Administrativos
+import { GastosFijosView } from "@/components/dashboard/gastos-fijos-view"
+import { InsumosView } from "@/components/dashboard/InsumosView"
+import { EmpleadosView } from "@/components/dashboard/empleados-view"
+import { EstadisticasDashboard } from "@/components/dashboard/estadisticas-dashboard"
+import { NotificationCenterExpenses, type NotificationGasto } from "@/components/dashboard/notification-center-expenses"
 
 // Iconos
 import { 
@@ -35,21 +46,35 @@ import {
     LayoutDashboard, FileSpreadsheet, Clock, Zap, Hammer, 
     DollarSign, Menu, Building2, Bell, TrendingUp, Euro, 
     Coins, CheckCircle2, MessageSquareText, Trash2, MailOpen, 
-    ChevronRight, ChevronLeft, Filter, ChevronDown, X
+    ChevronRight, ChevronLeft, Filter, ChevronDown, X, Briefcase, BarChart3, Package
 } from "lucide-react" 
 
 // Servicios
 import { type OrdenServicio } from "@/lib/types/orden"
 import { subscribeToOrdenes, deleteOrden, updateOrdenStatus, createOrden, actualizarOrden } from "@/lib/services/ordenes-service"
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
-import { createGasto, subscribeToGastos } from "@/lib/services/gastos-service"
-import { fetchBCVRateFromAPI } from "@/lib/bcv-service"
+import { 
+    createGasto, 
+    subscribeToGastos, 
+    subscribeToGastosFijos, 
+    subscribeToEmpleados,
+    subscribeToPagos,
+    deleteGastoInsumo,
+    createNotification,
+    subscribeToNotifications,
+    deleteNotification,
+    updateNotificationStatus
+} from "@/lib/services/gastos-service"
+import { fetchBCVRateFromAPI, getBCVRateFromStorage } from "@/lib/services/bcv-service"
 import { 
     getLogoBase64, setLogoBase64, 
     getFirmaBase64, setFirmaBase64, 
     getSelloBase64, setSelloBase64 
 } from "@/lib/logo-service" 
 import { cn } from "@/lib/utils"
+
+// Tipos adicionales
+import type { GastoFijo, Empleado, PagoEmpleado } from "@/lib/types/gastos"
 
 const springConfig = { type: "spring", stiffness: 300, damping: 30 };
 
@@ -70,7 +95,10 @@ export default function Dashboard() {
     const [isWizardOpen, setIsWizardOpen] = useState(false)
     const [editingOrder, setEditingOrder] = useState<OrdenServicio | null>(null)
     
-    // ESTADOS DEL TOAST
+    // NOTIFICACIONES Y PANELES
+    const [isNotiOpen, setIsNotiOpen] = useState(false)
+    const [isExpenseNotiOpen, setIsExpenseNotiOpen] = useState(false)
+    const [hasUnseenNotifications, setHasUnseenNotifications] = useState(false)
     const [showRateToast, setShowRateToast] = useState(false)
     const [rateToastMessage, setRateToastMessage] = useState("")
 
@@ -79,14 +107,18 @@ export default function Dashboard() {
     const [eurRate, setEurRate] = useState<number>(0)
     const [parallelRate, setParallelRate] = useState<number>(0)
     const [assets, setAssets] = useState({ logo: "", firma: "", sello: "" })
-    const [isNotiOpen, setIsNotiOpen] = useState(false)
-    const [hasUnseenNotifications, setHasUnseenNotifications] = useState(false)
+    
     const [systemEvents, setSystemEvents] = useState<Notification[]>([])
+    const [expenseEvents, setExpenseEvents] = useState<NotificationGasto[]>([])
+    
     const [ordenes, setOrdenes] = useState<OrdenServicio[]>([]) 
     const [designers, setDesigners] = useState<Designer[]>([]) 
-    const [gastos, setGastos] = useState<Gasto[]>([])
+    const [gastos, setGastos] = useState<any[]>([])
+    const [gastosFijos, setGastosFijos] = useState<GastoFijo[]>([])
+    const [empleados, setEmpleados] = useState<Empleado[]>([])
+    const [pagos, setPagos] = useState<PagoEmpleado[]>([]) 
 
-    // --- 3. NAV ITEMS ---
+    // --- 3. NAV ITEMS (AJUSTADO) ---
     const navItems = useMemo(() => [
         { id: 'orders', label: 'Ordenes de Servicio', icon: <LayoutDashboard className="w-4 h-4" /> }, 
         { 
@@ -102,14 +134,18 @@ export default function Dashboard() {
                 { id: 'tasks_INSTALACION', label: 'Instalación' },
             ]
         },
-        { id: 'design_production', label: 'Nómina Taller', icon: <Palette className="w-4 h-4" /> }, 
         {
-            id: 'finance_group',
-            label: 'Cuentas',
-            icon: <DollarSign className="w-4 h-4" />,
+            id: 'admin_group',
+            label: 'Administración',
+            icon: <Building2 className="w-4 h-4" />,
             children: [
-                { id: 'clients', label: 'Cobranza' },
-                { id: 'payable', label: 'Cuentas x Pagar' },
+                { id: 'financial_stats', label: 'Balance y Estadísticas' },
+                { id: 'clients', label: 'Cobranza' }, // Movido desde Cuentas
+                { id: 'design_production', label: 'Pago Diseños' }, // Renombrado y movido aquí
+                { id: 'fixed_expenses', label: 'Gastos Fijos' },
+                { id: 'insumos_mgmt', label: 'Insumos y Materiales' },
+                { id: 'employees_mgmt', label: 'Gestión de Personal' },
+
             ]
         },
         {
@@ -145,21 +181,26 @@ export default function Dashboard() {
         setAssets(prev => ({ ...prev, [type]: "" }));
     };
 
-    const handleDeleteNotification = useCallback((id: string) => {
-        setSystemEvents(prev => prev.filter(n => n.id !== id));
+    const handleDeleteNotification = useCallback(async (id: string) => {
+        await deleteNotification(id);
     }, []);
 
-    const handleToggleRead = useCallback((id: string) => {
-        setSystemEvents(prev => prev.map(n => n.id === id ? { ...n, isRead: !n.isRead } : n));
-    }, []);
+    const handleToggleRead = useCallback(async (id: string) => {
+        const noti = systemEvents.find(n => n.id === id);
+        if (noti) {
+            await updateNotificationStatus(id, !noti.isRead);
+        }
+    }, [systemEvents]);
 
     const handleUpdateRate = useCallback(async (label: string) => {
+        if (!currentUserId) return;
         let newValue = 0;
         try {
             if (label === "USD" || label === "EUR") {
                 const data = await fetchBCVRateFromAPI();
-                setCurrentBcvRate(data.usdRate); setEurRate(data.eurRate || 0);
-                newValue = label === "USD" ? data.usdRate : data.eurRate;
+                setCurrentBcvRate(data.usd); 
+                setEurRate(data.eur || 0);
+                newValue = label === "USD" ? data.usd : data.eur;
             } else if (label === "USDT") {
                 const res = await fetch('https://ve.dolarapi.com/v1/dolares/paralelo');
                 const data = await res.json();
@@ -168,30 +209,90 @@ export default function Dashboard() {
             const msg = `Valor ${label} actualizado a Bs. ${newValue.toFixed(2)}`;
             setRateToastMessage(msg); setShowRateToast(true);
             setTimeout(() => setShowRateToast(false), 4000);
-            const newEvent: Notification = {
-                id: `bcv-up-${label}-${Date.now()}`, title: `Sincronización ${label}`,
-                description: msg, type: 'warning', icon: <TrendingUp className="text-white w-4 h-4" />, 
-                timestamp: new Date(), isRead: false
-            };
-            setSystemEvents(prev => [newEvent, ...prev]); setHasUnseenNotifications(true);
-        } catch (error) { console.error(error); }
-    }, []);
 
-    // --- 5. CARGA DE FIREBASE ---
+            await createNotification(currentUserId, {
+                title: `Sincronización ${label}`,
+                description: msg,
+                type: 'info',
+                category: 'system'
+            });
+            
+            setHasUnseenNotifications(true);
+        } catch (error) { console.error(error); }
+    }, [currentUserId]);
+
+    const handleRegisterOrderPayment = async (ordenId: string, monto: number, nota?: string, imagenUrl?: string) => {
+        if (!currentUserId) return;
+        try {
+            const ordenActual = ordenes.find(o => o.id === ordenId);
+            if (!ordenActual) return;
+            const ordenRef = doc(db, "ordenes", ordenId);
+            const montoPagadoAnterior = Number(ordenActual.montoPagadoUSD) || 0;
+            const nuevoMontoTotalPagado = montoPagadoAnterior + monto;
+            const saldoRestante = ordenActual.totalUSD - nuevoMontoTotalPagado;
+            const nuevoEstadoPago = saldoRestante <= 0.01 ? "PAGADO" : "ABONADO";
+            const nuevoRecibo = {
+                montoUSD: monto,
+                fecha: new Date().toISOString(),
+                nota: nota || "",
+                imagenUrl: imagenUrl || "",
+                tasaBCV: currentBcvRate
+            };
+            await updateDoc(ordenRef, {
+                montoPagadoUSD: nuevoMontoTotalPagado,
+                estadoPago: nuevoEstadoPago,
+                registroPagos: arrayUnion(nuevoRecibo)
+            });
+            await createNotification(currentUserId, {
+                title: "Pago Registrado",
+                description: `Se recibió un pago de $${monto} para la Orden #${ordenActual.ordenNumero}`,
+                type: 'success',
+                category: 'system'
+            });
+        } catch (error) {
+            console.error("❌ Error al registrar pago:", error);
+        }
+    };
+
+    // --- 5. CARGA DE DATOS ---
     useEffect(() => {
         if (!currentUserId) return 
-        fetchBCVRateFromAPI().then(data => { setCurrentBcvRate(data.usdRate); setEurRate(data.eurRate || 0); });
+
+        const cached = getBCVRateFromStorage();
+        if (cached.usd > 0) {
+            setCurrentBcvRate(cached.usd);
+            setEurRate(cached.eur || 0);
+        }
+
+        fetchBCVRateFromAPI().then(data => { 
+            setCurrentBcvRate(data.usd); 
+            setEurRate(data.eur || 0); 
+        });
+
         fetch('https://ve.dolarapi.com/v1/dolares/paralelo').then(res => res.json()).then(data => { if (data?.promedio) setParallelRate(data.promedio); });
         Promise.all([getLogoBase64(), getFirmaBase64(), getSelloBase64()]).then(([l, f, s]) => { 
             setAssets({ logo: l || "", firma: f || "", sello: s || "" }); 
         });
+
         const unsubOrdenes = subscribeToOrdenes(currentUserId, (data) => setOrdenes(data));
         const unsubDesigners = subscribeToDesigners((data) => setDesigners(data));
-        const unsubGastos = subscribeToGastos((data) => setGastos(data));
-        return () => { unsubOrdenes(); unsubDesigners(); unsubGastos(); };
+        const unsubGastos = subscribeToGastos(currentUserId, (data) => setGastos(data));
+        const unsubGastosFijos = subscribeToGastosFijos(currentUserId, (data) => setGastosFijos(data));
+        const unsubEmpleados = subscribeToEmpleados(currentUserId, (data) => setEmpleados(data));
+        const unsubPagos = subscribeToPagos(currentUserId, (data) => setPagos(data)); 
+        
+        const unsubNotis = subscribeToNotifications(currentUserId, (data) => {
+            setSystemEvents(data.filter(n => n.category !== 'expense'));
+            setExpenseEvents(data.filter(n => n.category === 'expense') as any);
+        });
+
+        return () => { 
+            unsubOrdenes(); unsubDesigners(); unsubGastos(); 
+            unsubGastosFijos(); unsubEmpleados(); unsubPagos(); unsubNotis();
+        };
     }, [currentUserId]);
 
-    // --- 6. LÓGICA DE ACTIVIDADES (RESTAURADA) ---
+    // --- 6. LÓGICA DE NOTIFICACIONES Y FILTROS ---
     const allNotifications = useMemo(() => {
         let all: Notification[] = [...systemEvents];
         ordenes.forEach(o => {
@@ -203,20 +304,20 @@ export default function Dashboard() {
                     all.push({
                         id: `orden-${o.id}`, title: "Orden Registrada",
                         description: `Orden #${nOrdenStr} — ${clienteFinal}`,
-                        type: 'info', icon: <FileSpreadsheet />, timestamp: date, isRead: false
+                        type: 'info', icon: <FileSpreadsheet />, timestamp: date, isRead: true
                     });
                 }
             }
-            const pagos = (o as any).registroPagos || [];
-            pagos.forEach((p: any, idx: number) => {
+            const pagosReg = (o as any).registroPagos || [];
+            pagosReg.forEach((p: any, idx: number) => {
                 const rawFecha = p.fechaRegistro || p.fecha || p.fechaPago;
-                if (rawFecha && typeof rawFecha === 'string') {
-                    const date = new Date(rawFecha);
-                    if (!isNaN(date.getTime())) {
+                if (rawFecha) {
+                    const date = typeof rawFecha === 'string' ? new Date(rawFecha) : (rawFecha as any).toDate?.();
+                    if (date && !isNaN(date.getTime())) {
                         all.push({
                             id: `pago-${o.id}-${idx}`, title: "Abono Procesado",
                             description: `Recibido: $${p.montoUSD} — #${nOrdenStr} (${clienteFinal})`,
-                            type: 'success', icon: <CheckCircle2 />, timestamp: date, isRead: false
+                            type: 'success', icon: <CheckCircle2 />, timestamp: date, isRead: true
                         });
                     }
                 }
@@ -272,21 +373,27 @@ export default function Dashboard() {
           <header className="sticky top-0 flex items-center justify-between px-4 sm:px-6 py-4 border-b border-black/5 dark:border-white/5 bg-white/60 dark:bg-black/60 backdrop-blur-2xl z-50 w-full overflow-hidden">
             <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
                 <Button variant="ghost" size="icon" className="h-10 w-10 rounded-2xl bg-black/5 dark:bg-white/10 shrink-0" onClick={() => setIsSidebarOpen(!isSidebarOpen)}><Menu className="h-5 w-5" /></Button>
-                <h2 className="text-lg sm:text-xl font-bold tracking-tight italic uppercase truncate max-w-[100px] sm:max-w-none">
-                    {activeView.startsWith("tasks_") ? "Taller" : navItems.find(i => i.id === activeView)?.label || "Panel"}
+                <h2 className="text-lg sm:text-xl font-bold tracking-tight italic uppercase truncate max-w-[150px] sm:max-w-none">
+                    {activeView.startsWith("tasks_") ? "Taller" : navItems.find(i => i.id === activeView)?.label || 
+                     (activeView === "design_production" ? "Pago Diseños" : "Panel")}
                 </h2>
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
                 <div className="hidden lg:flex items-center gap-2">
                     <TasaHeaderBadge label="USD" value={currentBcvRate} icon={<DollarSign className="w-3.5 h-3.5" />} color="emerald" onClick={() => handleUpdateRate("USD")} />
-                    <TasaHeaderBadge label="EUR" value={eurRate} icon={<Euro className="w-3.5 h-3.5" />} color="indigo" onClick={() => handleUpdateRate("EUR")} />
+                    <TasaHeaderBadge label="EUR" value={eurRate} icon={<Euro className="w-3.5 h-3.5" />} color="blue" onClick={() => handleUpdateRate("EUR")} />
                     <TasaHeaderBadge label="USDT" value={parallelRate} icon={<Coins className="w-3.5 h-3.5" />} color="orange" onClick={() => handleUpdateRate("USDT")} />
                 </div>
+                
+                <Button variant="ghost" size="icon" className="rounded-2xl bg-orange-500/10 h-10 w-10 text-orange-600" onClick={() => setIsExpenseNotiOpen(true)}>
+                    <Clock className="h-5 w-5" />
+                </Button>
+
                 <div className="relative">
                     <Button variant="ghost" size="icon" className="rounded-2xl bg-black/5 dark:bg-white/10 h-10 w-10 relative" onClick={() => { setIsNotiOpen(true); setHasUnseenNotifications(false); }}>
                         <Bell className="h-5 w-5" />
-                        {hasUnseenNotifications && <motion.span layoutId="notification-dot" className="absolute top-2.5 right-2.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white dark:border-black" />}
+                        {(hasUnseenNotifications || allNotifications.some(n => !n.isRead)) && <motion.span layoutId="notification-dot" className="absolute top-2.5 right-2.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white dark:border-black" />}
                     </Button>
                 </div>
             </div>
@@ -297,6 +404,16 @@ export default function Dashboard() {
               activeNotifications={allNotifications} onMarkAllRead={() => setHasUnseenNotifications(false)} 
               onDeleteNotification={handleDeleteNotification} onToggleRead={handleToggleRead} 
               onMaximize={() => { setIsNotiOpen(false); setActiveView("notifications_full"); }} 
+          />
+
+          <NotificationCenterExpenses 
+              isOpen={isExpenseNotiOpen} onClose={() => setIsExpenseNotiOpen(false)} 
+              activeNotifications={expenseEvents} onMarkAllRead={() => {}} 
+              onDeleteNotification={(id) => deleteNotification(id)} 
+              onToggleRead={(id) => {
+                  const n = expenseEvents.find(x => x.id === id);
+                  if(n) updateNotificationStatus(id, !n.isRead);
+              }} 
           />
 
           <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 custom-scrollbar overflow-x-hidden">
@@ -323,47 +440,69 @@ export default function Dashboard() {
                     </div>
                 )}
 
-                {activeView === "notifications_full" && (
-                    <div className="max-w-5xl mx-auto space-y-8 pb-20 px-2 sm:px-4">
-                        <h1 className="text-3xl sm:text-4xl font-black italic tracking-tighter uppercase text-slate-900 dark:text-white">Centro de <span className="text-blue-600">Actividades</span></h1>
-                        <div className="relative">
-                            <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 opacity-20" />
-                            <input 
-                                type="text" placeholder="Buscar por cliente, orden o detalle..." 
-                                value={notiSearch} onChange={(e) => {setNotiSearch(e.target.value); setCurrentPage(1);}} 
-                                className="w-full pl-12 pr-6 py-4 bg-white dark:bg-white/5 border border-black/5 rounded-[2rem] text-sm outline-none shadow-sm focus:ring-4 focus:ring-blue-500/10 transition-all" 
-                            />
-                        </div>
-                        <div className="space-y-4">
-                            {paginatedNotis.map((n) => <ActivityRow key={n.id} n={n} />)}
-                        </div>
-                        <div className="flex items-center justify-center gap-4 pt-8">
-                            <Button variant="ghost" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="rounded-xl gap-2 font-bold uppercase text-[10px]"><ChevronLeft className="w-4 h-4" /> Anterior</Button>
-                            <span className="text-[10px] font-black uppercase tracking-widest opacity-40">Página {currentPage} de {totalPages || 1}</span>
-                            <Button variant="ghost" disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)} className="rounded-xl gap-2 font-bold uppercase text-[10px]">Siguiente <ChevronRight className="w-4 h-4" /></Button>
-                        </div>
-                    </div>
+                {activeView === "fixed_expenses" && (
+                    <GastosFijosView 
+                        gastos={gastosFijos} 
+                        empresaId={currentUserId || ""} 
+                        rates={{ usd: currentBcvRate, eur: eurRate }} 
+                        onNotification={(t, d) => { 
+                            setRateToastMessage(d); 
+                            setShowRateToast(true);
+                            setTimeout(() => setShowRateToast(false), 4000);
+                            createNotification(currentUserId!, { title: t, description: d, type: 'warning', category: 'expense' });
+                        }} 
+                    />
+                )}
+                
+                {activeView === "insumos_mgmt" && (
+                    <InsumosView 
+                        gastos={gastos} 
+                        currentBcvRate={currentBcvRate} 
+                        currentUserId={currentUserId || ""} 
+                        onCreateGasto={createGasto} 
+                        onDeleteGasto={deleteGastoInsumo} 
+                    />
+                )}
+
+                {activeView === "employees_mgmt" && (
+                    <EmpleadosView 
+                        empleados={empleados} 
+                        empresaId={currentUserId || ""} 
+                        rates={{ usd: currentBcvRate, eur: eurRate }} 
+                    />
+                )}
+
+                {activeView === "financial_stats" && (
+                    <EstadisticasDashboard 
+                        gastosInsumos={gastos as any} 
+                        gastosFijos={gastosFijos} 
+                        empleados={empleados} 
+                        pagosEmpleados={pagos} 
+                        cobranzas={ordenes.map(o => ({
+                            id: o.id, montoUSD: (o as any).totalUSD || 0, montoBs: (o as any).totalBs || 0,
+                            estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente'
+                        })) as any}
+                    />
                 )}
 
                 {activeView === "calculator" && (
                     <BudgetEntryView 
-                        currentBcvRate={currentBcvRate} 
-                        pdfLogoBase64={assets.logo} 
-                        handleLogoUpload={(e: any) => handleFileUpload(e, 'logo')}
-                        handleClearLogo={() => handleClearAsset('logo')}
-                        firmaBase64={assets.firma}
-                        handleFirmaUpload={(e: any) => handleFileUpload(e, 'firma')}
-                        handleClearFirma={() => handleClearAsset('firma')}
-                        selloBase64={assets.sello}
-                        handleSelloUpload={(e: any) => handleFileUpload(e, 'sello')}
-                        handleClearSello={() => handleClearAsset('sello')}
+                        currentBcvRate={currentBcvRate} pdfLogoBase64={assets.logo} 
+                        handleLogoUpload={(e: any) => handleFileUpload(e, 'logo')} handleClearLogo={() => handleClearAsset('logo')}
+                        firmaBase64={assets.firma} handleFirmaUpload={(e: any) => handleFileUpload(e, 'firma')} handleClearFirma={() => handleClearAsset('firma')}
+                        selloBase64={assets.sello} handleSelloUpload={(e: any) => handleFileUpload(e, 'sello')} handleClearSello={() => handleClearAsset('sello')}
                     />
                 )}
-
                 {activeView.startsWith("tasks_") && <TasksView ordenes={ordenes} currentUserId={currentUserId || ""} areaPriorizada={activeView.replace("tasks_", "")} />}
                 {activeView === "design_production" && <DesignerPayrollView designers={designers} ordenes={ordenes} bcvRate={currentBcvRate} />}
-                {activeView === "clients" && <ClientsAndPaymentsView ordenes={ordenes} bcvRate={currentBcvRate} currentUserId={currentUserId || ""} onRegisterPayment={() => Promise.resolve()} />}
-                {activeView === "payable" && <AccountsPayableView gastos={gastos} onCreateGasto={createGasto} bcvRate={currentBcvRate} />}
+                {activeView === "clients" && (
+                    <ClientsAndPaymentsView 
+                        ordenes={ordenes} 
+                        bcvRate={currentBcvRate} 
+                        currentUserId={currentUserId || ""} 
+                        onRegisterPayment={handleRegisterOrderPayment} 
+                    />
+                )}
                 {activeView === "old_calculator" && <CalculatorView />}
 
               </motion.div>
@@ -383,9 +522,9 @@ export default function Dashboard() {
     )
 }
 
-// --- AUXILIARES ---
+// Subcomponentes auxiliares (TasaHeaderBadge, StatCard, ActivityRow permanecen igual)
 function TasaHeaderBadge({ label, value, icon, color, onClick }: any) {
-    const colors: any = { emerald: "bg-emerald-500/10 text-emerald-600", indigo: "bg-indigo-500/10 text-indigo-600", orange: "bg-orange-500/10 text-orange-600" }
+    const colors: any = { emerald: "bg-emerald-500/10 text-emerald-600", orange: "bg-orange-500/10 text-orange-600", blue: "bg-blue-500/10 text-blue-600" }
     return (
         <motion.div whileHover={{ y: -1, scale: 1.02 }} onClick={onClick} className="bg-white dark:bg-white/5 px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center gap-3 cursor-pointer shrink-0">
             <div className={cn("p-1.5 rounded-xl", colors[color])}>{icon}</div>
@@ -415,15 +554,16 @@ function StatCard({ label, value, icon, subtext, color, className }: any) {
 
 function ActivityRow({ n }: { n: Notification }) {
     const colors: any = { success: "bg-emerald-500 shadow-emerald-500/20", info: "bg-blue-500 shadow-blue-500/20", warning: "bg-orange-500 shadow-orange-500/20", urgent: "bg-red-500 shadow-red-500/20", neutral: "bg-slate-500" };
+    const displayDate = n.timestamp instanceof Date ? n.timestamp : (n.timestamp as any)?.toDate ? (n.timestamp as any).toDate() : new Date();
     return (
         <div className="group flex items-center gap-4 sm:gap-6 p-4 sm:p-6 bg-white dark:bg-[#1c1c1e] rounded-[1.8rem] sm:rounded-[2.5rem] border border-black/5 shadow-sm hover:shadow-xl transition-all w-full min-w-0">
             <div className={cn("w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center text-white shadow-lg shrink-0", colors[n.type] || colors.neutral)}>
-                {n.icon && React.isValidElement(n.icon) ? React.cloneElement(n.icon as React.ReactElement, { className: "w-4 h-4 sm:w-5 sm:h-5 text-white" }) : null}
+                {n.icon && React.isValidElement(n.icon) ? React.cloneElement(n.icon as React.ReactElement, { className: "w-4 h-4 sm:w-5 sm:h-5 text-white" }) : <Bell className="w-4 h-4" />}
             </div>
             <div className="flex-1 min-w-0 overflow-hidden">
                 <div className="flex justify-between items-center mb-1 gap-2">
                     <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-widest opacity-40 truncate">{n.title}</span>
-                    <time className="text-[9px] sm:text-[10px] font-bold opacity-30 shrink-0">{n.timestamp.toLocaleDateString('es-VE')}</time>
+                    <time className="text-[9px] sm:text-[10px] font-bold opacity-30 shrink-0">{displayDate.toLocaleDateString('es-VE')}</time>
                 </div>
                 <h4 className="text-xs sm:text-sm font-bold truncate text-slate-900 dark:text-white">{n.description}</h4>
             </div>

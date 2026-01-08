@@ -10,12 +10,16 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { 
+    Table, TableBody, TableCell, TableHead, TableHeader, TableRow 
+} from "@/components/ui/table";
 
 // Iconos - Lucide
 import {
     Calculator as CalcIcon, Ruler, DollarSign, Timer, Trash2, Plus, 
     Repeat2, Save, FolderOpen, X, Clock, Eye, Pencil, 
-    ArrowLeftRight, Landmark, CheckCircle2, Search, ChevronLeft, ChevronRight
+    ArrowLeftRight, Landmark, CheckCircle2, Search, ChevronLeft, ChevronRight,
+    Wand2, RotateCcw, Package
 } from "lucide-react";
 
 import { fetchBCVRateFromAPI } from "@/lib/bcv-service";
@@ -90,7 +94,19 @@ const formatTime = (totalMinutes: number): string => {
 
 // --- COMPONENTES UI ---
 
-const PremiumResultWidget = ({ usdAmount, rates, title }: { usdAmount: number | null, rates: any, title: string }) => {
+const PremiumResultWidget = ({ 
+    usdAmount, 
+    rates, 
+    title, 
+    isRounded, 
+    onToggleRound 
+}: { 
+    usdAmount: number | null, 
+    rates: any, 
+    title: string, 
+    isRounded?: boolean, 
+    onToggleRound?: () => void 
+}) => {
     const [rateMode, setRateMode] = useState<'USD' | 'EUR'>('USD');
     if (!usdAmount || usdAmount <= 0) return null;
 
@@ -102,8 +118,27 @@ const PremiumResultWidget = ({ usdAmount, rates, title }: { usdAmount: number | 
             <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 p-5 rounded-3xl text-white shadow-lg relative overflow-hidden border border-emerald-400/20">
                 <div className="relative z-10 flex flex-row justify-between items-center gap-4">
                     <div className="space-y-0.5">
-                        <p className="text-[9px] font-black uppercase opacity-60 tracking-widest">{title}</p>
-                        <motion.h2 key={usdAmount} initial={{ x: -5, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="text-3xl font-black tracking-tighter italic">${formatUSD(usdAmount)}</motion.h2>
+                        <div className="flex items-center gap-2">
+                            <p className="text-[9px] font-black uppercase opacity-60 tracking-widest">{title}</p>
+                            {isRounded && (
+                                <Badge className="bg-white/20 text-[7px] font-black uppercase tracking-tighter h-4 border-none">Redondeado</Badge>
+                            )}
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                            <motion.h2 key={usdAmount} initial={{ x: -5, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="text-3xl font-black tracking-tighter italic">
+                                ${formatUSD(usdAmount)}
+                            </motion.h2>
+                            {onToggleRound && (
+                                <Button 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    onClick={onToggleRound}
+                                    className="h-8 w-8 rounded-full bg-white/10 hover:bg-white/20 text-white"
+                                >
+                                    {isRounded ? <RotateCcw size={14} /> : <Wand2 size={14} />}
+                                </Button>
+                            )}
+                        </div>
                     </div>
                     <div className="flex flex-col items-end gap-1.5">
                         <div className="bg-white/10 backdrop-blur-md p-0.5 rounded-xl flex border border-white/10">
@@ -116,7 +151,6 @@ const PremiumResultWidget = ({ usdAmount, rates, title }: { usdAmount: number | 
                         </div>
                     </div>
                 </div>
-                {/* SIGNO DE DÓLAR ANIMADO REINSTALADO */}
                 <motion.div 
                     animate={{ rotate: 360 }} 
                     transition={{ duration: 20, repeat: Infinity, ease: "linear" }} 
@@ -131,46 +165,123 @@ const PremiumResultWidget = ({ usdAmount, rates, title }: { usdAmount: number | 
 
 const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
     const [rateMode, setRateMode] = useState<'USD' | 'EUR'>('USD');
+    const [localRound, setLocalRound] = useState(false);
+
+    useEffect(() => {
+        if (isOpen) setLocalRound(false); 
+    }, [isOpen]);
+
     if (!isOpen || !data) return null;
+
+    const calculateTotal = () => {
+        let total = 0;
+        if (type === 'area') {
+            data.mediciones?.forEach((m: any) => {
+                const qty = m.cantidad || 1;
+                const areaPrice = (m.cmAlto/100)*(m.cmAncho/100)*m.precioDolar;
+                total += Math.max(1, areaPrice) * qty;
+            });
+        } else if (type === 'laser') {
+            data.tiempos?.forEach((t: any) => {
+                if (t.type === 'service') {
+                    total += (t.qty || 0) * (t.unitPrice || 0);
+                } else {
+                    const min = (t.minutes || 0) + (t.seconds || 0) / 60;
+                    total += (min * 0.80) + (t.includeMaterial ? (t.materialCost || 0) : 0);
+                }
+            });
+        }
+        return localRound ? Math.ceil(total) : (type === 'laser' ? data.totalCost : total);
+    };
+
+    const displayTotal = calculateTotal();
     const activeRate = rateMode === 'USD' ? rates.usdRate : rates.eurRate;
-    const totalBs = activeRate ? data.totalCost * activeRate : 0;
+    const totalBs = activeRate ? displayTotal * activeRate : 0;
 
     return (
         <AnimatePresence>
             <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm" />
-                <motion.div initial={{ scale: 0.95, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 10 }} className="bg-white dark:bg-slate-950 w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden z-[160] border border-slate-200 dark:border-slate-800">
+                <motion.div initial={{ scale: 0.95, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 10 }} className="bg-white dark:bg-slate-950 w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden z-[160] border border-slate-200 dark:border-slate-800">
                     <div className="bg-slate-900 p-6 text-white text-center relative">
                         <div className="absolute top-4 right-5 text-emerald-400"><CheckCircle2 size={20}/></div>
                         <h3 className="text-xl font-black italic tracking-tighter">{data.name}</h3>
                         <p className="text-slate-400 text-[9px] font-bold uppercase tracking-[0.2em] mt-1">{data.date}</p>
                     </div>
+
                     <div className="p-6 space-y-5">
-                        <div className="space-y-2 max-h-[25vh] overflow-y-auto pr-1 custom-scrollbar">
-                            {type === 'area' ? data.mediciones?.map((m: any, i: number) => (
-                                <div key={i} className="flex justify-between items-center text-[11px] font-bold border-b border-slate-50 dark:border-slate-900 pb-2">
-                                    <span className="text-slate-500">{m.name}</span>
-                                    <span className="text-slate-900 dark:text-white">${formatUSD(((m.cmAlto/100)*(m.cmAncho/100))*m.precioDolar)}</span>
-                                </div>
-                            )) : data.tiempos?.map((t: any, i: number) => (
-                                <div key={i} className="flex justify-between items-center text-[11px] font-bold border-b border-slate-50 dark:border-slate-900 pb-2">
-                                    <span className="text-slate-500">{t.name}</span>
-                                    <span className="text-slate-900 dark:text-white">{formatTime((t.minutes || 0) + (t.seconds || 0)/60)}</span>
-                                </div>
-                            ))}
+                        <div className="rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden bg-slate-50/50 dark:bg-slate-900/50">
+                            <Table>
+                                <TableHeader className="bg-slate-100/50 dark:bg-slate-800/50">
+                                    <TableRow className="hover:bg-transparent border-none">
+                                        {type === 'area' ? (
+                                            <>
+                                                <TableHead className="text-[9px] font-black uppercase h-8 w-12 text-center">Cant.</TableHead>
+                                                <TableHead className="text-[9px] font-black uppercase h-8">Descripción</TableHead>
+                                                <TableHead className="text-[9px] font-black uppercase h-8 text-center">Medidas</TableHead>
+                                                <TableHead className="text-[9px] font-black uppercase h-8 text-right">Precio</TableHead>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <TableHead className="text-[9px] font-black uppercase h-8 w-12 text-center">Unid.</TableHead>
+                                                <TableHead className="text-[9px] font-black uppercase h-8">Descripción</TableHead>
+                                                <TableHead className="text-[9px] font-black uppercase h-8 text-center">{data.tiempos?.some((t:any) => t.type === 'time') ? 'Tiempo' : '-'}</TableHead>
+                                                <TableHead className="text-[9px] font-black uppercase h-8 text-right">Precio</TableHead>
+                                            </>
+                                        )}
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {type === 'area' ? data.mediciones?.map((m: any, i: number) => {
+                                        const qty = m.cantidad || 1;
+                                        const areaPrice = ((m.cmAlto/100)*(m.cmAncho/100))*m.precioDolar;
+                                        const itemTotal = Math.max(1, areaPrice) * qty;
+                                        return (
+                                            <TableRow key={i} className="border-slate-100 dark:border-slate-800">
+                                                <TableCell className="text-[10px] font-bold text-center py-2">{qty}</TableCell>
+                                                <TableCell className="text-[10px] font-bold py-2">{m.name}</TableCell>
+                                                <TableCell className="text-[10px] font-medium text-slate-400 text-center py-2">{m.cmAlto}x{m.cmAncho}cm</TableCell>
+                                                <TableCell className="text-[10px] font-black text-right py-2">${formatUSD(itemTotal)}</TableCell>
+                                            </TableRow>
+                                        );
+                                    }) : data.tiempos?.map((t: any, i: number) => {
+                                        const isService = t.type === 'service';
+                                        const itemCost = isService ? (t.qty * t.unitPrice) : ((t.minutes + t.seconds/60) * 0.80 + (t.materialCost || 0));
+                                        return (
+                                            <TableRow key={i} className="border-slate-100 dark:border-slate-800">
+                                                <TableCell className="text-[10px] font-bold text-center py-2">{isService ? t.qty : '-'}</TableCell>
+                                                <TableCell className="text-[10px] font-bold py-2">{t.name}</TableCell>
+                                                <TableCell className="text-[10px] font-medium text-slate-400 text-center py-2">{!isService ? formatTime(t.minutes + t.seconds/60) : '-'}</TableCell>
+                                                <TableCell className="text-[10px] font-black text-right py-2">${formatUSD(itemCost)}</TableCell>
+                                            </TableRow>
+                                        );
+                                    })}
+                                </TableBody>
+                            </Table>
                         </div>
-                        <div className="flex justify-between items-center">
-                            <div className="bg-slate-100 dark:bg-slate-900 p-0.5 rounded-lg flex gap-0.5">
-                                <button onClick={() => setRateMode('USD')} className={cn("px-2 py-1 rounded-md text-[8px] font-black", rateMode === 'USD' ? "bg-white dark:bg-slate-800 text-blue-600 shadow-sm" : "text-slate-400")}>USD</button>
-                                <button onClick={() => setRateMode('EUR')} className={cn("px-2 py-1 rounded-md text-[8px] font-black", rateMode === 'EUR' ? "bg-white dark:bg-slate-800 text-blue-600 shadow-sm" : "text-slate-400")}>EUR</button>
+                        
+                        <div className="flex justify-between items-center px-2">
+                            <div className="flex items-center gap-2">
+                                <div className="bg-slate-100 dark:bg-slate-900 p-0.5 rounded-lg flex gap-0.5">
+                                    <button onClick={() => setRateMode('USD')} className={cn("px-2 py-1 rounded-md text-[8px] font-black", rateMode === 'USD' ? "bg-white dark:bg-slate-800 text-blue-600 shadow-sm" : "text-slate-400")}>USD</button>
+                                    <button onClick={() => setRateMode('EUR')} className={cn("px-2 py-1 rounded-md text-[8px] font-black", rateMode === 'EUR' ? "bg-white dark:bg-slate-800 text-blue-600 shadow-sm" : "text-slate-400")}>EUR</button>
+                                </div>
+                                <Button variant="ghost" size="icon" onClick={() => setLocalRound(!localRound)} className={cn("h-7 w-7 rounded-lg", localRound ? "bg-amber-100 text-amber-600" : "text-slate-300")}>
+                                    <Wand2 size={12} />
+                                </Button>
                             </div>
-                            <p className="text-2xl font-black italic tracking-tighter text-slate-900 dark:text-white">${formatUSD(data.totalCost)}</p>
+                            <div className="text-right">
+                                <p className="text-[8px] font-black uppercase text-slate-400 tracking-widest">Total Cotización</p>
+                                <p className="text-3xl font-black italic tracking-tighter text-slate-900 dark:text-white leading-none">${formatUSD(displayTotal)}</p>
+                            </div>
                         </div>
-                        <div className="bg-blue-600 p-4 rounded-2xl text-white text-center shadow-lg shadow-blue-500/20">
-                            <p className="text-[8px] font-black uppercase opacity-60 mb-0.5 tracking-widest">Total en Bolívares</p>
-                            <p className="text-2xl font-black tracking-tighter">Bs. {formatBs(totalBs)}</p>
+
+                        <div className="bg-blue-600 p-4 rounded-3xl text-white text-center shadow-lg shadow-blue-500/20 relative overflow-hidden">
+                            <p className="text-[8px] font-black uppercase opacity-60 mb-0.5 tracking-widest relative z-10">Equivalente en Bolívares</p>
+                            <p className="text-2xl font-black tracking-tighter relative z-10">Bs. {formatBs(totalBs)}</p>
+                            <Landmark className="absolute -right-2 -bottom-2 opacity-10 rotate-12" size={80}/>
                         </div>
-                        <Button onClick={onClose} variant="ghost" className="w-full text-slate-400 font-bold h-10 text-xs rounded-xl">Cerrar Recibo</Button>
+                        <Button onClick={onClose} variant="ghost" className="w-full text-slate-400 font-bold h-10 text-xs rounded-xl hover:bg-slate-50">Cerrar Recibo</Button>
                     </div>
                 </motion.div>
             </div>
@@ -180,13 +291,14 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
 
 // --- CALCULADORA 1: METRO CUADRADO ---
 const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
-    const [mediciones, setMediciones] = useState<any[]>([{ id: Date.now(), name: "Medición #1", cmAlto: 0, cmAncho: 0, precioDolar: 0 }]);
+    const [mediciones, setMediciones] = useState<any[]>([{ id: Date.now(), name: "Pieza #1", cmAlto: 0, cmAncho: 0, precioDolar: 0, cantidad: 1 }]);
     const [editingId, setEditingId] = useState<number | null>(null);
     const [resultadoTotal, setResultadoTotal] = useState<number | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [saveName, setSaveName] = useState("");
     const [history, setHistory] = useState<any[]>([]);
     const [selectedItem, setSelectedItem] = useState<any>(null);
+    const [shouldRoundTotal, setShouldRoundTotal] = useState(false);
 
     const [searchTerm, setSearchTerm] = useState("");
     const [currentPage, setCurrentPage] = useState(1);
@@ -195,9 +307,17 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
     
     useEffect(() => {
         let total = 0; let ok = false;
-        mediciones.forEach(m => { if(m.cmAlto > 0 && m.cmAncho > 0 && m.precioDolar > 0) { total += (m.cmAlto/100)*(m.cmAncho/100)*m.precioDolar; ok = true; }});
-        setResultadoTotal(ok ? total : null);
-    }, [mediciones]);
+        mediciones.forEach(m => { 
+            if(m.cmAlto > 0 && m.cmAncho > 0 && m.precioDolar > 0) { 
+                const qty = m.cantidad || 1;
+                const areaPrice = (m.cmAlto/100)*(m.cmAncho/100)*m.precioDolar;
+                total += Math.max(1, areaPrice) * qty; 
+                ok = true; 
+            }
+        });
+        const finalAmount = shouldRoundTotal ? Math.ceil(total) : total;
+        setResultadoTotal(ok ? finalAmount : null);
+    }, [mediciones, shouldRoundTotal]);
 
     const filteredHistory = useMemo(() => {
         return history.filter(h => h.name.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -240,10 +360,11 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
                                     </div>
                                     <Button variant="ghost" size="icon" onClick={() => setMediciones(mediciones.length > 1 ? mediciones.filter(i => i.id !== m.id) : mediciones)} className="h-8 w-8 text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors"><Trash2 size={16}/></Button>
                                 </div>
-                                <div className="grid grid-cols-3 gap-3">
+                                <div className="grid grid-cols-4 gap-2 sm:gap-3">
+                                    <div className="space-y-1"><Label className="text-[8px] font-black uppercase text-slate-400 ml-1">Cant.</Label><Input type="number" className="rounded-xl h-9 text-xs font-black text-blue-600" value={m.cantidad || ""} onChange={e => setMediciones(mediciones.map(i => i.id === m.id ? {...i, cantidad: parseInt(e.target.value)||0} : i))} /></div>
                                     <div className="space-y-1"><Label className="text-[8px] font-black uppercase text-slate-400 ml-1">Alto (cm)</Label><Input type="number" className="rounded-xl h-9 text-xs font-bold" value={m.cmAlto || ""} onChange={e => setMediciones(mediciones.map(i => i.id === m.id ? {...i, cmAlto: parseFloat(e.target.value)||0} : i))} /></div>
                                     <div className="space-y-1"><Label className="text-[8px] font-black uppercase text-slate-400 ml-1">Ancho (cm)</Label><Input type="number" className="rounded-xl h-9 text-xs font-bold" value={m.cmAncho || ""} onChange={e => setMediciones(mediciones.map(i => i.id === m.id ? {...i, cmAncho: parseFloat(e.target.value)||0} : i))} /></div>
-                                    <div className="space-y-1"><Label className="text-[8px] font-black uppercase text-slate-400 ml-1">Precio m²</Label><Input type="number" className="rounded-xl h-9 text-xs font-black text-blue-600" value={m.precioDolar || ""} onChange={e => setMediciones(mediciones.map(i => i.id === m.id ? {...i, precioDolar: parseFloat(e.target.value)||0} : i))} /></div>
+                                    <div className="space-y-1"><Label className="text-[8px] font-black uppercase text-slate-400 ml-1">Precio m²</Label><Input type="number" className="rounded-xl h-9 text-xs font-black text-emerald-600" value={m.precioDolar || ""} onChange={e => setMediciones(mediciones.map(i => i.id === m.id ? {...i, precioDolar: parseFloat(e.target.value)||0} : i))} /></div>
                                 </div>
                             </motion.div>
                         ))}
@@ -252,12 +373,18 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
             </LayoutGroup>
 
             <motion.div {...hoverScale} {...tapAnimation}>
-                <Button variant="outline" onClick={() => setMediciones([...mediciones, { id: Date.now(), name: `Pieza #${mediciones.length+1}`, cmAlto: 0, cmAncho: 0, precioDolar: 0 }])} className="w-full h-10 rounded-2xl border-dashed border-2 font-black text-[10px] text-slate-400 gap-2 hover:bg-slate-50 transition-all">
+                <Button variant="outline" onClick={() => setMediciones([...mediciones, { id: Date.now(), name: `Pieza #${mediciones.length+1}`, cmAlto: 0, cmAncho: 0, precioDolar: 0, cantidad: 1 }])} className="w-full h-10 rounded-2xl border-dashed border-2 font-black text-[10px] text-slate-400 gap-2 hover:bg-slate-50 transition-all">
                     <Plus size={16}/> Añadir otra pieza
                 </Button>
             </motion.div>
 
-            <PremiumResultWidget usdAmount={resultadoTotal} rates={rates} title="Cotización Total Área" />
+            <PremiumResultWidget 
+                usdAmount={resultadoTotal} 
+                rates={rates} 
+                title="Cotización Total Área" 
+                isRounded={shouldRoundTotal}
+                onToggleRound={() => setShouldRoundTotal(!shouldRoundTotal)}
+            />
 
             {resultadoTotal && (
                 <div className="pt-1">
@@ -267,7 +394,7 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
                         </Button>
                     ) : (
                         <motion.div layout className="flex gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-2xl">
-                            <Input autoFocus placeholder="Cliente..." className="h-10 rounded-xl bg-white dark:bg-slate-800 border-none font-bold px-4 text-xs flex-1" value={saveName} onChange={e => setSaveName(e.target.value)} />
+                            <Input autoFocus placeholder="Nombre del Cliente..." className="h-10 rounded-xl bg-white dark:bg-slate-800 border-none font-bold px-4 text-xs flex-1" value={saveName} onChange={e => setSaveName(e.target.value)} />
                             <Button onClick={handleSave} className="h-10 px-6 bg-blue-600 text-white rounded-xl font-black text-xs">OK</Button>
                             <Button variant="ghost" onClick={() => setIsSaving(false)} className="h-10 w-10 rounded-xl text-slate-400"><X size={18} /></Button>
                         </motion.div>
@@ -278,7 +405,7 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
             <div className="pt-8 space-y-4">
                 <div className="flex flex-row justify-between items-center gap-2 px-1">
                     <div className="flex items-center gap-1.5 text-slate-400 font-black uppercase text-[9px] tracking-widest">
-                        <FolderOpen size={12}/> Historial
+                        <FolderOpen size={12}/> Historial de Área
                     </div>
                     <div className="relative w-40 sm:w-56">
                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
@@ -320,13 +447,26 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
 
 // --- CALCULADORA 2: LÁSER ---
 const LaserCutsCalculator = ({ rates }: { rates: any }) => {
-    const [tiempos, setTiempos] = useState<any[]>([{ id: Date.now(), name: "Corte #1", minutes: 0, seconds: 0, includeMaterial: false, materialCost: 0 }]);
+    const [items, setItems] = useState<any[]>([{ 
+        id: Date.now(), 
+        name: "Ítem #1", 
+        type: "time", 
+        minutes: 0, 
+        seconds: 0, 
+        qty: 1,
+        unitPrice: 0,
+        includeMaterial: false, 
+        materialCost: 0 
+    }]);
+    
     const [editingId, setEditingId] = useState<number | null>(null);
     const [resultado, setResultado] = useState<any>(null);
     const [history, setHistory] = useState<any[]>([]);
     const [selectedItem, setSelectedItem] = useState<any>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [saveName, setSaveName] = useState("");
+    const [shouldRoundTotal, setShouldRoundTotal] = useState(false);
+    
     const COSTO_POR_MINUTO = 0.80;
 
     const [searchTerm, setSearchTerm] = useState("");
@@ -335,10 +475,29 @@ const LaserCutsCalculator = ({ rates }: { rates: any }) => {
     useEffect(() => { getLaserHistory().then(setHistory); }, []);
     
     useEffect(() => {
-        let min = 0; let mat = 0;
-        tiempos.forEach(t => { min += (t.minutes||0) + ((t.seconds||0)/60); if(t.includeMaterial) mat += (t.materialCost||0); });
-        setResultado(min > 0 ? { totalMinutes: min, totalCost: (min * COSTO_POR_MINUTO) + mat } : null);
-    }, [tiempos]);
+        let totalUSD = 0;
+        let totalMin = 0;
+        let ok = false;
+
+        items.forEach(item => {
+            if (item.type === 'service') {
+                if (item.qty > 0 && item.unitPrice > 0) {
+                    totalUSD += (item.qty * item.unitPrice);
+                    ok = true;
+                }
+            } else {
+                const min = (item.minutes||0) + ((item.seconds||0)/60);
+                if (min > 0) {
+                    totalMin += min;
+                    totalUSD += (min * COSTO_POR_MINUTO) + (item.includeMaterial ? (item.materialCost||0) : 0);
+                    ok = true;
+                }
+            }
+        });
+
+        const finalAmount = shouldRoundTotal ? Math.ceil(totalUSD) : totalUSD;
+        setResultado(ok ? { totalMinutes: totalMin, totalCost: finalAmount } : null);
+    }, [items, shouldRoundTotal]);
 
     const filteredHistory = useMemo(() => {
         return history.filter(h => h.name.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -349,12 +508,18 @@ const LaserCutsCalculator = ({ rates }: { rates: any }) => {
 
     const handleSave = async () => {
         if (!saveName.trim() || !resultado) return;
-        const newItem = await saveLaserCalculation({ name: saveName, date: new Date().toLocaleDateString(), tiempos, totalCost: resultado.totalCost, totalMinutes: resultado.totalMinutes });
+        const newItem = await saveLaserCalculation({ 
+            name: saveName, 
+            date: new Date().toLocaleDateString(), 
+            tiempos: items, 
+            totalCost: resultado.totalCost, 
+            totalMinutes: resultado.totalMinutes 
+        });
         setHistory([newItem as any, ...history]); setIsSaving(false); setSaveName(""); setCurrentPage(1);
     };
 
     const handleEditFromHistory = (item: any) => {
-        setTiempos(item.tiempos);
+        setItems(item.tiempos || item.items); 
         setSaveName(item.name);
         setIsSaving(true);
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -362,70 +527,90 @@ const LaserCutsCalculator = ({ rates }: { rates: any }) => {
 
     return (
         <div className="space-y-5">
-            <motion.div initial={{ y: -5, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-slate-900 text-white p-4 rounded-2xl flex items-center justify-between border border-white/5 relative overflow-hidden">
-                <div className="flex items-center gap-2 relative z-10">
-                    <Clock className="text-emerald-400" size={16}/>
-                    <span className="text-[9px] font-black uppercase tracking-wider opacity-70">Tarifa Base</span>
-                </div>
-                <span className="font-black text-lg text-emerald-400 italic relative z-10">${formatUSD(COSTO_POR_MINUTO)} <span className="text-[9px] opacity-40">/ MIN</span></span>
-            </motion.div>
-
             <LayoutGroup>
                 <div className="space-y-3">
                     <AnimatePresence mode="popLayout">
-                        {tiempos.map((t, idx) => (
-                            <motion.div layout variants={itemVariants} initial="hidden" animate="visible" exit="exit" key={t.id} className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 space-y-3 group">
+                        {items.map((item, idx) => (
+                            <motion.div layout variants={itemVariants} initial="hidden" animate="visible" exit="exit" key={item.id} className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 space-y-4 group">
                                 <div className="flex justify-between items-center">
                                     <div className="flex items-center gap-2">
                                         <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 h-6 w-6 rounded-lg p-0 flex items-center justify-center text-[9px] font-black">{idx + 1}</Badge>
-                                        {editingId === t.id ? (
-                                            <Input autoFocus className="h-7 w-32 rounded-md font-bold text-xs" value={t.name} onChange={e => setTiempos(tiempos.map(i => i.id === t.id ? {...i, name: e.target.value} : i))} onBlur={() => setEditingId(null)} />
+                                        {editingId === item.id ? (
+                                            <Input autoFocus className="h-7 w-32 rounded-md font-bold text-xs" value={item.name} onChange={e => setItems(items.map(i => i.id === item.id ? {...i, name: e.target.value} : i))} onBlur={() => setEditingId(null)} />
                                         ) : (
                                             <div className="flex items-center gap-1">
-                                                <span className="font-black text-xs text-slate-700 dark:text-white italic">{t.name}</span>
-                                                <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400" onClick={() => setEditingId(t.id)}><Pencil size={12}/></Button>
+                                                <span className="font-black text-xs text-slate-700 dark:text-white italic">{item.name}</span>
+                                                <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400" onClick={() => setEditingId(item.id)}><Pencil size={12}/></Button>
                                             </div>
                                         )}
                                     </div>
-                                    <Button variant="ghost" size="icon" onClick={() => setTiempos(tiempos.length > 1 ? tiempos.filter(i => i.id !== t.id) : tiempos)} className="text-red-400 h-8 w-8"><Trash2 size={16}/></Button>
+                                    
+                                    <div className="flex bg-white dark:bg-slate-950 p-1 rounded-xl border border-slate-200/60 dark:border-slate-800 scale-90">
+                                        <button onClick={() => setItems(items.map(i => i.id === item.id ? {...i, type: 'time'} : i))} className={cn("px-3 py-1 rounded-lg text-[8px] font-black transition-all flex items-center gap-1", item.type === 'time' ? "bg-slate-900 text-white" : "text-slate-400")}>
+                                            <Clock size={10} /> TIEMPO
+                                        </button>
+                                        <button onClick={() => setItems(items.map(i => i.id === item.id ? {...i, type: 'service'} : i))} className={cn("px-3 py-1 rounded-lg text-[8px] font-black transition-all flex items-center gap-1", item.type === 'service' ? "bg-blue-600 text-white" : "text-slate-400")}>
+                                            <Package size={10} /> SERVICIO
+                                        </button>
+                                    </div>
+
+                                    <Button variant="ghost" size="icon" onClick={() => setItems(items.length > 1 ? items.filter(i => i.id !== item.id) : items)} className="text-red-400 h-8 w-8"><Trash2 size={16}/></Button>
                                 </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="space-y-1"><Label className="text-[8px] font-black text-slate-400 ml-1">Minutos</Label><Input type="number" className="rounded-xl h-9 text-xs font-bold" value={t.minutes || ""} onChange={e => setTiempos(tiempos.map(i => i.id === t.id ? {...i, minutes: parseFloat(e.target.value)||0} : i))} /></div>
-                                    <div className="space-y-1"><Label className="text-[8px] font-black text-slate-400 ml-1">Segundos</Label><Input type="number" className="rounded-xl h-9 text-xs font-bold" value={t.seconds || ""} onChange={e => setTiempos(tiempos.map(i => i.id === t.id ? {...i, seconds: parseFloat(e.target.value)||0} : i))} /></div>
-                                </div>
-                                <div className="flex items-center gap-3 bg-white dark:bg-slate-950 p-2.5 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
-                                    <Checkbox checked={t.includeMaterial} onCheckedChange={v => setTiempos(tiempos.map(i => i.id === t.id ? {...i, includeMaterial: !!v} : i))} className="h-4 w-4" />
-                                    <Label className="text-[9px] font-black text-slate-500 uppercase flex-1 cursor-pointer">Material Extra</Label>
-                                    <AnimatePresence>
-                                        {t.includeMaterial && (
-                                            <motion.div initial={{ width: 0, opacity: 0 }} animate={{ width: 'auto', opacity: 1 }} exit={{ width: 0, opacity: 0 }}>
-                                                <Input type="number" placeholder="0.00" className="w-20 h-7 text-[10px] border-none font-black text-right text-blue-600" value={t.materialCost || ""} onChange={e => setTiempos(tiempos.map(i => i.id === t.id ? {...i, materialCost: parseFloat(e.target.value)||0} : i))} />
-                                            </motion.div>
-                                        )}
-                                    </AnimatePresence>
-                                </div>
+
+                                {item.type === 'time' ? (
+                                    <>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-1"><Label className="text-[8px] font-black text-slate-400 ml-1">Minutos</Label><Input type="number" className="rounded-xl h-9 text-xs font-bold" value={item.minutes || ""} onChange={e => setItems(items.map(i => i.id === item.id ? {...i, minutes: parseFloat(e.target.value)||0} : i))} /></div>
+                                            <div className="space-y-1"><Label className="text-[8px] font-black text-slate-400 ml-1">Segundos</Label><Input type="number" className="rounded-xl h-9 text-xs font-bold" value={item.seconds || ""} onChange={e => setItems(items.map(i => i.id === item.id ? {...i, seconds: parseFloat(e.target.value)||0} : i))} /></div>
+                                        </div>
+                                        <div className="flex items-center gap-3 bg-white dark:bg-slate-950 p-2.5 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+                                            <Checkbox checked={item.includeMaterial} onCheckedChange={v => setItems(items.map(i => i.id === item.id ? {...i, includeMaterial: !!v} : i))} className="h-4 w-4" />
+                                            <Label className="text-[9px] font-black text-slate-500 uppercase flex-1 cursor-pointer">Material Extra</Label>
+                                            <AnimatePresence>
+                                                {item.includeMaterial && (
+                                                    <motion.div initial={{ width: 0, opacity: 0 }} animate={{ width: 'auto', opacity: 1 }} exit={{ width: 0, opacity: 0 }}>
+                                                        <Input type="number" placeholder="0.00" className="w-20 h-7 text-[10px] border-none font-black text-right text-blue-600" value={item.materialCost || ""} onChange={e => setItems(items.map(i => i.id === item.id ? {...i, materialCost: parseFloat(e.target.value)||0} : i))} />
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1"><Label className="text-[8px] font-black text-slate-400 ml-1">Cantidad (Unidades)</Label><Input type="number" className="rounded-xl h-9 text-xs font-black text-blue-600" value={item.qty || ""} onChange={e => setItems(items.map(i => i.id === item.id ? {...i, qty: parseInt(e.target.value)||0} : i))} /></div>
+                                        <div className="space-y-1"><Label className="text-[8px] font-black text-slate-400 ml-1">Precio x Unidad ($)</Label><Input type="number" className="rounded-xl h-9 text-xs font-black text-emerald-600" value={item.unitPrice || ""} onChange={e => setItems(items.map(i => i.id === item.id ? {...i, unitPrice: parseFloat(e.target.value)||0} : i))} /></div>
+                                    </div>
+                                )}
                             </motion.div>
                         ))}
                     </AnimatePresence>
                 </div>
             </LayoutGroup>
 
-            <Button variant="outline" onClick={() => setTiempos([...tiempos, { id: Date.now(), name: `Tiempo #${tiempos.length+1}`, minutes: 0, seconds: 0, includeMaterial: false, materialCost: 0 }])} className="w-full h-10 rounded-2xl border-dashed text-[10px] font-black text-slate-400 gap-2 hover:bg-slate-50">
-                <Plus size={16}/> Añadir tiempo
+            <Button variant="outline" onClick={() => setItems([...items, { id: Date.now(), name: `Nuevo Cobro #${items.length+1}`, type: "time", minutes: 0, seconds: 0, qty: 1, unitPrice: 0, includeMaterial: false, materialCost: 0 }])} className="w-full h-10 rounded-2xl border-dashed text-[10px] font-black text-slate-400 gap-2 hover:bg-slate-50">
+                <Plus size={16}/> Añadir Concepto
             </Button>
 
             {resultado && (
                 <div className="space-y-3">
-                    <div className="bg-slate-100 dark:bg-slate-900 p-4 rounded-3xl flex items-center justify-between border border-slate-200/50">
-                        <div><p className="text-[8px] font-black uppercase opacity-40">Tiempo Total</p><p className="text-2xl font-black italic text-slate-900 dark:text-white">{formatTime(resultado.totalMinutes)}</p></div>
-                        <div className="w-8 h-8 rounded-full bg-white dark:bg-slate-800 flex items-center justify-center text-slate-300 shadow-inner"><ArrowLeftRight size={16} /></div>
-                        <div className="text-right"><p className="text-[8px] font-black uppercase opacity-40">Costo Tiempo</p><p className="text-2xl font-black text-blue-600 italic tracking-tighter">${formatUSD(resultado.totalMinutes * COSTO_POR_MINUTO)}</p></div>
-                    </div>
+                    {resultado.totalMinutes > 0 && (
+                        <div className="bg-slate-100 dark:bg-slate-900 p-4 rounded-3xl flex items-center justify-between border border-slate-200/50">
+                            <div><p className="text-[8px] font-black uppercase opacity-40">Tiempo Total Láser</p><p className="text-2xl font-black italic text-slate-900 dark:text-white">{formatTime(resultado.totalMinutes)}</p></div>
+                            <div className="w-8 h-8 rounded-full bg-white dark:bg-slate-800 flex items-center justify-center text-slate-300 shadow-inner"><Clock size={16} /></div>
+                            <div className="text-right"><p className="text-[8px] font-black uppercase opacity-40">Costo Tiempo</p><p className="text-2xl font-black text-blue-600 italic tracking-tighter">${formatUSD(resultado.totalMinutes * COSTO_POR_MINUTO)}</p></div>
+                        </div>
+                    )}
 
-                    <PremiumResultWidget usdAmount={resultado.totalCost} rates={rates} title="Cotización Total Láser" />
+                    <PremiumResultWidget 
+                        usdAmount={resultado.totalCost} 
+                        rates={rates} 
+                        title="Cotización Total Láser" 
+                        isRounded={shouldRoundTotal}
+                        onToggleRound={() => setShouldRoundTotal(!shouldRoundTotal)}
+                    />
 
                     {!isSaving ? (
-                        <Button onClick={() => setIsSaving(true)} className="w-full h-12 bg-slate-900 text-white rounded-2xl font-black gap-2 shadow-md transition-all"><Save size={16} /> Guardar</Button>
+                        <Button onClick={() => setIsSaving(true)} className="w-full h-12 bg-slate-900 text-white rounded-2xl font-black gap-2 shadow-md transition-all"><Save size={16} /> Guardar Presupuesto</Button>
                     ) : (
                         <motion.div layout className="flex gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-2xl">
                             <Input placeholder="Cliente..." className="h-10 rounded-xl bg-white border-none font-bold px-4 text-xs flex-1" value={saveName} onChange={e => setSaveName(e.target.value)} />

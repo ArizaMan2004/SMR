@@ -1,0 +1,189 @@
+// @/components/dashboard/InsumosView.tsx
+"use client"
+
+import React, { useState, useMemo } from "react"
+import { 
+  Package, 
+  ShoppingBag, 
+  TrendingUp, 
+  DollarSign, 
+  ArrowUpRight,
+  PlusCircle,
+  XCircle
+} from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
+import { GastosForm } from "./gastos-form"
+import { GastosList } from "./gastos-list"
+import { cn } from "@/lib/utils"
+
+interface InsumosViewProps {
+  gastos: any[]
+  currentBcvRate: number
+  currentUserId: string
+  onCreateGasto: (data: any) => Promise<void>
+  onDeleteGasto: (id: string) => Promise<void>
+}
+
+export function InsumosView({ 
+  gastos, 
+  currentBcvRate, 
+  currentUserId,
+  onCreateGasto,
+  onDeleteGasto 
+}: InsumosViewProps) {
+  
+  const [isSaving, setIsSaving] = useState(false)
+  const [editingInsumo, setEditingInsumo] = useState<any>(null)
+
+  // Cálculos rápidos para los KPI de la cabecera
+  const stats = useMemo(() => {
+    const totalUSD = gastos.reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+    const totalBs = totalUSD * currentBcvRate;
+    return {
+      count: gastos.length,
+      usd: totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+      bs: totalBs.toLocaleString('es-VE', { minimumFractionDigits: 2 })
+    };
+  }, [gastos, currentBcvRate]);
+
+  const handleSubmit = async (data: any) => {
+    setIsSaving(true)
+    try {
+      const { id, ...camposDeContenido } = data;
+      const gastoFinal: any = {
+        ...camposDeContenido,
+        empresa_id: currentUserId,
+        fecha: camposDeContenido.fecha ? new Date(camposDeContenido.fecha) : new Date(),
+        updatedAt: new Date()
+      };
+
+      if (id) {
+        await onCreateGasto({ ...gastoFinal, id }); //
+      } else {
+        await onCreateGasto({ ...gastoFinal, createdAt: new Date() }); //
+      }
+      setEditingInsumo(null)
+    } catch (error) {
+      console.error("Error al procesar el registro:", error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!id) return;
+    try {
+      await onDeleteGasto(id) //
+    } catch (error) {
+      console.error("Error al eliminar el registro:", error)
+    }
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-8 pb-24 px-6 animate-in fade-in duration-700">
+      
+      {/* HEADER SECTION: Estilo Bento Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Título Principal */}
+        <div className="md:col-span-1 bg-white dark:bg-[#1c1c1e] p-8 rounded-[2.5rem] border border-black/5 dark:border-white/5 flex flex-col justify-center">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shrink-0">
+              <Package className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black italic uppercase tracking-tighter leading-none">
+                Insumos <br/><span className="text-blue-600">& Materiales</span>
+              </h2>
+            </div>
+          </div>
+          <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 opacity-70">
+            Control de Operaciones SMR
+          </p>
+        </div>
+
+        {/* Stat: Total Inversión */}
+        <div className="bg-blue-600 p-8 rounded-[2.5rem] text-white flex flex-col justify-between relative overflow-hidden group">
+          <TrendingUp className="absolute right-[-10px] top-[-10px] w-32 h-32 text-white/10 -rotate-12 group-hover:rotate-0 transition-transform duration-700" />
+          <p className="text-[10px] font-black uppercase tracking-widest text-blue-100 opacity-80">Inversión Total (USD)</p>
+          <div className="mt-4">
+            <h3 className="text-4xl font-black tracking-tighter">${stats.usd}</h3>
+            <p className="text-blue-200 text-[10px] font-bold mt-1">≈ {stats.bs} Bs.</p>
+          </div>
+        </div>
+
+        {/* Stat: Movimientos */}
+        <div className="bg-white dark:bg-[#1c1c1e] p-8 rounded-[2.5rem] border border-black/5 dark:border-white/5 flex flex-col justify-between">
+          <div className="flex justify-between items-start">
+            <div className="w-10 h-10 bg-slate-100 dark:bg-white/5 rounded-xl flex items-center justify-center">
+              <ShoppingBag className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+            </div>
+            <div className="bg-emerald-500/10 text-emerald-600 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter">
+              Activo
+            </div>
+          </div>
+          <div>
+            <h3 className="text-4xl font-black tracking-tighter mt-4">{stats.count}</h3>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Registros en el historial</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        
+        {/* PANEL IZQUIERDO: Formulario con estado de edición dinámico */}
+        <div className="lg:col-span-5 space-y-4 sticky top-24">
+          <AnimatePresence mode="wait">
+            {editingInsumo && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-indigo-600 text-white px-6 py-4 rounded-[1.5rem] flex items-center justify-between shadow-lg shadow-indigo-500/20"
+              >
+                <div className="flex items-center gap-3">
+                  <PlusCircle className="w-4 h-4" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Modo Edición Activo</span>
+                </div>
+                <button 
+                  onClick={() => setEditingInsumo(null)}
+                  className="hover:scale-110 transition-transform"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <GastosForm 
+            onSubmit={handleSubmit} //
+            bcvRate={currentBcvRate} 
+            isLoading={isSaving}
+            initialData={editingInsumo} //
+          />
+        </div>
+
+        {/* PANEL DERECHO: Listado con estética limpia */}
+        <div className="lg:col-span-7 space-y-6">
+          <div className="flex items-center justify-between px-4">
+            <h3 className="font-black text-[10px] uppercase tracking-[0.4em] text-slate-400 italic">
+              Historial de Adquisiciones
+            </h3>
+            <div className="h-px flex-1 bg-black/5 dark:bg-white/5 mx-6" />
+            <ArrowUpRight className="w-4 h-4 text-slate-300" />
+          </div>
+          
+          <div className="bg-white/20 dark:bg-black/10 rounded-[3rem] p-2 backdrop-blur-sm">
+            <GastosList 
+              gastos={gastos} //
+              onDelete={handleDelete} //
+              onEdit={(g: any) => {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                setEditingInsumo(g);
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

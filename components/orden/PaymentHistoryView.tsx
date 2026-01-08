@@ -4,19 +4,20 @@
 
 import React, { useState } from 'react'
 import { formatCurrency } from '@/lib/utils/order-utils'
-import { format } from 'date-fns'
-// 1. Agregamos DialogTitle a la importación
+import { format, isValid } from 'date-fns' // 1. Agregamos isValid
 import { 
     Table, TableBody, TableCell, TableHead, TableHeader, TableRow 
 } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
-import { Eye, ExternalLink } from 'lucide-react'
+import { Eye, ExternalLink, CalendarX } from 'lucide-react'
 
 export interface PagoTransaction {
     montoUSD: number
-    fechaRegistro: string
+    fechaRegistro?: string | any // 2. Cambiado a opcional y any para soportar Timestamps
+    fecha?: string | any
+    timestamp?: string | any
     registradoPorUserId: string
     nota?: string | null
     imagenUrl?: string | null 
@@ -32,9 +33,14 @@ export function PaymentHistoryView({ historial, totalOrdenUSD, montoPagadoUSD }:
     const [previewImage, setPreviewImage] = useState<string | null>(null)
     const pendiente = totalOrdenUSD - montoPagadoUSD
 
-    const sortedHistorial = [...historial].sort((a, b) => 
-        new Date(b.fechaRegistro).getTime() - new Date(a.fechaRegistro).getTime()
-    )
+    // Ordenamiento seguro manejando posibles fechas nulas
+    const sortedHistorial = [...historial].sort((a, b) => {
+        const dateA = a.fechaRegistro || a.fecha || a.timestamp || 0;
+        const dateB = b.fechaRegistro || b.fecha || b.timestamp || 0;
+        const timeA = dateA?.toDate ? dateA.toDate().getTime() : new Date(dateA).getTime();
+        const timeB = dateB?.toDate ? dateB.toDate().getTime() : new Date(dateB).getTime();
+        return timeB - timeA;
+    })
 
     return (
         <div className="space-y-6 w-full bg-white dark:bg-gray-900/50 rounded-lg p-2 border border-gray-100 dark:border-gray-800">
@@ -77,51 +83,66 @@ export function PaymentHistoryView({ historial, totalOrdenUSD, montoPagadoUSD }:
                                 </TableCell>
                             </TableRow>
                         ) : (
-                            sortedHistorial.map((pago, index) => (
-                                <TableRow key={index} className="hover:bg-muted/30">
-                                    <TableCell className="text-xs font-medium">
-                                        <div className="flex flex-col">
-                                            <span className="flex items-center gap-1 font-semibold text-gray-700 dark:text-gray-300">
-                                                {format(new Date(pago.fechaRegistro), 'dd/MM/yyyy')}
-                                            </span>
-                                            <span className="text-[10px] text-muted-foreground">
-                                                {format(new Date(pago.fechaRegistro), 'hh:mm a')}
-                                            </span>
-                                        </div>
-                                    </TableCell>
-                                    
-                                    <TableCell>
-                                        <div className="text-sm italic text-gray-600 dark:text-gray-400 break-words max-w-[300px]">
-                                            {pago.nota || "Sin nota"}
-                                        </div>
-                                    </TableCell>
+                            sortedHistorial.map((pago, index) => {
+                                // 3. Lógica todoterreno para procesar la fecha
+                                const rawDate = pago.fechaRegistro || pago.fecha || pago.timestamp;
+                                const dateObj = rawDate?.toDate ? rawDate.toDate() : (rawDate ? new Date(rawDate) : null);
+                                const dateIsValid = dateObj && isValid(dateObj);
 
-                                    <TableCell className="text-center">
-                                        {pago.imagenUrl ? (
-                                            <Button 
-                                                variant="ghost" 
-                                                size="icon"
-                                                className="h-8 w-8 text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 rounded-full"
-                                                onClick={() => setPreviewImage(pago.imagenUrl || null)}
-                                            >
-                                                <Eye className="w-4 h-4" />
-                                            </Button>
-                                        ) : (
-                                            <span className="text-xs text-muted-foreground opacity-50">-</span>
-                                        )}
-                                    </TableCell>
+                                return (
+                                    <TableRow key={index} className="hover:bg-muted/30">
+                                        <TableCell className="text-xs font-medium">
+                                            <div className="flex flex-col">
+                                                {dateIsValid ? (
+                                                    <>
+                                                        <span className="flex items-center gap-1 font-semibold text-gray-700 dark:text-gray-300">
+                                                            {format(dateObj, 'dd/MM/yyyy')}
+                                                        </span>
+                                                        <span className="text-[10px] text-muted-foreground">
+                                                            {format(dateObj, 'hh:mm a')}
+                                                        </span>
+                                                    </>
+                                                ) : (
+                                                    <span className="flex items-center gap-1 text-red-400 italic">
+                                                        <CalendarX className="w-3 h-3" /> Sin fecha
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </TableCell>
+                                        
+                                        <TableCell>
+                                            <div className="text-sm italic text-gray-600 dark:text-gray-400 break-words max-w-[300px]">
+                                                {pago.nota || "Sin nota"}
+                                            </div>
+                                        </TableCell>
 
-                                    <TableCell className="text-right font-bold text-green-600 dark:text-green-400 text-sm">
-                                        {formatCurrency(pago.montoUSD)}
-                                    </TableCell>
+                                        <TableCell className="text-center">
+                                            {pago.imagenUrl ? (
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="icon"
+                                                    className="h-8 w-8 text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 rounded-full"
+                                                    onClick={() => setPreviewImage(pago.imagenUrl || null)}
+                                                >
+                                                    <Eye className="w-4 h-4" />
+                                                </Button>
+                                            ) : (
+                                                <span className="text-xs text-muted-foreground opacity-50">-</span>
+                                            )}
+                                        </TableCell>
 
-                                    <TableCell className="text-right">
-                                        <Badge variant="outline" className="text-[10px] font-mono text-muted-foreground">
-                                            {pago.registradoPorUserId ? pago.registradoPorUserId.slice(0, 6) : 'N/A'}...
-                                        </Badge>
-                                    </TableCell>
-                                </TableRow>
-                            ))
+                                        <TableCell className="text-right font-bold text-green-600 dark:text-green-400 text-sm">
+                                            {formatCurrency(pago.montoUSD)}
+                                        </TableCell>
+
+                                        <TableCell className="text-right">
+                                            <Badge variant="outline" className="text-[10px] font-mono text-muted-foreground">
+                                                {pago.registradoPorUserId ? pago.registradoPorUserId.slice(0, 6) : 'N/A'}...
+                                            </Badge>
+                                        </TableCell>
+                                    </TableRow>
+                                )
+                            })
                         )}
                     </TableBody>
                 </Table>
@@ -130,8 +151,6 @@ export function PaymentHistoryView({ historial, totalOrdenUSD, montoPagadoUSD }:
             {/* MODAL DE PREVISUALIZACIÓN */}
             <Dialog open={!!previewImage} onOpenChange={(open) => !open && setPreviewImage(null)}>
                 <DialogContent className="max-w-4xl p-0 bg-transparent border-none shadow-none flex justify-center items-center pointer-events-none">
-                    
-                    {/* 2. SOLUCIÓN DEL ERROR: Título oculto para accesibilidad */}
                     <DialogTitle className="sr-only">Vista previa del comprobante</DialogTitle>
                     
                     <div className="relative group max-h-[90vh] w-auto pointer-events-auto">
