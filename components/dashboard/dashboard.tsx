@@ -504,6 +504,37 @@ export default function Dashboard() {
                     />
                 )}
                 {activeView === "old_calculator" && <CalculatorView />}
+                {/* --- VISTA DE NOTIFICACIONES COMPLETA --- */}
+{activeView === "notifications_full" && (
+    <div className="max-w-4xl mx-auto space-y-6">
+        <div className="flex items-center justify-between mb-8">
+            <div>
+                <h2 className="text-3xl font-extrabold tracking-tight">Centro de Actividades</h2>
+                <p className="text-muted-foreground">Historial completo de eventos y notificaciones del sistema</p>
+            </div>
+            <Button 
+                variant="outline" 
+                onClick={() => setActiveView("orders")}
+                className="rounded-2xl gap-2"
+            >
+                <ChevronLeft className="w-4 h-4" /> Volver al Panel
+            </Button>
+        </div>
+
+        <div className="flex flex-col gap-4">
+            {allNotifications.length > 0 ? (
+                allNotifications.map((noti) => (
+                    <ActivityRow key={noti.id} n={noti} />
+                ))
+            ) : (
+                <div className="text-center py-20 bg-white/50 dark:bg-white/5 rounded-[2.5rem] border border-dashed border-black/10">
+                    <Bell className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                    <p className="text-muted-foreground font-medium">No hay notificaciones para mostrar</p>
+                </div>
+            )}
+        </div>
+    </div>
+)}
 
               </motion.div>
             </AnimatePresence>
