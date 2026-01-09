@@ -18,7 +18,7 @@ import {
 
 // --- SERVICIOS Y UTILIDADES ---
 import { formatCurrency } from '@/lib/utils/order-utils'
-import { fetchBCVRateFromAPI } from "@/lib/bcv-service"
+import { fetchBCVRateFromAPI } from "@/lib/services/bcv-service"
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
 import { type OrdenServicio } from '@/lib/types/orden'
 
@@ -105,9 +105,9 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose }: PaymentEdit
         try {
             const data = await fetchBCVRateFromAPI()
             setRates({ 
-                usd: data.usdRate, 
+                usd: data.usd, 
                 // @ts-ignore
-                eur: data.eurRate || 0 
+                eur: data.eur || 0 
             })
         } catch (e) {
             console.error("Error tasa", e)
@@ -142,10 +142,17 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose }: PaymentEdit
         if (fileInputRef.current) fileInputRef.current.value = ""
     }
 
-    // --- GUARDAR ---
+    // --- GUARDAR CON CONFIRMACIÓN ---
     const handleSave = async () => {
         const finalAmount = parseFloat(amountUSD)
         if (isNaN(finalAmount) || finalAmount <= 0) return
+
+        // NUEVO: Lógica de confirmación requerida
+        const message = currencyMode === 'BS' 
+            ? `¿Estás seguro de querer abonar Bs. ${parseFloat(amountBS).toLocaleString('es-VE')} (Equivalente a $${finalAmount})?`
+            : `¿Estás seguro de querer abonar $${finalAmount}?`;
+
+        if (!window.confirm(message)) return;
 
         setIsUploading(true)
 
@@ -197,7 +204,6 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose }: PaymentEdit
                             <div className="flex justify-between items-center mb-1">
                                 <p className="text-xs text-blue-100 uppercase font-semibold tracking-wider">Saldo Pendiente</p>
                                 
-                                {/* BOTÓN TOGGLE TASA HEADER */}
                                 <Button 
                                     size="sm" 
                                     variant="ghost" 
@@ -210,10 +216,8 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose }: PaymentEdit
                                 </Button>
                             </div>
                             
-                            {/* Monto Principal USD */}
                             <p className="text-3xl font-bold font-mono">{formatCurrency(montoPendiente)}</p>
                             
-                            {/* Monto Chiquito en Bs */}
                             <p className="text-sm text-blue-100 font-medium mt-1 flex items-center">
                                 ≈ Bs. {pendingBs > 0 
                                     ? pendingBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) 
@@ -268,7 +272,6 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose }: PaymentEdit
                         {/* INPUT BS */}
                         <TabsContent value="BS" className="pt-4 space-y-4 animate-in fade-in slide-in-from-right-2">
                             
-                            {/* SELECTOR DE TASA (BOTONES GRANDES) */}
                             <div className="space-y-2">
                                 <div className="flex justify-between items-center">
                                     <Label className="text-xs text-muted-foreground">Calcular usando tasa:</Label>
@@ -278,7 +281,6 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose }: PaymentEdit
                                 </div>
                                 
                                 <div className="grid grid-cols-2 gap-3">
-                                    {/* BOTÓN TASA USD */}
                                     <button
                                         onClick={() => setCalculationBase('USD')}
                                         className={`relative flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${
@@ -298,7 +300,6 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose }: PaymentEdit
                                         )}
                                     </button>
 
-                                    {/* BOTÓN TASA EURO */}
                                     <button
                                         onClick={() => setCalculationBase('EUR')}
                                         className={`relative flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${
@@ -344,7 +345,6 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose }: PaymentEdit
                         </TabsContent>
                     </Tabs>
 
-                    {/* ALERTA SI EXCEDE MONTO */}
                     {isOverLimit && (
                         <div className="text-red-500 text-xs font-medium bg-red-50 p-2 rounded flex items-center gap-2">
                             <X className="w-4 h-4" /> El monto excede la deuda pendiente.
@@ -353,7 +353,6 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose }: PaymentEdit
 
                     <Separator />
 
-                    {/* --- ZONA DE UPLOAD IMAGEN --- */}
                     <div className="space-y-2">
                         <Label className="flex items-center justify-between">
                             <span>Comprobante / Capture</span>
@@ -381,7 +380,6 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose }: PaymentEdit
                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect}/>
                     </div>
 
-                    {/* NOTAS */}
                     <div className="space-y-2">
                         <Label>Nota / Referencia</Label>
                         <Textarea 

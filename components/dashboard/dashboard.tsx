@@ -120,7 +120,7 @@ export default function Dashboard() {
 
     // --- 3. NAV ITEMS (AJUSTADO) ---
     const navItems = useMemo(() => [
-        { id: 'orders', label: 'Ordenes de Servicio', icon: <LayoutDashboard className="w-4 h-4" /> }, 
+        { id: 'orders', label: 'Facturación', icon: <LayoutDashboard className="w-4 h-4" /> }, 
         { 
             id: 'tasks_group', 
             label: 'Producción', 
@@ -435,7 +435,20 @@ export default function Dashboard() {
                             <Button onClick={() => { setEditingOrder(null); setIsWizardOpen(true); }} className="px-8 py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-[1.8rem] font-bold text-sm gap-3 shrink-0"><Plus /> NUEVA ORDEN</Button>
                         </div>
                         <div className="bg-white dark:bg-[#1c1c1e] rounded-[2rem] border border-black/5 shadow-2xl overflow-hidden">
-                            <OrdersTable ordenes={filteredOrdenes} onDelete={deleteOrden} onStatusChange={updateOrdenStatus} onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}} smrLogoBase64={assets.logo} bcvRate={currentBcvRate} />
+                            
+
+<OrdersTable 
+    ordenes={filteredOrdenes} 
+    onDelete={deleteOrden} 
+    onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}} 
+    onRegisterPayment={handleRegisterOrderPayment}
+    currentUserId={currentUserId || ""}
+    bcvRate={currentBcvRate} 
+    // NUEVOS CAMPOS REQUERIDOS:
+    pdfLogoBase64={assets.logo}
+    firmaBase64={assets.firma}
+    selloBase64={assets.sello}
+/>
                         </div>
                     </div>
                 )}
@@ -491,6 +504,7 @@ export default function Dashboard() {
                         handleLogoUpload={(e: any) => handleFileUpload(e, 'logo')} handleClearLogo={() => handleClearAsset('logo')}
                         firmaBase64={assets.firma} handleFirmaUpload={(e: any) => handleFileUpload(e, 'firma')} handleClearFirma={() => handleClearAsset('firma')}
                         selloBase64={assets.sello} handleSelloUpload={(e: any) => handleFileUpload(e, 'sello')} handleClearSello={() => handleClearAsset('sello')}
+                        currentUserId={currentUserId} // CORRECCIÓN: Se añade el ID de usuario
                     />
                 )}
                 {activeView.startsWith("tasks_") && <TasksView ordenes={ordenes} currentUserId={currentUserId || ""} areaPriorizada={activeView.replace("tasks_", "")} />}
@@ -553,7 +567,7 @@ export default function Dashboard() {
     )
 }
 
-// Subcomponentes auxiliares (TasaHeaderBadge, StatCard, ActivityRow permanecen igual)
+// Subcomponentes auxiliares
 function TasaHeaderBadge({ label, value, icon, color, onClick }: any) {
     const colors: any = { emerald: "bg-emerald-500/10 text-emerald-600", orange: "bg-orange-500/10 text-orange-600", blue: "bg-blue-500/10 text-blue-600" }
     return (

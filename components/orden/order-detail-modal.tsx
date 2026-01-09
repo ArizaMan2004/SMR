@@ -52,7 +52,6 @@ export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailM
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      {/* Estética Premium iOS: Glassmorphism y bordes suaves */}
       <DialogContent className="max-w-[95vw] md:max-w-6xl h-[92vh] p-0 border-none bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-2xl overflow-hidden rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl flex flex-col">
         
         {/* --- HEADER --- */}
@@ -82,7 +81,7 @@ export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailM
             </Button>
         </header>
 
-        {/* --- ÁREA DE CONTENIDO (Scrollable con corrección min-h-0) --- */}
+        {/* --- ÁREA DE CONTENIDO --- */}
         <div className="flex-1 min-h-0 relative"> 
             <ScrollArea className="h-full">
                 <div className="px-6 md:px-10 py-8 max-w-5xl mx-auto space-y-8 pb-24">
@@ -108,7 +107,8 @@ export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailM
                                 <div className="space-y-3">
                                     <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Servicios</p>
                                     <div className="flex flex-wrap gap-2">
-                                        {Object.entries(orden.serviciosSolicitados).filter(([,v])=>v).map(([k]) => (
+                                        {/* SOLUCIÓN: Fallback con objeto vacío para evitar error de undefined */}
+                                        {Object.entries(orden.serviciosSolicitados || {}).filter(([,v])=>v).map(([k]) => (
                                             <Badge key={k} variant="secondary" className="rounded-xl bg-white border-slate-200 font-bold text-[9px] py-1 px-3 uppercase">
                                                 {k.replace(/([A-Z])/g, ' $1').trim()}
                                             </Badge>
@@ -207,7 +207,7 @@ function InfoField({ label, value, icon: Icon, primary, className }: any) {
 
 function ItemRow({ item }: { item: ItemOrden }) {
     const subtotal = getItemSubtotal(item);
-    const itemExtra = item as any; // Casting para acceder a campos técnicos guardados
+    const itemExtra = item as any;
 
     return (
         <motion.div 
@@ -225,7 +225,6 @@ function ItemRow({ item }: { item: ItemOrden }) {
                                 {item.tipoServicio}
                             </Badge>
                             
-                            {/* --- RESPONSABLE ASIGNADO (Visible y prominentemente marcado) --- */}
                             {itemExtra.empleadoAsignado && itemExtra.empleadoAsignado !== "N/A" && (
                                 <Badge variant="outline" className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 text-[9px] font-black uppercase px-2 py-0 gap-1">
                                     <User className="w-2.5 h-2.5" /> Responsable: {itemExtra.empleadoAsignado}
@@ -233,7 +232,6 @@ function ItemRow({ item }: { item: ItemOrden }) {
                             )}
                         </div>
                         
-                        {/* DETALLES TÉCNICOS ESPECÍFICOS */}
                         <div className="space-y-1">
                             {itemExtra.materialDetalleCorte && (
                                 <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1.5 italic leading-none">
@@ -243,12 +241,6 @@ function ItemRow({ item }: { item: ItemOrden }) {
                             {item.materialDeImpresion && (
                                 <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1.5 italic leading-none">
                                     <Printer className="w-3 h-3 text-blue-500" /> {item.materialDeImpresion}
-                                </p>
-                            )}
-                            {itemExtra.archivoTipo && (
-                                <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1.5 italic leading-none">
-                                    {itemExtra.archivoTipo === 'vector' ? <FileCode className="w-3 h-3 text-indigo-500"/> : <FileImage className="w-3 h-3 text-indigo-500"/>}
-                                    Entrega en {itemExtra.archivoFormato} ({itemExtra.archivoTipo})
                                 </p>
                             )}
                         </div>
@@ -264,21 +256,15 @@ function ItemRow({ item }: { item: ItemOrden }) {
                     </div>
                 </div>
 
-                {/* BADGES DE ESPECIFICACIONES ADICIONALES */}
                 <div className="flex flex-wrap gap-2 md:gap-3">
-                    {(item as any).medidaXCm > 0 && (
+                    {itemExtra.medidaXCm > 0 && (
                         <Badge variant="outline" className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 bg-slate-50 dark:bg-slate-800 rounded-lg py-1 px-2 border-slate-100 dark:border-slate-700">
-                            <Box className="w-3 h-3" /> {(item as any).medidaXCm}x{(item as any).medidaYCm}cm
+                            <Box className="w-3 h-3" /> {itemExtra.medidaXCm}x{itemExtra.medidaYCm}cm
                         </Badge>
                     )}
                     {item.tiempoCorte && (
                         <Badge variant="outline" className="flex items-center gap-1.5 text-[10px] font-bold text-orange-600 bg-orange-50 dark:bg-orange-500/10 rounded-lg py-1 px-2 border-orange-100 dark:border-orange-500/20">
                             <Timer className="w-3 h-3" /> {item.tiempoCorte}
-                        </Badge>
-                    )}
-                    {(item as any).suministrarMaterial && (
-                        <Badge variant="outline" className="flex items-center gap-1.5 text-[10px] font-black text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10 rounded-lg py-1 px-2 border-emerald-100 dark:border-emerald-500/20">
-                            <Hammer className="w-3 h-3" /> MATERIAL INCLUIDO
                         </Badge>
                     )}
                 </div>
