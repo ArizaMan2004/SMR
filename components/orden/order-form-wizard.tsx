@@ -15,17 +15,17 @@ import { cn } from "@/lib/utils"
 
 import { 
     Plus, X, User, Receipt, 
-    Users, Loader2, Pencil, Trash2, RefreshCcw, Save, 
-    Palette, Scissors, Printer, Calendar, Box, ChevronRight, ShoppingCart
+    Users, Loader2, Pencil, Trash2, Save, 
+    Palette, Scissors, Printer, Calendar, Box, ShoppingCart, DollarSign
 } from "lucide-react" 
 
 import { ItemFormModal } from "@/components/orden/item-form-modal"
 import { getLastOrderNumber } from "@/lib/firebase/ordenes" 
 import { getFrequentClients, saveClient, deleteClient } from "@/lib/firebase/clientes" 
-// Importar servicios de colores si los tienes en un archivo separado, o asegúrate de que existan
 import { subscribeToColors, saveNewColor } from "@/lib/firebase/configuracion" 
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
 
+// Utility to prevent Firebase errors with undefined values
 const cleanFirebaseObject = (obj: any): any => {
     const newObj = { ...obj };
     Object.keys(newObj).forEach(key => {
@@ -43,7 +43,6 @@ const cleanFirebaseObject = (obj: any): any => {
 
 const PREFIJOS_RIF = ["V", "E", "P", "R", "J", "G"] as const;
 const PREFIJOS_TELEFONO = ["0412", "0422", "0414", "0424", "0416", "0426"] as const;
-const JEFES_CONTACTO = ["Marcos Leal", "Samuel Leal"] as const;
 
 const INITIAL_FORM_DATA = {
     ordenNumero: '', 
@@ -79,8 +78,13 @@ export const OrderFormWizardV2: React.FC<any> = ({
             try {
                 const clients = await getFrequentClients();
                 setFrequentClients(clients.map(c => ({
-                    id: c.id!, nombreRazonSocial: c.nombreRazonSocial, rifCedula: c.rifCedulaCompleto, 
-                    telefono: c.telefonoCompleto, correo: c.correo, domicilioFiscal: c.domicilioFiscal, personaContacto: c.personaContactoCliente,
+                    id: c.id!, 
+                    nombreRazonSocial: c.nombreRazonSocial, 
+                    rifCedula: c.rifCedulaCompleto, 
+                    telefono: c.telefonoCompleto, 
+                    correo: c.correo, 
+                    domicilioFiscal: c.domicilioFiscal, 
+                    personaContacto: c.personaContactoCliente,
                 })));
 
                 if (initialData) {
@@ -118,14 +122,26 @@ export const OrderFormWizardV2: React.FC<any> = ({
         setFormData((prev: any) => ({ ...prev, ordenNumero: String(lastNumber + 1) }));
     };
 
-    const handleRegisterColor = async (newColor: any) => {
-        try {
-            await saveNewColor(newColor);
-            toast.success("Color registrado en la base de datos");
-        } catch (e) {
-            toast.error("No se pudo guardar el color");
-        }
-    };
+    // LÓGICA DE CÁLCULO TOTAL CORREGIDA
+    const currentTotal = useMemo(() => {
+        return formData.items.reduce((sum: number, item: any) => {
+            const x = parseFloat(item.medidaXCm) || 0;
+            const y = parseFloat(item.medidaYCm) || 0;
+            const precioBase = parseFloat(item.precioUnitario) || 0;
+            const cant = parseFloat(item.cantidad) || 0;
+            const extra = item.suministrarMaterial ? (parseFloat(item.costoMaterialExtra) || 0) : 0;
+
+            let subTotalItem = 0;
+            if (item.unidad === 'm2' && x > 0 && y > 0) {
+                // (Área en m2 * Precio Base m2 + Extra sustrato) * Cantidad
+                subTotalItem = ((x / 100) * (y / 100) * precioBase + extra) * cant;
+            } else {
+                // (Precio Unitario + Extra sustrato) * Cantidad
+                subTotalItem = (precioBase + extra) * cant;
+            }
+            return sum + subTotalItem;
+        }, 0);
+    }, [formData.items]);
 
     const handleSaveItem = (newItem: any) => {
         setFormData((prev: any) => {
@@ -171,34 +187,21 @@ export const OrderFormWizardV2: React.FC<any> = ({
         
         setIsLoading(true);
         try {
-            const idToSave = (selectedClientId === 'NEW' || selectedClientId === 'CUSTOM') ? undefined : selectedClientId;
             const payload = {
                 nombreRazonSocial, 
                 telefonoCompleto: numeroTelefono ? `${prefijoTelefono}${numeroTelefono}` : "EXPRESS",
                 rifCedulaCompleto: numeroRif ? `${prefijoRif}-${numeroRif}` : "EXPRESS", 
                 prefijoTelefono, numeroTelefono, prefijoRif, numeroRif,
-                domicilioFiscal, correo, 
-                personaContactoCliente: JEFES_CONTACTO.includes(personaContacto as any) ? null : personaContacto
+                domicilioFiscal, correo, personaContactoCliente: personaContacto
             };
+            const idToSave = (selectedClientId === 'NEW' || selectedClientId === 'CUSTOM') ? undefined : selectedClientId;
             const newId = await saveClient(cleanFirebaseObject(payload), idToSave);
-            toast.success("Cliente en base de datos actualizado");
+            toast.success("Cliente actualizado");
             setSelectedClientId(newId);
             setIsClientEditing(false);
             const updated = await getFrequentClients();
             setFrequentClients(updated.map(c => ({ id: c.id, nombreRazonSocial: c.nombreRazonSocial, rifCedula: c.rifCedulaCompleto, telefono: c.telefonoCompleto })));
         } catch { toast.error("Error al guardar cliente"); } finally { setIsLoading(false); }
-    };
-
-    const handleDeleteClientData = async () => {
-        if (!window.confirm("¿Eliminar cliente de la base de datos?")) return;
-        setIsLoading(true);
-        try {
-            await deleteClient(selectedClientId);
-            toast.success("Cliente eliminado");
-            handleSelectClient('NEW');
-            const updated = await getFrequentClients();
-            setFrequentClients(updated.map(c => ({ id: c.id, nombreRazonSocial: c.nombreRazonSocial, rifCedula: c.rifCedulaCompleto, telefono: c.telefonoCompleto })));
-        } catch { toast.error("Error al eliminar"); } finally { setIsLoading(false); }
     };
 
     const handleChange = useCallback((path: string, value: any) => {
@@ -212,24 +215,12 @@ export const OrderFormWizardV2: React.FC<any> = ({
         });
     }, []);
 
-    const currentTotal = useMemo(() => {
-        return formData.items.reduce((sum: number, item: any) => {
-            const x = parseFloat(item.medidaXCm) || 0;
-            const y = parseFloat(item.medidaYCm) || 0;
-            const precio = parseFloat(item.precioUnitario) || 0;
-            const cant = parseFloat(item.cantidad) || 0;
-            let sub = (item.unidad === 'm2' && x > 0 && y > 0) ? (x / 100) * (y / 100) * precio * cant : precio * cant;
-            return sum + sub;
-        }, 0);
-    }, [formData.items]);
-
     const handleSaveOrder = async () => {
         if (!formData.cliente.nombreRazonSocial) return toast.error("El nombre del cliente es obligatorio");
         if (formData.items.length === 0) return toast.error("La orden está vacía");
         
         setIsLoading(true);
         const { prefijoTelefono, numeroTelefono, prefijoRif, numeroRif, ...clienteRest } = formData.cliente;
-        
         const finalRif = numeroRif.trim() === "" ? "EXPRESS" : `${prefijoRif}-${numeroRif}`;
         const finalTel = numeroTelefono.trim() === "" ? "EXPRESS" : `${prefijoTelefono}${numeroTelefono}`;
 
@@ -275,7 +266,7 @@ export const OrderFormWizardV2: React.FC<any> = ({
             </header>
 
             <main className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-                {/* IZQUIERDA: ITEMS */}
+                {/* IZQUIERDA: LISTA DE ITEMS */}
                 <section className="flex-1 flex flex-col bg-white dark:bg-slate-900/50 border-r">
                     <div className="p-6 flex justify-between items-center border-b bg-slate-50/50 dark:bg-transparent">
                         <h3 className="font-black text-xs uppercase text-slate-500 tracking-widest flex items-center gap-2">
@@ -297,46 +288,57 @@ export const OrderFormWizardV2: React.FC<any> = ({
                                     <p className="font-black text-[10px] uppercase tracking-widest">Esperando productos...</p>
                                 </div>
                             ) : (
-                                formData.items.map((item: any, idx: number) => (
-                                    <motion.div key={idx} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="p-4 bg-white dark:bg-slate-900 rounded-[1.5rem] border border-slate-200/60 flex items-center justify-between group hover:border-blue-300 transition-all shadow-sm">
-                                        <div className="flex items-center gap-4">
-                                            <div className="h-12 w-12 bg-slate-50 dark:bg-slate-800 rounded-2xl flex items-center justify-center text-slate-500 shadow-inner">
-                                                {item.tipoServicio === 'IMPRESION' ? <Printer className="w-5 h-5 text-blue-500" /> : <Scissors className="w-5 h-5 text-orange-500" />}
-                                            </div>
-                                            <div>
-                                                <div className="flex items-center gap-2">
-                                                    <h4 className="font-black text-sm uppercase text-slate-800 dark:text-white">{item.nombre}</h4>
-                                                    {item.empleadoAsignado && item.empleadoAsignado !== "N/A" && (
-                                                        <Badge variant="outline" className="text-[8px] font-black border-blue-200 text-blue-500">{item.empleadoAsignado}</Badge>
-                                                    )}
+                                formData.items.map((item: any, idx: number) => {
+                                    // Cálculo individual para el Badge del ítem
+                                    const x = parseFloat(item.medidaXCm) || 0;
+                                    const y = parseFloat(item.medidaYCm) || 0;
+                                    const p = parseFloat(item.precioUnitario) || 0;
+                                    const c = parseFloat(item.cantidad) || 0;
+                                    const e = item.suministrarMaterial ? (parseFloat(item.costoMaterialExtra) || 0) : 0;
+                                    const sub = item.unidad === 'm2' ? ((x/100)*(y/100)*p + e)*c : (p+e)*c;
+
+                                    return (
+                                        <motion.div key={idx} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="p-4 bg-white dark:bg-slate-900 rounded-[1.5rem] border border-slate-200/60 flex items-center justify-between group hover:border-blue-300 transition-all shadow-sm">
+                                            <div className="flex items-center gap-4">
+                                                <div className="h-12 w-12 bg-slate-50 dark:bg-slate-800 rounded-2xl flex items-center justify-center text-slate-500 shadow-inner">
+                                                    {item.tipoServicio === 'IMPRESION' ? <Printer className="w-5 h-5 text-blue-500" /> : <Scissors className="w-5 h-5 text-orange-500" />}
                                                 </div>
-                                                <p className="text-[10px] text-slate-400 font-bold uppercase">
-                                                    {item.cantidad} {item.unidad} 
-                                                    {item.unidad === 'm2' && ` (${item.medidaXCm}x${item.medidaYCm}cm)`}
-                                                    <span className="mx-2">•</span> 
-                                                    ${item.precioUnitario} c/u
-                                                </p>
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <h4 className="font-black text-sm uppercase text-slate-800 dark:text-white">{item.nombre}</h4>
+                                                        {item.empleadoAsignado && item.empleadoAsignado !== "N/A" && (
+                                                            <Badge variant="outline" className="text-[8px] font-black border-blue-200 text-blue-500">{item.empleadoAsignado}</Badge>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-[10px] text-slate-400 font-bold uppercase">
+                                                        {item.cantidad} {item.unidad} 
+                                                        {item.unidad === 'm2' && ` (${item.medidaXCm}x${item.medidaYCm}cm)`}
+                                                        <span className="mx-2">•</span> 
+                                                        ${item.precioUnitario} {item.unidad === 'm2' ? '/m²' : 'c/u'}
+                                                        {item.suministrarMaterial && <span className="text-emerald-500 ml-1">+ Material</span>}
+                                                    </p>
+                                                </div>
                                             </div>
-                                        </div>
-                                        <div className="flex items-center gap-6">
-                                            <div className="text-right">
-                                                <p className="text-lg font-black text-blue-600 tracking-tight">
-                                                    ${((item.unidad === 'm2' ? (item.medidaXCm/100)*(item.medidaYCm/100) : 1) * item.cantidad * item.precioUnitario).toFixed(2)}
-                                                </p>
+                                            <div className="flex items-center gap-6">
+                                                <div className="text-right">
+                                                    <p className="text-lg font-black text-blue-600 tracking-tight">
+                                                        ${sub.toFixed(2)}
+                                                    </p>
+                                                </div>
+                                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => { setEditingItemIndex(idx); setIsItemModalOpen(true); }}><Pencil className="w-4 h-4" /></Button>
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-red-500" onClick={() => setFormData({...formData, items: formData.items.filter((_:any, i:number)=> i !== idx)})}><Trash2 className="w-4 h-4" /></Button>
+                                                </div>
                                             </div>
-                                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => { setEditingItemIndex(idx); setIsItemModalOpen(true); }}><Pencil className="w-4 h-4" /></Button>
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-red-500" onClick={() => setFormData({...formData, items: formData.items.filter((_:any, i:number)=> i !== idx)})}><Trash2 className="w-4 h-4" /></Button>
-                                            </div>
-                                        </div>
-                                    </motion.div>
-                                ))
+                                        </motion.div>
+                                    )
+                                })
                             )}
                         </div>
                     </ScrollArea>
                 </section>
 
-                {/* DERECHA: CLIENTE */}
+                {/* DERECHA: CLIENTE Y TOTAL */}
                 <aside className="w-full lg:w-[420px] shrink-0 bg-slate-50 dark:bg-slate-900 border-l flex flex-col shadow-2xl z-10">
                     <ScrollArea className="flex-1">
                         <div className="p-8 space-y-8">
@@ -347,9 +349,6 @@ export const OrderFormWizardV2: React.FC<any> = ({
                                         <Button size="sm" variant="ghost" className="h-7 text-[9px] font-black uppercase" onClick={() => setIsClientEditing(!isClientEditing)}>
                                             {isClientEditing ? 'Bloquear' : 'Editar'}
                                         </Button>
-                                        {!isClientEditing && (
-                                            <Button size="sm" variant="ghost" className="h-7 text-[9px] font-black uppercase text-red-500" onClick={handleDeleteClientData}>Borrar</Button>
-                                        )}
                                         {isClientEditing && (
                                             <Button size="sm" variant="ghost" className="h-7 text-[9px] font-black uppercase text-emerald-500" onClick={handleSaveClientData}>Guardar DB</Button>
                                         )}
@@ -358,7 +357,7 @@ export const OrderFormWizardV2: React.FC<any> = ({
 
                                 <Select onValueChange={handleSelectClient} value={selectedClientId}>
                                     <SelectTrigger className="h-12 rounded-xl border-none shadow-sm font-bold bg-white dark:bg-slate-800">
-                                        <SelectValue placeholder="Seleccionar de la lista..." />
+                                        <SelectValue placeholder="Seleccionar cliente..." />
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="NEW" className="font-black text-blue-600">✨ VENTA RÁPIDA (EXPRESS)</SelectItem>
@@ -379,7 +378,7 @@ export const OrderFormWizardV2: React.FC<any> = ({
                                                     <SelectTrigger className="w-16 h-11 border-none bg-white dark:bg-slate-800 font-bold rounded-xl text-xs"><SelectValue /></SelectTrigger>
                                                     <SelectContent>{PREFIJOS_RIF.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
                                                 </Select>
-                                                <Input value={formData.cliente.numeroRif} onChange={e => handleChange('cliente.numeroRif', e.target.value)} className="h-11 border-none bg-white dark:bg-slate-800 font-bold rounded-xl text-xs" placeholder="EXPRESS" />
+                                                <Input value={formData.cliente.numeroRif} onChange={e => handleChange('cliente.numeroRif', e.target.value)} className="h-11 border-none bg-white dark:bg-slate-800 font-bold rounded-xl text-xs" placeholder="Número" />
                                             </div>
                                         </div>
                                         <div className="space-y-1">
@@ -403,7 +402,7 @@ export const OrderFormWizardV2: React.FC<any> = ({
 
                             <div className="space-y-4">
                                 <Label className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-2 tracking-widest"><Palette className="w-3.5 h-3.5" /> Instrucciones Especiales</Label>
-                                <Textarea value={formData.descripcionDetallada} onChange={e => handleChange('descripcionDetallada', e.target.value)} className="rounded-2xl border-none shadow-sm bg-white dark:bg-slate-800 resize-none h-24 text-xs font-bold p-4" placeholder="Colores, acabados, ubicación de instalación..." />
+                                <Textarea value={formData.descripcionDetallada} onChange={e => handleChange('descripcionDetallada', e.target.value)} className="rounded-2xl border-none shadow-sm bg-white dark:bg-slate-800 resize-none h-24 text-xs font-bold p-4" placeholder="Detalles de diseño, acabados..." />
                             </div>
                         </div>
                     </ScrollArea>
@@ -424,7 +423,6 @@ export const OrderFormWizardV2: React.FC<any> = ({
                 </aside>
             </main>
 
-            {/* MODAL ITEMS CON LÓGICA DE COLORES */}
             <ItemFormModal
                 isOpen={isItemModalOpen}
                 onClose={() => { setIsItemModalOpen(false); setEditingItemIndex(null); }}
@@ -432,7 +430,7 @@ export const OrderFormWizardV2: React.FC<any> = ({
                 itemToEdit={editingItemIndex !== null ? formData.items[editingItemIndex] : undefined}
                 designers={designersList}
                 customColors={customColors}
-                onRegisterColor={handleRegisterColor}
+                onRegisterColor={(newColor: any) => saveNewColor(newColor)}
             />
         </div>
     )

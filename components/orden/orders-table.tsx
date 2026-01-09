@@ -10,10 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { formatCurrency, formatDate } from "@/lib/utils/order-utils"
-
-// IMPORTACIÓN DEL GENERADOR
 import { generateOrderPDF } from "@/lib/services/pdf-generator"
-
 import { 
     Trash2, Eye, Pencil, ChevronLeft, ChevronRight, 
     ChevronDown, DollarSign, CheckCircle2, Wallet, Landmark,
@@ -32,7 +29,6 @@ interface OrdersTableProps {
   onRegisterPayment: (ordenId: string, abono: number, nota?: string, img?: string) => Promise<void>
   currentUserId: string
   bcvRate: number
-  // NUEVOS PROPS PARA PDF
   pdfLogoBase64?: string
   firmaBase64?: string
   selloBase64?: string
@@ -41,9 +37,9 @@ interface OrdersTableProps {
 function PaymentStatusBadge({ total, abonado }: { total: number, abonado: number }) {
     const isPagado = abonado >= total && total > 0;
     const isAbonado = abonado > 0 && abonado < total;
-    if (isPagado) return <Badge className="bg-emerald-500/10 text-emerald-600 border-none px-3 py-1 rounded-full font-black text-[10px] uppercase flex items-center gap-1.5 shadow-sm"><CheckCircle2 className="w-3 h-3" /> Pagado Total</Badge>;
-    if (isAbonado) return <Badge className="bg-amber-500/10 text-amber-600 border-none px-3 py-1 rounded-full font-black text-[10px] uppercase flex items-center gap-1.5 shadow-sm"><Wallet className="w-3 h-3" /> Abonado</Badge>;
-    return <Badge className="bg-slate-100 text-slate-400 border-none px-3 py-1 rounded-full font-black text-[10px] uppercase flex items-center gap-1.5"><Clock className="w-3 h-3" /> Pago Pendiente</Badge>;
+    if (isPagado) return <Badge className="bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border-none px-3 py-1 rounded-full font-black text-[10px] uppercase flex items-center gap-1.5 shadow-sm"><CheckCircle2 className="w-3 h-3" /> Pagado Total</Badge>;
+    if (isAbonado) return <Badge className="bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400 border-none px-3 py-1 rounded-full font-black text-[10px] uppercase flex items-center gap-1.5 shadow-sm"><Wallet className="w-3 h-3" /> Abonado</Badge>;
+    return <Badge className="bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500 border-none px-3 py-1 rounded-full font-black text-[10px] uppercase flex items-center gap-1.5"><Clock className="w-3 h-3" /> Pago Pendiente</Badge>;
 }
 
 export function OrdersTable({ 
@@ -73,44 +69,43 @@ export function OrdersTable({
     return { unpaidOrders: unpaid, paidOrders: paid };
   }, [ordenes]);
 
-  // FUNCIÓN PARA DISPARAR EL PDF
   const handleDownloadPDF = async (o: OrdenServicio) => {
-    if (!pdfLogoBase64) {
-        return alert("Por favor, suba un logo en la sección de Presupuestos antes de exportar.");
-    }
-    await generateOrderPDF(o, pdfLogoBase64, {
-        bcvRate,
-        firmaBase64,
-        selloBase64
-    });
+    if (!pdfLogoBase64) return alert("Por favor, cargue un logo en Presupuestos.");
+    await generateOrderPDF(o, pdfLogoBase64, { bcvRate, firmaBase64, selloBase64 });
   };
 
   return (
     <div className="space-y-10 pb-24">
       {/* SECCIÓN 1: CUENTAS POR COBRAR */}
-      <section className="space-y-4 px-4">
-        <button onClick={() => setShowUnpaid(!showUnpaid)} className="group flex items-center justify-between w-full p-4 bg-white dark:bg-slate-900 rounded-[2rem] border border-black/5 shadow-sm transition-all outline-none">
+      <section className="space-y-4 px-2 sm:px-4">
+        <button onClick={() => setShowUnpaid(!showUnpaid)} className="group flex items-center justify-between w-full p-4 bg-white dark:bg-zinc-900 rounded-[2rem] border border-black/5 dark:border-white/10 shadow-sm transition-all outline-none">
             <div className="flex items-center gap-5">
-                <div className="p-3 bg-amber-500 rounded-2xl shadow-lg shadow-amber-200"><Landmark className="w-6 h-6 text-white" /></div>
-                <div className="text-left"><h2 className="text-xl font-black text-slate-800 dark:text-white uppercase italic tracking-tight">Cuentas por Cobrar</h2><p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Saldos activos y abonos</p></div>
+                <div className="p-3 bg-amber-500 rounded-2xl shadow-lg shadow-amber-200 dark:shadow-none"><Landmark className="w-6 h-6 text-white" /></div>
+                <div className="text-left">
+                    <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 uppercase italic tracking-tight leading-none">Cuentas por Cobrar</h2>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 font-black uppercase tracking-widest mt-1">Saldos activos y abonos</p>
+                </div>
                 <Badge className="bg-amber-500 text-white rounded-full px-3">{unpaidOrders.length}</Badge>
             </div>
-            <ChevronDown className={cn("w-6 h-6 text-slate-300 transition-transform duration-500", showUnpaid && 'rotate-180')} />
+            <ChevronDown className={cn("w-6 h-6 text-slate-300 dark:text-slate-600 transition-transform duration-500", showUnpaid && 'rotate-180')} />
         </button>
-        <AnimatePresence>{showUnpaid && (<motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><Card className="rounded-[2.5rem] border-none shadow-xl bg-white dark:bg-slate-900 overflow-hidden"><CardContent className="p-0"><OrdersSubTable data={unpaidOrders} actions={{ onDelete, onEdit, handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, handleOpenPayment: (o:any)=>{setOrdenForPayment(o); setIsPaymentModalOpen(true); }, handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, handleDownloadPDF }} /></CardContent></Card></motion.div>)}</AnimatePresence>
+        <AnimatePresence>{showUnpaid && (<motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><Card className="rounded-[2.5rem] border-none shadow-xl bg-white dark:bg-zinc-900 overflow-hidden"><CardContent className="p-0"><OrdersSubTable data={unpaidOrders} actions={{ onDelete, onEdit, handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, handleOpenPayment: (o:any)=>{setOrdenForPayment(o); setIsPaymentModalOpen(true); }, handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, handleDownloadPDF }} /></CardContent></Card></motion.div>)}</AnimatePresence>
       </section>
 
       {/* SECCIÓN 2: HISTORIAL PAGADO */}
-      <section className="space-y-4 px-4">
-        <button onClick={() => setShowPaid(!showPaid)} className="group flex items-center justify-between w-full p-4 bg-slate-50 dark:bg-slate-900 rounded-[2rem] border border-black/5 transition-all outline-none">
+      <section className="space-y-4 px-2 sm:px-4">
+        <button onClick={() => setShowPaid(!showPaid)} className="group flex items-center justify-between w-full p-4 bg-slate-50 dark:bg-zinc-900/50 rounded-[2rem] border border-black/5 dark:border-white/5 transition-all outline-none">
             <div className="flex items-center gap-5 opacity-70">
                 <div className="p-3 bg-emerald-500 rounded-2xl"><CheckCircle2 className="w-6 h-6 text-white" /></div>
-                <div className="text-left"><h2 className="text-xl font-black text-slate-600 uppercase italic tracking-tight">Facturación Pagada</h2><p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Ingresos liquidados</p></div>
-                <Badge variant="outline" className="rounded-full px-3">{paidOrders.length}</Badge>
+                <div className="text-left">
+                    <h2 className="text-xl font-black text-slate-600 dark:text-slate-400 uppercase italic tracking-tight leading-none">Facturación Pagada</h2>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-600 font-black uppercase tracking-widest mt-1">Ingresos liquidados</p>
+                </div>
+                <Badge variant="outline" className="rounded-full px-3 border-slate-300 dark:border-slate-700">{paidOrders.length}</Badge>
             </div>
-            <ChevronDown className={cn("w-6 h-6 text-slate-300 transition-transform duration-500", showPaid && 'rotate-180')} />
+            <ChevronDown className={cn("w-6 h-6 text-slate-300 dark:text-slate-600 transition-transform duration-500", showPaid && 'rotate-180')} />
         </button>
-        <AnimatePresence>{showPaid && (<motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><Card className="rounded-[2.5rem] border-none shadow-lg bg-white/80 dark:bg-slate-900/80 overflow-hidden opacity-90"><CardContent className="p-0"><OrdersSubTable data={paidOrders} actions={{ onDelete, onEdit, handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, handleOpenPayment: (o:any)=>{setOrdenForPayment(o); setIsPaymentModalOpen(true); }, handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, handleDownloadPDF }} /></CardContent></Card></motion.div>)}</AnimatePresence>
+        <AnimatePresence>{showPaid && (<motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><Card className="rounded-[2.5rem] border-none shadow-lg bg-white/80 dark:bg-zinc-900/80 overflow-hidden opacity-90"><CardContent className="p-0"><OrdersSubTable data={paidOrders} actions={{ onDelete, onEdit, handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, handleOpenPayment: (o:any)=>{setOrdenForPayment(o); setIsPaymentModalOpen(true); }, handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, handleDownloadPDF }} /></CardContent></Card></motion.div>)}</AnimatePresence>
       </section>
 
       {/* MODALES */}
@@ -118,15 +113,18 @@ export function OrdersTable({
       {ordenForPayment && (<PaymentEditModal isOpen={isPaymentModalOpen} orden={ordenForPayment} onClose={() => { setIsPaymentModalOpen(false); setOrdenForPayment(null); }} onSave={async (monto, nota, img) => { await onRegisterPayment(ordenForPayment.id, monto, nota, img); setIsPaymentModalOpen(false); }} currentUserId={currentUserId} />)}
 
       <Dialog open={isHistoryModalOpen} onOpenChange={setIsHistoryModalOpen}>
-          <DialogContent className="max-w-4xl p-0 border-none bg-white dark:bg-slate-950 rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden">
-              <header className="p-6 border-b flex justify-between items-center bg-slate-50 dark:bg-slate-900">
+          <DialogContent className="max-w-4xl p-0 border-none bg-white dark:bg-zinc-950 rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden">
+              <header className="p-6 border-b dark:border-white/10 flex justify-between items-center bg-slate-50 dark:bg-zinc-900">
                   <div className="flex items-center gap-3">
                       <div className="p-2.5 bg-blue-600 rounded-xl text-white shadow-lg"><History className="w-5 h-5" /></div>
-                      <div className="text-left"><DialogTitle className="text-xl font-black uppercase tracking-tight leading-none">Historial de Abonos</DialogTitle><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Orden #{orderForHistory?.ordenNumero}</p></div>
+                      <div className="text-left">
+                          <DialogTitle className="text-xl font-black uppercase tracking-tight leading-none text-slate-900 dark:text-white">Historial de Abonos</DialogTitle>
+                          <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">Orden #{orderForHistory?.ordenNumero}</p>
+                      </div>
                   </div>
-                  <Button variant="ghost" size="icon" onClick={() => setIsHistoryModalOpen(false)} className="rounded-full"><X /></Button>
+                  <Button variant="ghost" size="icon" onClick={() => setIsHistoryModalOpen(false)} className="rounded-full text-slate-400"><X /></Button>
               </header>
-              <div className="p-6 overflow-y-auto max-h-[70vh]">
+              <div className="p-6 overflow-y-auto max-h-[70vh] bg-white dark:bg-zinc-950">
                   {orderForHistory && (<PaymentHistoryView historial={(orderForHistory as any).registroPagos || []} totalOrdenUSD={orderForHistory.totalUSD} montoPagadoUSD={orderForHistory.montoPagadoUSD || 0} />)}
               </div>
           </DialogContent>
@@ -141,59 +139,50 @@ function OrdersSubTable({ data, actions }: any) {
     const totalPages = Math.ceil(data.length / pageSize);
     const paginated = data.slice((page - 1) * pageSize, page * pageSize);
 
-    if (data.length === 0) return <div className="p-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest italic bg-slate-50/30">No hay registros financieros</div>
+    if (data.length === 0) return <div className="p-20 text-center text-slate-300 dark:text-slate-700 font-bold uppercase text-[10px] tracking-widest italic bg-slate-50/30 dark:bg-black/20">No hay registros financieros</div>
 
     return (
         <div className="w-full">
             <div className="hidden md:block overflow-x-auto">
                 <Table>
-                    <TableHeader className="bg-slate-50/50 dark:bg-slate-900">
-                        <TableRow className="border-b border-slate-100 dark:border-slate-800">
-                            <TableHead className="py-6 px-8 text-[10px] font-black uppercase tracking-widest">N° Orden</TableHead>
-                            <TableHead className="py-6 text-[10px] font-black uppercase tracking-widest">Cliente</TableHead>
-                            <TableHead className="py-6 text-right text-[10px] font-black uppercase tracking-widest">Total Factura</TableHead>
-                            <TableHead className="py-6 text-center text-[10px] font-black uppercase tracking-widest">Estatus Pago</TableHead>
-                            <TableHead className="py-6 pr-8 text-center text-[10px] font-black uppercase tracking-widest">Acciones</TableHead>
+                    <TableHeader className="bg-slate-50/50 dark:bg-zinc-800/50">
+                        <TableRow className="border-b border-slate-100 dark:border-white/5">
+                            <TableHead className="py-6 px-8 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">N° Orden</TableHead>
+                            <TableHead className="py-6 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Cliente</TableHead>
+                            <TableHead className="py-6 text-right text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Total Factura</TableHead>
+                            <TableHead className="py-6 text-center text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Estatus Pago</TableHead>
+                            <TableHead className="py-6 pr-8 text-center text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Acciones</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {paginated.map((o: OrdenServicio) => (
-                            <TableRow key={o.id} className="group border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50 transition-colors">
-                                <TableCell className="py-5 px-8 text-xl font-black tracking-tighter">#{o.ordenNumero}</TableCell>
+                            <TableRow key={o.id} className="group border-b border-slate-50 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+                                <TableCell className="py-5 px-8 text-xl font-black tracking-tighter text-slate-900 dark:text-white">#{o.ordenNumero}</TableCell>
                                 <TableCell className="py-5">
                                     <div className="flex flex-col">
-                                        <span className="font-bold text-slate-800 dark:text-slate-100 text-sm truncate max-w-[220px]">{o.cliente?.nombreRazonSocial || "Cliente S/N"}</span>
-                                        <span className="text-[10px] text-slate-400 font-mono tracking-tighter">{o.cliente?.rifCedula || "S/R"}</span>
+                                        <span className="font-bold text-slate-800 dark:text-slate-200 text-sm truncate max-w-[220px] leading-tight uppercase italic">{o.cliente?.nombreRazonSocial || "Cliente S/N"}</span>
+                                        <span className="text-[10px] text-slate-400 dark:text-slate-600 font-mono tracking-tighter">{o.cliente?.rifCedula || "S/R"}</span>
                                     </div>
                                 </TableCell>
                                 <TableCell className="py-5 text-right">
                                     <div className="flex flex-col items-end gap-1">
-                                        <span className="font-mono font-black text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1 rounded-xl border border-emerald-100 dark:border-emerald-500/20 shadow-sm">{formatCurrency(o.totalUSD)}</span>
-                                        {o.montoPagadoUSD > 0 && o.montoPagadoUSD < o.totalUSD && (<span className="text-[9px] font-black text-amber-600 uppercase italic">Abonado: {formatCurrency(o.montoPagadoUSD)}</span>)}
+                                        <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1 rounded-xl border border-emerald-100 dark:border-emerald-500/20 shadow-sm">
+                                            {formatCurrency(o.totalUSD)}
+                                        </span>
+                                        {o.montoPagadoUSD > 0 && o.montoPagadoUSD < o.totalUSD && (
+                                            <span className="text-[9px] font-black text-amber-600 dark:text-amber-500 uppercase italic leading-none">Abonado: {formatCurrency(o.montoPagadoUSD)}</span>
+                                        )}
                                     </div>
                                 </TableCell>
                                 <TableCell className="py-5 text-center flex justify-center"><PaymentStatusBadge total={o.totalUSD} abonado={o.montoPagadoUSD || 0} /></TableCell>
                                 <TableCell className="py-5 pr-8 text-center">
                                     <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <ActionButton icon={<Eye />} color="blue" onClick={() => actions.handleOpenDetail(o)} label="Ver" />
-                                        
-                                        {/* NUEVO BOTÓN: DESCARGAR PDF */}
+                                        <ActionButton icon={<Eye />} color="blue" onClick={() => actions.handleOpenDetail(o)} label="Ver Factura" />
                                         <ActionButton icon={<Download />} color="emerald" onClick={() => actions.handleDownloadPDF(o)} label="Exportar PDF" />
-                                        
                                         <ActionButton icon={<History />} color="indigo" onClick={() => actions.handleOpenHistory(o)} label="Historial" />
                                         {(o.totalUSD - (o.montoPagadoUSD || 0)) > 0.01 && (<ActionButton icon={<Wallet />} color="green" onClick={() => actions.handleOpenPayment(o)} label="Abonar" />)}
                                         <ActionButton icon={<Pencil />} color="orange" onClick={() => actions.onEdit(o)} label="Editar" />
-                                        
-                                        <ActionButton 
-                                            icon={<Trash2 />} 
-                                            color="rose" 
-                                            onClick={() => {
-                                                if (confirm(`¿Estás seguro de querer borrar la orden #${o.ordenNumero}?`)) {
-                                                    actions.onDelete(o.id);
-                                                }
-                                            }} 
-                                            label="Borrar" 
-                                        />
+                                        <ActionButton icon={<Trash2 />} color="rose" onClick={() => { if (confirm(`¿Borrar orden #${o.ordenNumero}?`)) actions.onDelete(o.id); }} label="Borrar" />
                                     </div>
                                 </TableCell>
                             </TableRow>
@@ -201,19 +190,20 @@ function OrdersSubTable({ data, actions }: any) {
                     </TableBody>
                 </Table>
             </div>
-            {totalPages > 1 && (<div className="p-4 bg-slate-50/50 border-t flex justify-between items-center"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-4">Página {page} de {totalPages}</span><div className="flex gap-2 px-4"><Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} className="h-9 w-9 p-0 rounded-xl"><ChevronLeft className="w-4 h-4"/></Button><Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages} className="h-9 w-9 p-0 rounded-xl"><ChevronRight className="w-4 h-4"/></Button></div></div>)}
+            {/* PAGINACIÓN */}
+            {totalPages > 1 && (<div className="p-4 bg-slate-50/50 dark:bg-zinc-800/30 border-t dark:border-white/5 flex justify-between items-center"><span className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest px-4">Página {page} de {totalPages}</span><div className="flex gap-2 px-4"><Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} className="h-9 w-9 p-0 rounded-xl dark:border-white/10 dark:text-slate-400"><ChevronLeft className="w-4 h-4"/></Button><Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages} className="h-9 w-9 p-0 rounded-xl dark:border-white/10 dark:text-slate-400"><ChevronRight className="w-4 h-4"/></Button></div></div>)}
         </div>
     )
 }
 
 function ActionButton({ icon, color, onClick, label }: any) {
     const colors: any = { 
-        blue: "text-blue-600 bg-blue-50 border-blue-100 hover:bg-blue-600 hover:text-white", 
-        green: "text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-600 hover:text-white", 
-        orange: "text-orange-600 bg-orange-50 border-orange-100 hover:bg-orange-600 hover:text-white", 
-        rose: "text-rose-600 bg-rose-50 border-rose-100 hover:bg-rose-600 hover:text-white",
-        indigo: "text-indigo-600 bg-indigo-50 border-indigo-100 hover:bg-indigo-600 hover:text-white",
-        emerald: "text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-600 hover:text-white"
+        blue: "text-blue-600 bg-blue-50 border-blue-100 hover:bg-blue-600 hover:text-white dark:bg-blue-500/10 dark:border-blue-500/20 dark:hover:bg-blue-500", 
+        green: "text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-600 hover:text-white dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:hover:bg-emerald-500", 
+        orange: "text-orange-600 bg-orange-50 border-orange-100 hover:bg-orange-600 hover:text-white dark:bg-orange-500/10 dark:border-orange-500/20 dark:hover:bg-orange-500", 
+        rose: "text-rose-600 bg-rose-50 border-rose-100 hover:bg-rose-600 hover:text-white dark:bg-rose-500/10 dark:border-rose-500/20 dark:hover:bg-rose-500",
+        indigo: "text-indigo-600 bg-indigo-50 border-indigo-100 hover:bg-indigo-600 hover:text-white dark:bg-indigo-500/10 dark:border-indigo-500/20 dark:hover:bg-indigo-500",
+        emerald: "text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-600 hover:text-white dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:hover:bg-emerald-500"
     };
     return (<button onClick={onClick} title={label} className={cn("w-10 h-10 rounded-xl flex items-center justify-center transition-all border active:scale-95 shadow-sm", colors[color])}>{React.cloneElement(icon, { className: "w-5 h-5" })}</button>);
 }

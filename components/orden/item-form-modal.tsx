@@ -62,7 +62,6 @@ export function ItemFormModal({
   const [minutos, setMinutos] = useState('0');
   const [segundos, setSegundos] = useState('00');
 
-  // Combinar colores locales con los traídos de la base de datos
   const allColors = useMemo(() => [...COLORES_PREDEFINIDOS, ...customColors], [customColors]);
 
   useEffect(() => {
@@ -80,7 +79,7 @@ export function ItemFormModal({
     }
   }, [isOpen, itemToEdit]);
 
-  // Lógica de cálculo en tiempo real
+  // LÓGICA DE CÁLCULO CORREGIDA
   useEffect(() => {
     let costoBaseUnitario = 0;
     const { cantidad, precioUnitario, unidad, medidaXCm, medidaYCm, suministrarMaterial, costoMaterialExtra, tipoServicio, modoCobroLaser } = state; 
@@ -90,6 +89,7 @@ export function ItemFormModal({
             const totalMinutes = (parseFloat(minutos) || 0) + ((parseFloat(segundos) || 0) / 60);
             costoBaseUnitario = totalMinutes * PRECIO_LASER_POR_MINUTO;
         } else if (unidad === 'm2' && medidaXCm > 0 && medidaYCm > 0) {
+            // Fórmula corregida: (cm/100) * (cm/100) * precio_m2
             costoBaseUnitario = (medidaXCm / 100) * (medidaYCm / 100) * precioUnitario;
         } else {
             costoBaseUnitario = precioUnitario;
@@ -100,12 +100,12 @@ export function ItemFormModal({
     }
   }, [state.cantidad, state.precioUnitario, state.unidad, state.medidaXCm, state.medidaYCm, minutos, segundos, state.suministrarMaterial, state.costoMaterialExtra, state.tipoServicio, state.modoCobroLaser]);
 
+  // FUNCIÓN DE GUARDADO CORREGIDA
   const handleSave = async () => {
     if (!state.nombre.trim()) return;
 
     let colorFinal = state.colorAcrilico;
 
-    // Lógica para persistir nuevo color en Firebase
     if (state.colorAcrilico === 'NEW' && state.nuevoColorCustom.trim() !== "") {
         colorFinal = state.nuevoColorCustom.trim();
         if (onRegisterColor) {
@@ -113,15 +113,18 @@ export function ItemFormModal({
         }
     }
 
-    const detalleCorte = state.tipoServicio === 'CORTE' 
-        ? `${state.materialDeCorte} ${state.materialDeCorte === 'Cartulina' ? 'N/A' : state.grosorMaterial} ${colorFinal}`
-        : null;
+    // SI ES M2, GUARDAMOS EL PRECIO BASE POR M2 PARA QUE EL WIZARD NO MULTIPLIQUE DOBLE
+    const finalUnitPrice = state.unidad === 'm2' 
+        ? state.precioUnitario 
+        : (state.subtotal / state.cantidad);
 
     onAddItem({ 
         ...state, 
         colorAcrilico: colorFinal,
-        materialDetalleCorte: detalleCorte,
-        precioUnitario: state.subtotal / state.cantidad,
+        materialDetalleCorte: state.tipoServicio === 'CORTE' 
+            ? `${state.materialDeCorte} ${state.materialDeCorte === 'Cartulina' ? 'N/A' : state.grosorMaterial} ${colorFinal}`
+            : null,
+        precioUnitario: finalUnitPrice,
         tiempoCorte: state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo' ? `${minutos}:${segundos.padStart(2, '0')}` : "Servicio" 
     });
     onClose();
@@ -147,7 +150,6 @@ export function ItemFormModal({
         <ScrollArea className="flex-1 overflow-y-auto">
             <div className="p-8 space-y-8 pb-12">
                 
-                {/* IDENTIFICACIÓN */}
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
                     <div className="md:col-span-8 space-y-1.5">
                         <Label className="text-[10px] font-black uppercase text-slate-400 ml-1">Descripción</Label>
@@ -179,7 +181,6 @@ export function ItemFormModal({
                     </div>
                 </div>
 
-                {/* MODALIDAD LÁSER (CON TIEMPO O SERVICIO) */}
                 <AnimatePresence>
                     {state.tipoServicio === 'CORTE' && (
                         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="p-6 bg-orange-50 dark:bg-orange-900/10 rounded-[2rem] border border-orange-100 dark:border-orange-800 space-y-6">
@@ -254,7 +255,6 @@ export function ItemFormModal({
                     )}
                 </AnimatePresence>
 
-                {/* MODALIDAD M2 (IMPRESIÓN) */}
                 <AnimatePresence>
                     {state.unidad === 'm2' && (
                         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="p-6 bg-blue-50 dark:bg-blue-900/10 rounded-[2rem] border border-blue-100 dark:border-blue-900/30 space-y-4">
@@ -273,7 +273,6 @@ export function ItemFormModal({
                     )}
                 </AnimatePresence>
 
-                {/* PRECIO GENERAL (Si no es Láser por tiempo) */}
                 {!(state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo') && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div className="space-y-2">
