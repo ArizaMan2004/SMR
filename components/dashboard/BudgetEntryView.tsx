@@ -70,34 +70,7 @@ export default function BudgetEntryView({
 
     useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
-    // --- LÓGICA DE GUARDADO (FIX) ---
-    const handleSaveDraft = async () => {
-        if (!budgetData.clienteNombre) return toast.error("El nombre del cliente es obligatorio");
-        if (budgetData.items.length === 0) return toast.error("Agrega al menos un concepto");
-
-        setIsLoading(true);
-        try {
-            const payload = {
-                ...budgetData,
-                totalUSD: totalUSD, // Aseguramos que se guarde el total calculado
-                dateCreated: new Date().toISOString(), // Fecha necesaria para el historial
-                userId: currentUserId
-            };
-
-            await saveBudgetToFirestore(payload);
-            toast.success("Borrador guardado en la nube");
-            
-            // Limpiar y refrescar
-            setBudgetData({ clienteNombre: '', items: [] });
-            await fetchHistory();
-        } catch (error) {
-            toast.error("Error al guardar el borrador");
-            console.error(error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
+    // --- LÓGICA DE ITEMS ---
     const handleAddItem = () => {
         if (!newItem.descripcion || newItem.cantidad <= 0) return;
         setBudgetData(prev => ({ 
@@ -108,13 +81,53 @@ export default function BudgetEntryView({
         setShowSuggestions(false);
     };
 
+    const handleEditItem = (item: any) => {
+        setNewItem({
+            descripcion: item.descripcion,
+            cantidad: item.cantidad,
+            precioUnitarioUSD: item.precioUnitarioUSD
+        });
+        setBudgetData(prev => ({
+            ...prev,
+            items: prev.items.filter(i => i.id !== item.id)
+        }));
+        toast.info("Item cargado para edición");
+    };
+
+    // --- LÓGICA DE GUARDADO ---
+    const handleSaveDraft = async () => {
+        if (!budgetData.clienteNombre) return toast.error("El nombre del cliente es obligatorio");
+        if (budgetData.items.length === 0) return toast.error("Agrega al menos un concepto");
+
+        setIsLoading(true);
+        try {
+            const payload = {
+                ...budgetData,
+                totalUSD: totalUSD, 
+                dateCreated: new Date().toISOString(),
+                userId: currentUserId
+            };
+
+            await saveBudgetToFirestore(payload);
+            toast.success("Borrador guardado en la nube");
+            
+            setBudgetData({ clienteNombre: '', items: [] });
+            await fetchHistory();
+        } catch (error) {
+            toast.error("Error al guardar el borrador");
+            console.error(error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const handleEditBudget = (entry: any) => {
         setBudgetData({
             clienteNombre: entry.clienteNombre,
             items: entry.items || []
         });
         window.scrollTo({ top: 0, behavior: 'smooth' });
-        toast.info("Cargado para edición");
+        toast.info("Presupuesto completo cargado");
     };
 
     const handleConvertToOrder = async (targetBudget?: any) => {
@@ -255,7 +268,7 @@ export default function BudgetEntryView({
                                         <TableRow className="border-none">
                                             <TableHead className="px-8 text-[9px] font-black uppercase">Descripción</TableHead>
                                             <TableHead className="text-right px-8 text-[9px] font-black uppercase">Subtotal</TableHead>
-                                            <TableHead className="w-12"></TableHead>
+                                            <TableHead className="w-24"></TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
@@ -266,9 +279,24 @@ export default function BudgetEntryView({
                                                 </TableCell>
                                                 <TableCell className="text-right px-8 font-black text-blue-600 text-sm tracking-tight">${item.totalUSD.toFixed(2)}</TableCell>
                                                 <TableCell className="pr-6">
-                                                    <Button variant="ghost" size="icon" onClick={() => setBudgetData(p => ({...p, items: p.items.filter(i => i.id !== item.id)}))} className="text-red-400 hover:text-red-600">
-                                                        <Trash2 className="w-4 h-4"/>
-                                                    </Button>
+                                                    <div className="flex items-center justify-end gap-1">
+                                                        <Button 
+                                                            variant="ghost" 
+                                                            size="icon" 
+                                                            onClick={() => handleEditItem(item)} 
+                                                            className="text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10"
+                                                        >
+                                                            <Pencil className="w-4 h-4" />
+                                                        </Button>
+                                                        <Button 
+                                                            variant="ghost" 
+                                                            size="icon" 
+                                                            onClick={() => setBudgetData(p => ({...p, items: p.items.filter(i => i.id !== item.id)}))} 
+                                                            className="text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10"
+                                                        >
+                                                            <Trash2 className="w-4 h-4"/>
+                                                        </Button>
+                                                    </div>
                                                 </TableCell>
                                             </TableRow>
                                         ))}
