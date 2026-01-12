@@ -469,11 +469,18 @@ export default function Dashboard() {
                                 onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}} 
                                 onRegisterPayment={handleRegisterOrderPayment}
                                 currentUserId={currentUserId || ""}
+    // CAMBIA ESTO:
+    rates={{
+        usd: currentBcvRate,
+        eur: eurRate,
+        usdt: parallelRate
+    }}
                                 bcvRate={currentBcvRate} 
                                 pdfLogoBase64={assets.logo}
                                 firmaBase64={assets.firma}
                                 selloBase64={assets.sello}
                                 onSyncStatus={syncAllOrdersClientStatus}
+                                
                             />
                         </div>
                     </div>

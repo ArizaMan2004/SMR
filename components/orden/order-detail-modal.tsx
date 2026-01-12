@@ -1,19 +1,26 @@
 // @/components/orden/order-detail-modal.tsx
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { formatCurrency, formatDate } from "@/lib/utils/order-utils";
 import { type OrdenServicio, type ItemOrden } from "@/lib/types/orden";
 import { 
     X, User, Calendar, FileText, MapPin, Phone, 
     Mail, Box, Layers, Hammer, Receipt, ArrowRight, 
-    Timer, Scissors, Printer, Star, ShieldCheck 
+    Timer, Scissors, Printer, Star, ShieldCheck,
+    ChevronDown, DollarSign, Euro, Coins 
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +28,11 @@ interface OrderDetailModalProps {
   open: boolean;
   onClose: () => void;
   orden: OrdenServicio | null;
-  bcvRate: number;
+  rates: {
+    usd: number;
+    eur: number;
+    usdt: number;
+  };
 }
 
 // --- UTILIDADES DE CÁLCULO ---
@@ -37,7 +48,9 @@ const getItemSubtotal = (item: ItemOrden) => {
   return price * qty;
 };
 
-export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailModalProps) {
+export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailModalProps) {
+  const [selectedCurrency, setSelectedCurrency] = useState<'USD' | 'EUR' | 'USDT'>('USD');
+
   if (!orden) return null;
 
   // Lógica de detección de Aliado
@@ -50,6 +63,16 @@ export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailM
   const montoPagadoUSD = orden.montoPagadoUSD || 0;
   const montoPendiente = totalBaseUSD - montoPagadoUSD;
   const isPagado = montoPendiente <= 0.01;
+
+  // Lógica de tasa activa
+  const activeRateValue = selectedCurrency === 'USD' ? rates.usd : 
+                         selectedCurrency === 'EUR' ? rates.eur : rates.usdt;
+
+  const currencyLabels = {
+    USD: { label: "Tasa BCV (USD)", icon: <DollarSign className="w-3 h-3 text-emerald-500" /> },
+    EUR: { label: "Tasa BCV (EUR)", icon: <Euro className="w-3 h-3 text-blue-500" /> },
+    USDT: { label: "Tasa Paralelo", icon: <Coins className="w-3 h-3 text-orange-500" /> }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -81,7 +104,7 @@ export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailM
 
                         <Badge className={cn(
                             "rounded-full px-3 py-1 text-[9px] md:text-[10px] font-black uppercase tracking-widest border-none",
-                            orden.estado === 'TERMINADO' ? "bg-emerald-500 text-white" : "bg-orange-50 text-white"
+                            orden.estado === 'TERMINADO' ? "bg-emerald-500 text-white" : "bg-orange-500 text-white"
                         )}>
                             {orden.estado}
                         </Badge>
@@ -176,17 +199,52 @@ export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailM
                                     <span>- {formatCurrency(montoPagadoUSD)} USD</span>
                                 </div>
                                 <Separator className={cn("opacity-50", isAliado ? "bg-white" : "bg-slate-200")} />
+                                
                                 <div className="flex justify-between items-end">
-                                    <div>
-                                        <p className={cn("text-[10px] font-black uppercase tracking-widest", isAliado ? "text-purple-100" : "text-slate-400")}>Restante</p>
-                                        <p className={cn("text-xs font-bold mt-1", isAliado ? "text-purple-200" : "text-slate-400")}>Ref. BCV: {formatCurrency(bcvRate)}</p>
+                                    <div className="space-y-3">
+                                        <p className={cn("text-[10px] font-black uppercase tracking-widest", isAliado ? "text-purple-100" : "text-slate-400")}>Restante en Bs.</p>
+                                        
+                                        {/* SELECTOR DE MONEDA DINÁMICO */}
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="sm" 
+                                                    className={cn(
+                                                        "h-8 gap-2 px-3 rounded-xl border font-bold text-[10px] uppercase transition-all",
+                                                        isAliado 
+                                                            ? "bg-purple-500/30 border-purple-400 text-white hover:bg-purple-500/50" 
+                                                            : "bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200"
+                                                    )}
+                                                >
+                                                    {currencyLabels[selectedCurrency].icon}
+                                                    {currencyLabels[selectedCurrency].label}
+                                                    <ChevronDown className="w-3 h-3 opacity-50" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="start" className="rounded-2xl p-2 shadow-2xl border-none bg-white dark:bg-slate-800">
+                                                <DropdownMenuItem onClick={() => setSelectedCurrency('USD')} className="rounded-xl gap-2 font-bold text-xs uppercase cursor-pointer">
+                                                    <DollarSign className="w-4 h-4 text-emerald-500" /> Dólar BCV
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem onClick={() => setSelectedCurrency('EUR')} className="rounded-xl gap-2 font-bold text-xs uppercase cursor-pointer">
+                                                    <Euro className="w-4 h-4 text-blue-500" /> Euro BCV
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem onClick={() => setSelectedCurrency('USDT')} className="rounded-xl gap-2 font-bold text-xs uppercase cursor-pointer">
+                                                    <Coins className="w-4 h-4 text-orange-500" /> USDT / Paralelo
+                                                </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+
+                                        <p className={cn("text-[10px] font-bold mt-1", isAliado ? "text-purple-200" : "text-slate-400")}>
+                                            Ref. Tasa: {formatCurrency(activeRateValue)} Bs.
+                                        </p>
                                     </div>
                                     <div className="text-right">
                                         <p className={cn("text-4xl md:text-5xl font-black tracking-tighter leading-none", isPagado ? "text-emerald-400" : isAliado ? "text-white" : "text-red-500")}>
                                             {formatCurrency(montoPendiente)}
                                         </p>
                                         <p className={cn("text-lg md:text-xl font-black mt-1", isAliado ? "text-purple-100" : "text-slate-400")}>
-                                            ≈ {formatCurrency(montoPendiente * bcvRate)} Bs.
+                                            ≈ {formatCurrency(montoPendiente * activeRateValue)} Bs.
                                         </p>
                                     </div>
                                 </div>

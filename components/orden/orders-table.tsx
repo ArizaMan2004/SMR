@@ -33,7 +33,12 @@ interface OrdersTableProps {
   onEdit: (orden: OrdenServicio) => void
   onRegisterPayment: (ordenId: string, abono: number, nota?: string, img?: string) => Promise<void>
   currentUserId: string
-  bcvRate: number
+  // CORRECCIÓN: Se reemplaza bcvRate por el objeto rates completo
+  rates: {
+    usd: number;
+    eur: number;
+    usdt: number;
+  };
   pdfLogoBase64?: string
   firmaBase64?: string
   selloBase64?: string
@@ -50,7 +55,7 @@ function PaymentStatusBadge({ total, abonado }: { total: number, abonado: number
 
 export function OrdersTable({ 
     ordenes, onDelete, onEdit, onRegisterPayment, 
-    currentUserId, bcvRate, pdfLogoBase64, firmaBase64, selloBase64, onSyncStatus 
+    currentUserId, rates, pdfLogoBase64, firmaBase64, selloBase64, onSyncStatus 
 }: OrdersTableProps) {
   
   const [selectedOrden, setSelectedOrden] = useState<OrdenServicio | null>(null)
@@ -78,7 +83,8 @@ export function OrdersTable({
 
   const handleDownloadPDF = async (o: OrdenServicio) => {
     if (!pdfLogoBase64) return alert("Por favor, cargue un logo en Presupuestos.");
-    await generateOrderPDF(o, pdfLogoBase64, { bcvRate, firmaBase64, selloBase64 });
+    // Se utiliza rates.usd como referencia para el PDF
+    await generateOrderPDF(o, pdfLogoBase64, { bcvRate: rates.usd, firmaBase64, selloBase64 });
   };
 
   const handleSync = async () => {
@@ -170,7 +176,16 @@ export function OrdersTable({
       </section>
 
       {/* MODALES */}
-      {selectedOrden && (<OrderDetailModal orden={selectedOrden} open={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} bcvRate={bcvRate} />)}
+      {/* CORRECCIÓN: Se pasa el objeto rates al modal en lugar de bcvRate */}
+      {selectedOrden && (
+        <OrderDetailModal 
+          orden={selectedOrden} 
+          open={isDetailModalOpen} 
+          onClose={() => setIsDetailModalOpen(false)} 
+          rates={rates} 
+        />
+      )}
+      
       {ordenForPayment && (<PaymentEditModal isOpen={isPaymentModalOpen} orden={ordenForPayment} onClose={() => { setIsPaymentModalOpen(false); setOrdenForPayment(null); }} onSave={async (monto, nota, img) => { await onRegisterPayment(ordenForPayment.id, monto, nota, img); setIsPaymentModalOpen(false); }} currentUserId={currentUserId} />)}
 
       <Dialog open={isHistoryModalOpen} onOpenChange={setIsHistoryModalOpen}>
