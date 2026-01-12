@@ -10,13 +10,14 @@ import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area" 
 import { Badge } from "@/components/ui/badge" 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select" 
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from 'sonner' 
 import { cn } from "@/lib/utils"
 
 import { 
     Plus, X, User, Receipt, 
     Users, Loader2, Pencil, Trash2, Save, 
-    Palette, Scissors, Printer, Calendar, Box, ShoppingCart, DollarSign
+    Palette, Scissors, Printer, Calendar, Box, ShoppingCart, DollarSign, ChevronRight, CheckCircle2, Sparkles
 } from "lucide-react" 
 
 import { ItemFormModal } from "@/components/orden/item-form-modal"
@@ -25,22 +26,6 @@ import { getFrequentClients, saveClient, deleteClient } from "@/lib/firebase/cli
 import { subscribeToColors, saveNewColor } from "@/lib/firebase/configuracion" 
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
 
-// Utility to prevent Firebase errors with undefined values
-const cleanFirebaseObject = (obj: any): any => {
-    const newObj = { ...obj };
-    Object.keys(newObj).forEach(key => {
-        if (newObj[key] === undefined) delete newObj[key];
-        else if (newObj[key] && typeof newObj[key] === 'object' && !Array.isArray(newObj[key])) {
-            newObj[key] = cleanFirebaseObject(newObj[key]);
-        } else if (Array.isArray(newObj[key])) {
-            newObj[key] = newObj[key].map((item: any) => 
-                (typeof item === 'object' && item !== null) ? cleanFirebaseObject(item) : item
-            );
-        }
-    });
-    return newObj;
-};
-
 const PREFIJOS_RIF = ["V", "E", "P", "R", "J", "G"] as const;
 const PREFIJOS_TELEFONO = ["0412", "0422", "0414", "0424", "0416", "0426"] as const;
 
@@ -48,18 +33,15 @@ const INITIAL_FORM_DATA = {
     ordenNumero: '', 
     fechaEntrega: new Date().toISOString().split('T')[0],
     cliente: { 
-        nombreRazonSocial: "", rifCedula: "", telefono: "", 
-        prefijoTelefono: "0414", numeroTelefono: "", 
-        prefijoRif: "V", numeroRif: "", 
+        nombreRazonSocial: "", tipoCliente: "REGULAR", rifCedula: "", telefono: "", 
+        prefijoTelefono: "0414", numeroTelefono: "", prefijoRif: "V", numeroRif: "", 
         domicilioFiscal: "", correo: "", personaContacto: "" 
     },
     items: [],
     descripcionDetallada: "",
 };
 
-export const OrderFormWizardV2: React.FC<any> = ({ 
-    onCreate, onUpdate, onClose, initialData, currentUserId 
-}) => {
+export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, initialData, currentUserId }) => {
     const [formData, setFormData] = useState<any>(INITIAL_FORM_DATA);
     const [isLoading, setIsLoading] = useState(false);
     const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -71,367 +53,268 @@ export const OrderFormWizardV2: React.FC<any> = ({
     const [customColors, setCustomColors] = useState<any[]>([]);
 
     useEffect(() => {
-        const unsubscribeDesigners = subscribeToDesigners(setDesignersList);
-        const unsubscribeColors = subscribeToColors((colors) => setCustomColors(colors));
-
-        const loadData = async () => {
-            try {
-                const clients = await getFrequentClients();
-                setFrequentClients(clients.map(c => ({
-                    id: c.id!, 
-                    nombreRazonSocial: c.nombreRazonSocial, 
-                    rifCedula: c.rifCedulaCompleto, 
-                    telefono: c.telefonoCompleto, 
-                    correo: c.correo, 
-                    domicilioFiscal: c.domicilioFiscal, 
-                    personaContacto: c.personaContactoCliente,
-                })));
-
-                if (initialData) {
-                    const [prefijoRif, numeroRif] = (initialData.cliente?.rifCedula || "V-").split('-');
-                    const tel = initialData.cliente?.telefono || "";
-                    setFormData({
-                        ...initialData,
-                        ordenNumero: String(initialData.ordenNumero),
-                        cliente: { 
-                            ...initialData.cliente, 
-                            prefijoRif: prefijoRif || "V", 
-                            numeroRif: numeroRif || "", 
-                            prefijoTelefono: tel.substring(0, 4) || "0414", 
-                            numeroTelefono: tel.substring(4) || ""
-                        }
-                    });
-                    const existing = clients.find(c => c.rifCedulaCompleto === initialData.cliente?.rifCedula);
-                    if (existing) { setSelectedClientId(existing.id!); setIsClientEditing(false); }
-                    else { setSelectedClientId('CUSTOM'); setIsClientEditing(true); }
-                } else {
-                    fetchOrderNumber();
-                }
-            } catch (e) { console.error(e); }
+        const unsubDesigners = subscribeToDesigners(setDesignersList);
+        const unsubColors = subscribeToColors(setCustomColors);
+        const load = async () => {
+            const clients = await getFrequentClients();
+            setFrequentClients(clients.map(c => ({
+                id: c.id!, nombreRazonSocial: c.nombreRazonSocial, 
+                tipoCliente: c.tipoCliente || "REGULAR", rifCedula: c.rifCedulaCompleto, 
+                telefono: c.telefonoCompleto
+            })));
+            if (initialData) {
+                const [prefRif, numRif] = (initialData.cliente?.rifCedula || "V-").split('-');
+                const tel = initialData.cliente?.telefono || "";
+                setFormData({ ...initialData, cliente: { ...initialData.cliente, prefijoRif: prefRif || "V", numeroRif: numRif || "", prefijoTelefono: tel.substring(0, 4) || "0414", numeroTelefono: tel.substring(4) || "" } });
+                const existing = clients.find(c => c.rifCedulaCompleto === initialData.cliente?.rifCedula);
+                if (existing) { setSelectedClientId(existing.id!); setIsClientEditing(false); }
+            } else {
+                const last = await getLastOrderNumber();
+                setFormData(prev => ({ ...prev, ordenNumero: String(last + 1) }));
+            }
         };
-
-        loadData();
-        return () => {
-            unsubscribeDesigners();
-            unsubscribeColors();
-        };
+        load();
+        return () => { unsubDesigners(); unsubColors(); };
     }, [initialData]);
 
-    const fetchOrderNumber = async () => {
-        const lastNumber = await getLastOrderNumber(); 
-        setFormData((prev: any) => ({ ...prev, ordenNumero: String(lastNumber + 1) }));
-    };
-
-    // LÓGICA DE CÁLCULO TOTAL CORREGIDA
     const currentTotal = useMemo(() => {
         return formData.items.reduce((sum: number, item: any) => {
             const x = parseFloat(item.medidaXCm) || 0;
             const y = parseFloat(item.medidaYCm) || 0;
-            const precioBase = parseFloat(item.precioUnitario) || 0;
-            const cant = parseFloat(item.cantidad) || 0;
-            const extra = item.suministrarMaterial ? (parseFloat(item.costoMaterialExtra) || 0) : 0;
-
-            let subTotalItem = 0;
-            if (item.unidad === 'm2' && x > 0 && y > 0) {
-                // (Área en m2 * Precio Base m2 + Extra sustrato) * Cantidad
-                subTotalItem = ((x / 100) * (y / 100) * precioBase + extra) * cant;
-            } else {
-                // (Precio Unitario + Extra sustrato) * Cantidad
-                subTotalItem = (precioBase + extra) * cant;
-            }
-            return sum + subTotalItem;
+            const p = parseFloat(item.precioUnitario) || 0;
+            const c = parseFloat(item.cantidad) || 0;
+            const e = item.suministrarMaterial ? (parseFloat(item.costoMaterialExtra) || 0) : 0;
+            return sum + (item.unidad === 'm2' ? ((x/100)*(y/100)*p + e)*c : (p+e)*c);
         }, 0);
     }, [formData.items]);
 
-    const handleSaveItem = (newItem: any) => {
-        setFormData((prev: any) => {
-            let newItems = [...prev.items];
-            if (editingItemIndex !== null) newItems[editingItemIndex] = newItem;
-            else newItems.push(newItem);
-            return { ...prev, items: newItems };
-        });
-        setIsItemModalOpen(false);
-    };
-
     const handleSelectClient = (clientId: string) => {
         setSelectedClientId(clientId);
-        if (clientId === 'NEW' || clientId === 'CUSTOM') {
+        if (clientId === 'NEW') {
             setIsClientEditing(true);
-            setFormData((p: any) => ({ ...p, cliente: INITIAL_FORM_DATA.cliente }));
+            setFormData(p => ({ ...p, cliente: INITIAL_FORM_DATA.cliente }));
             return;
         }
-        const client = frequentClients.find(c => c.id === clientId);
-        if (client) {
+        const c = frequentClients.find(client => client.id === clientId);
+        if (c) {
             setIsClientEditing(false);
-            const [prefijoRif, numeroRif] = (client.rifCedula || "V-").split('-');
-            setFormData((prev: any) => ({
-                ...prev,
-                cliente: {
-                    ...prev.cliente,
-                    nombreRazonSocial: client.nombreRazonSocial, 
-                    correo: client.correo || "",
-                    domicilioFiscal: client.domicilioFiscal || "", 
-                    personaContacto: client.personaContacto || "",
-                    prefijoRif: prefijoRif || "V", 
-                    numeroRif: numeroRif || "", 
-                    prefijoTelefono: client.telefono?.substring(0, 4) || "0414", 
-                    numeroTelefono: client.telefono?.substring(4) || "",
-                }
-            }));
+            const [pref, num] = (c.rifCedula || "V-").split('-');
+            setFormData(prev => ({ ...prev, cliente: { ...prev.cliente, nombreRazonSocial: c.nombreRazonSocial, tipoCliente: c.tipoCliente, prefijoRif: pref || "V", numeroRif: num || "", prefijoTelefono: c.telefono?.substring(0, 4) || "0414", numeroTelefono: c.telefono?.substring(4) || "" } }));
         }
     };
 
     const handleSaveClientData = async () => {
-        const { nombreRazonSocial, numeroTelefono, prefijoTelefono, prefijoRif, numeroRif, domicilioFiscal, correo, personaContacto } = formData.cliente;
-        if (!nombreRazonSocial?.trim()) return toast.error("Nombre es obligatorio");
-        
+        const { nombreRazonSocial, tipoCliente, numeroTelefono, prefijoTelefono, prefijoRif, numeroRif } = formData.cliente;
+        if (!nombreRazonSocial) return toast.error("Nombre obligatorio");
         setIsLoading(true);
         try {
-            const payload = {
-                nombreRazonSocial, 
-                telefonoCompleto: numeroTelefono ? `${prefijoTelefono}${numeroTelefono}` : "EXPRESS",
-                rifCedulaCompleto: numeroRif ? `${prefijoRif}-${numeroRif}` : "EXPRESS", 
-                prefijoTelefono, numeroTelefono, prefijoRif, numeroRif,
-                domicilioFiscal, correo, personaContactoCliente: personaContacto
-            };
-            const idToSave = (selectedClientId === 'NEW' || selectedClientId === 'CUSTOM') ? undefined : selectedClientId;
-            const newId = await saveClient(cleanFirebaseObject(payload), idToSave);
-            toast.success("Cliente actualizado");
-            setSelectedClientId(newId);
+            const payload = { nombreRazonSocial, tipoCliente, telefonoCompleto: `${prefijoTelefono}${numeroTelefono}`, rifCedulaCompleto: `${prefijoRif}-${numeroRif}`, prefijoTelefono, numeroTelefono, prefijoRif, numeroRif };
+            const id = await saveClient(payload, selectedClientId === 'NEW' ? undefined : selectedClientId);
+            toast.success("Cliente sincronizado", { icon: <CheckCircle2 className="text-emerald-500" /> });
+            setSelectedClientId(id);
             setIsClientEditing(false);
             const updated = await getFrequentClients();
-            setFrequentClients(updated.map(c => ({ id: c.id, nombreRazonSocial: c.nombreRazonSocial, rifCedula: c.rifCedulaCompleto, telefono: c.telefonoCompleto })));
-        } catch { toast.error("Error al guardar cliente"); } finally { setIsLoading(false); }
+            setFrequentClients(updated.map(c => ({ id: c.id, nombreRazonSocial: c.nombreRazonSocial, tipoCliente: c.tipoCliente, rifCedula: c.rifCedulaCompleto, telefono: c.telefonoCompleto })));
+        } catch { toast.error("Error al sincronizar"); } finally { setIsLoading(false); }
+    };
+
+    const handleDeleteClient = async () => {
+        if (selectedClientId === 'NEW') return;
+        if (!confirm("¿Eliminar este cliente permanentemente?")) return;
+        try {
+            await deleteClient(selectedClientId);
+            toast.success("Cliente eliminado");
+            handleSelectClient('NEW');
+            const updated = await getFrequentClients();
+            setFrequentClients(updated.map(c => ({ id: c.id, nombreRazonSocial: c.nombreRazonSocial, tipoCliente: c.tipoCliente, rifCedula: c.rifCedulaCompleto, telefono: c.telefonoCompleto })));
+        } catch { toast.error("Error al eliminar"); }
     };
 
     const handleChange = useCallback((path: string, value: any) => {
-        setFormData((prev: any) => {
-            const newForm = JSON.parse(JSON.stringify(prev));
+        setFormData(prev => {
+            const next = JSON.parse(JSON.stringify(prev));
             const keys = path.split('.');
-            let current = newForm;
-            for (let i = 0; i < keys.length - 1; i++) current = current[keys[i]];
-            current[keys[keys.length - 1]] = value;
-            return newForm;
+            let curr = next;
+            for (let i = 0; i < keys.length - 1; i++) curr = curr[keys[i]];
+            curr[keys[keys.length - 1]] = value;
+            return next;
         });
     }, []);
 
     const handleSaveOrder = async () => {
-        if (!formData.cliente.nombreRazonSocial) return toast.error("El nombre del cliente es obligatorio");
-        if (formData.items.length === 0) return toast.error("La orden está vacía");
-        
+        if (!formData.cliente.nombreRazonSocial || formData.items.length === 0) return toast.error("Datos incompletos");
         setIsLoading(true);
-        const { prefijoTelefono, numeroTelefono, prefijoRif, numeroRif, ...clienteRest } = formData.cliente;
-        const finalRif = numeroRif.trim() === "" ? "EXPRESS" : `${prefijoRif}-${numeroRif}`;
-        const finalTel = numeroTelefono.trim() === "" ? "EXPRESS" : `${prefijoTelefono}${numeroTelefono}`;
-
-        const finalPayload = {
-            ...formData,
-            ordenNumero: parseInt(formData.ordenNumero, 10),
-            cliente: { ...clienteRest, telefono: finalTel, rifCedula: finalRif },
-            totalUSD: parseFloat(currentTotal.toFixed(2)),
-            userId: currentUserId,
-            updatedAt: new Date().toISOString()
-        };
-
         try {
-            const cleanPayload = cleanFirebaseObject(finalPayload);
-            if (initialData?.id) await onUpdate(initialData.id, cleanPayload);
-            else await onCreate(cleanPayload);
-            toast.success("Orden procesada exitosamente");
+            const { prefijoTelefono, numeroTelefono, prefijoRif, numeroRif, ...clienteRest } = formData.cliente;
+            const finalPayload = { ...formData, totalUSD: parseFloat(currentTotal.toFixed(2)), userId: currentUserId, updatedAt: new Date().toISOString(), cliente: { ...clienteRest, telefono: `${prefijoTelefono}${numeroTelefono}`, rifCedula: `${prefijoRif}-${numeroRif}` } };
+            if (initialData?.id) await onUpdate(initialData.id, finalPayload);
+            else await onCreate(finalPayload);
             onClose();
-        } catch (error) {
-            toast.error("Error al procesar orden");
-        } finally { setIsLoading(false); }
+        } catch { toast.error("Error al procesar"); } finally { setIsLoading(false); }
     };
 
+    if (!formData) return null;
+
     return (
-        <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 overflow-hidden">
-            <header className="h-20 shrink-0 bg-white dark:bg-slate-900 border-b flex items-center justify-between px-8 z-20">
-                <div className="flex items-center gap-4">
-                    <div className="h-10 w-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-                        <ShoppingCart className="w-5 h-5" />
-                    </div>
-                    <div>
-                        <h2 className="text-lg font-black uppercase tracking-tight leading-none">Punto de Venta</h2>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Terminal de Producción</p>
-                    </div>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="relative w-full h-full bg-[#f8fafc] dark:bg-black flex flex-col overflow-hidden rounded-[2rem] border dark:border-white/5 shadow-2xl">
+            {/* HEADER COMPACTO */}
+            <header className="h-14 shrink-0 bg-white dark:bg-slate-900 border-b flex items-center justify-between px-6 z-20">
+                <div className="flex items-center gap-3">
+                    <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><ShoppingCart className="w-4 h-4" /></div>
+                    <h2 className="text-sm font-black dark:text-white uppercase">Terminal de Ventas</h2>
                 </div>
-                <div className="flex items-center gap-6">
-                    <div className="text-right">
-                        <p className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">Orden Nº</p>
-                        <p className="text-xl font-black text-blue-600 tracking-tighter">#{formData.ordenNumero}</p>
-                    </div>
-                    <Button variant="ghost" onClick={onClose} className="rounded-full h-10 w-10 hover:bg-red-50 text-red-500"><X /></Button>
+                <div className="flex items-center gap-4">
+                    <div className="text-right"><p className="text-[8px] font-black text-slate-400 uppercase">Nº Orden</p><p className="text-base font-black text-blue-600">#{formData.ordenNumero}</p></div>
+                    <Button variant="ghost" onClick={onClose} className="rounded-full h-8 w-8 p-0 hover:bg-red-50 text-red-500"><X className="w-4 h-4" /></Button>
                 </div>
             </header>
 
-            <main className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-                {/* IZQUIERDA: LISTA DE ITEMS */}
-                <section className="flex-1 flex flex-col bg-white dark:bg-slate-900/50 border-r">
-                    <div className="p-6 flex justify-between items-center border-b bg-slate-50/50 dark:bg-transparent">
-                        <h3 className="font-black text-xs uppercase text-slate-500 tracking-widest flex items-center gap-2">
-                            <Box className="w-4 h-4" /> Detalle de Producción
-                        </h3>
-                        <Button 
-                            onClick={() => { setEditingItemIndex(null); setIsItemModalOpen(true); }} 
-                            className="rounded-xl bg-blue-600 hover:bg-blue-700 font-bold text-xs h-10 px-6 shadow-md shadow-blue-500/10"
-                        >
-                            <Plus className="w-4 h-4 mr-2" /> AGREGAR ÍTEM
-                        </Button>
+            <main className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
+                {/* IZQUIERDA: LISTA DE PRODUCTOS */}
+                <section className="flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-950 border-r">
+                    <div className="p-3 px-6 flex justify-between items-center border-b bg-slate-50/50">
+                        <h3 className="font-black text-[9px] uppercase text-slate-500 tracking-widest flex items-center gap-2"><Box className="w-3.5 h-3.5" /> Items en Orden</h3>
+                        <Button onClick={() => { setEditingItemIndex(null); setIsItemModalOpen(true); }} className="rounded-lg bg-blue-600 hover:bg-blue-700 font-bold text-[9px] h-7 px-4 shadow-md"><Plus className="w-3 h-3 mr-1" /> AÑADIR</Button>
                     </div>
-
-                    <ScrollArea className="flex-1 p-6">
-                        <div className="space-y-3 max-w-4xl mx-auto pb-10">
-                            {formData.items.length === 0 ? (
-                                <div className="h-64 flex flex-col items-center justify-center border-2 border-dashed rounded-[2.5rem] text-slate-300 border-slate-200">
-                                    <Box className="w-12 h-12 mb-2 opacity-20" />
-                                    <p className="font-black text-[10px] uppercase tracking-widest">Esperando productos...</p>
-                                </div>
-                            ) : (
-                                formData.items.map((item: any, idx: number) => {
-                                    // Cálculo individual para el Badge del ítem
-                                    const x = parseFloat(item.medidaXCm) || 0;
-                                    const y = parseFloat(item.medidaYCm) || 0;
-                                    const p = parseFloat(item.precioUnitario) || 0;
-                                    const c = parseFloat(item.cantidad) || 0;
-                                    const e = item.suministrarMaterial ? (parseFloat(item.costoMaterialExtra) || 0) : 0;
-                                    const sub = item.unidad === 'm2' ? ((x/100)*(y/100)*p + e)*c : (p+e)*c;
-
-                                    return (
-                                        <motion.div key={idx} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="p-4 bg-white dark:bg-slate-900 rounded-[1.5rem] border border-slate-200/60 flex items-center justify-between group hover:border-blue-300 transition-all shadow-sm">
-                                            <div className="flex items-center gap-4">
-                                                <div className="h-12 w-12 bg-slate-50 dark:bg-slate-800 rounded-2xl flex items-center justify-center text-slate-500 shadow-inner">
-                                                    {item.tipoServicio === 'IMPRESION' ? <Printer className="w-5 h-5 text-blue-500" /> : <Scissors className="w-5 h-5 text-orange-500" />}
-                                                </div>
+                    <ScrollArea className="flex-1">
+                        <div className="p-4 space-y-2 pb-10">
+                            <AnimatePresence mode="popLayout">
+                                {formData.items.length === 0 ? (
+                                    <div className="h-32 flex flex-col items-center justify-center border-2 border-dashed rounded-xl text-slate-300"><Sparkles className="w-8 h-8 mb-1 opacity-20" /><p className="text-[9px] font-black uppercase">Sin productos</p></div>
+                                ) : (
+                                    formData.items.map((item: any, idx: number) => (
+                                        <motion.div key={idx} initial={{ opacity: 0, x: -5 }} animate={{ opacity: 1, x: 0 }} className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 flex items-center justify-between group">
+                                            <div className="flex items-center gap-3">
+                                                <div className={cn("h-9 w-9 rounded-lg flex items-center justify-center", item.tipoServicio === 'IMPRESION' ? "bg-blue-50 text-blue-500" : "bg-orange-50 text-orange-500")}>{item.tipoServicio === 'IMPRESION' ? <Printer className="w-4 h-4" /> : <Scissors className="w-4 h-4" />}</div>
                                                 <div>
-                                                    <div className="flex items-center gap-2">
-                                                        <h4 className="font-black text-sm uppercase text-slate-800 dark:text-white">{item.nombre}</h4>
-                                                        {item.empleadoAsignado && item.empleadoAsignado !== "N/A" && (
-                                                            <Badge variant="outline" className="text-[8px] font-black border-blue-200 text-blue-500">{item.empleadoAsignado}</Badge>
-                                                        )}
-                                                    </div>
-                                                    <p className="text-[10px] text-slate-400 font-bold uppercase">
-                                                        {item.cantidad} {item.unidad} 
-                                                        {item.unidad === 'm2' && ` (${item.medidaXCm}x${item.medidaYCm}cm)`}
-                                                        <span className="mx-2">•</span> 
-                                                        ${item.precioUnitario} {item.unidad === 'm2' ? '/m²' : 'c/u'}
-                                                        {item.suministrarMaterial && <span className="text-emerald-500 ml-1">+ Material</span>}
-                                                    </p>
+                                                    <h4 className="font-black text-[11px] uppercase dark:text-white leading-none mb-1">{item.nombre}</h4>
+                                                    <p className="text-[9px] text-slate-400 font-bold uppercase">{item.cantidad} {item.unidad} • {item.unidad === 'm2' ? `${item.medidaXCm}x${item.medidaYCm}cm` : `$${item.precioUnitario}`}</p>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-6">
-                                                <div className="text-right">
-                                                    <p className="text-lg font-black text-blue-600 tracking-tight">
-                                                        ${sub.toFixed(2)}
-                                                    </p>
-                                                </div>
+                                            <div className="flex items-center gap-3">
+                                                <p className="text-sm font-black dark:text-white">${((item.unidad === 'm2' ? (item.medidaXCm/100)*(item.medidaYCm/100) : 1) * item.cantidad * item.precioUnitario).toFixed(2)}</p>
                                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => { setEditingItemIndex(idx); setIsItemModalOpen(true); }}><Pencil className="w-4 h-4" /></Button>
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-red-500" onClick={() => setFormData({...formData, items: formData.items.filter((_:any, i:number)=> i !== idx)})}><Trash2 className="w-4 h-4" /></Button>
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md bg-slate-50" onClick={() => { setEditingItemIndex(idx); setIsItemModalOpen(true); }}><Pencil className="w-3 h-3" /></Button>
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md bg-red-50 text-red-500" onClick={() => handleChange('items', formData.items.filter((_:any, i:number)=> i !== idx))}><Trash2 className="w-3 h-3" /></Button>
                                                 </div>
                                             </div>
                                         </motion.div>
-                                    )
-                                })
-                            )}
+                                    ))
+                                )}
+                            </AnimatePresence>
                         </div>
                     </ScrollArea>
                 </section>
 
-                {/* DERECHA: CLIENTE Y TOTAL */}
-                <aside className="w-full lg:w-[420px] shrink-0 bg-slate-50 dark:bg-slate-900 border-l flex flex-col shadow-2xl z-10">
+                {/* DERECHA: CLIENTE Y DATOS */}
+                <aside className="w-full lg:w-[350px] shrink-0 bg-[#f1f5f9] dark:bg-black border-l dark:border-slate-800 flex flex-col min-h-0">
                     <ScrollArea className="flex-1">
-                        <div className="p-8 space-y-8">
+                        <div className="p-5 space-y-6">
+                            {/* SECCIÓN CLIENTE */}
                             <section className="space-y-4">
                                 <div className="flex justify-between items-center">
-                                    <Label className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-2 tracking-widest"><Users className="w-3.5 h-3.5" /> Datos del Cliente</Label>
+                                    <Label className="text-[9px] font-black uppercase text-slate-400">Datos del Cliente</Label>
                                     <div className="flex gap-1">
-                                        <Button size="sm" variant="ghost" className="h-7 text-[9px] font-black uppercase" onClick={() => setIsClientEditing(!isClientEditing)}>
-                                            {isClientEditing ? 'Bloquear' : 'Editar'}
-                                        </Button>
-                                        {isClientEditing && (
-                                            <Button size="sm" variant="ghost" className="h-7 text-[9px] font-black uppercase text-emerald-500" onClick={handleSaveClientData}>Guardar DB</Button>
-                                        )}
+                                        <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-blue-500" onClick={() => setIsClientEditing(!isClientEditing)}><Pencil className="w-3 h-3"/></Button>
+                                        {selectedClientId !== 'NEW' && <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 hover:text-red-500" onClick={handleDeleteClient}><Trash2 className="w-3 h-3"/></Button>}
                                     </div>
                                 </div>
-
                                 <Select onValueChange={handleSelectClient} value={selectedClientId}>
-                                    <SelectTrigger className="h-12 rounded-xl border-none shadow-sm font-bold bg-white dark:bg-slate-800">
-                                        <SelectValue placeholder="Seleccionar cliente..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="NEW" className="font-black text-blue-600">✨ VENTA RÁPIDA (EXPRESS)</SelectItem>
-                                        {frequentClients.map(c => <SelectItem key={c.id} value={c.id}>{c.nombreRazonSocial}</SelectItem>)}
+                                    <SelectTrigger className="h-10 rounded-lg border-none bg-white dark:bg-slate-900 px-4 text-[11px] font-bold"><SelectValue placeholder="Seleccionar cliente..." /></SelectTrigger>
+                                    <SelectContent className="rounded-xl">
+                                        <SelectItem value="NEW" className="font-bold text-blue-600">✨ Venta Directa (Express)</SelectItem>
+                                        {frequentClients.map(c => (
+                                            <SelectItem key={c.id} value={c.id} className="text-[11px] font-bold">
+                                                <div className="flex justify-between w-full gap-2"><span>{c.nombreRazonSocial}</span>{c.tipoCliente === 'ALIADO' && <Badge className="h-3.5 bg-purple-100 text-purple-600 border-none text-[7px] uppercase">Aliado</Badge>}</div>
+                                            </SelectItem>
+                                        ))}
                                     </SelectContent>
                                 </Select>
 
-                                <div className={cn("space-y-4 transition-all", !isClientEditing && "opacity-50 pointer-events-none")}>
+                                <div className={cn("space-y-3", !isClientEditing && "opacity-60 pointer-events-none")}>
                                     <div className="space-y-1">
-                                        <Label className="text-[9px] font-black uppercase text-slate-400 ml-1">Nombre / Razón Social *</Label>
-                                        <Input value={formData.cliente.nombreRazonSocial} onChange={e => handleChange('cliente.nombreRazonSocial', e.target.value)} className="h-11 rounded-xl border-none shadow-sm font-bold bg-white dark:bg-slate-800" placeholder="Indispensable" />
+                                        <Label className="text-[8px] font-black text-slate-400 ml-1 uppercase">Razón Social / Nombre</Label>
+                                        <Input value={formData.cliente.nombreRazonSocial} onChange={e => handleChange('cliente.nombreRazonSocial', e.target.value)} className="h-9 rounded-lg border-none bg-white dark:bg-slate-900 font-bold text-[11px]" />
                                     </div>
-                                    <div className="grid grid-cols-2 gap-3">
+                                    <div className="grid grid-cols-2 gap-2">
                                         <div className="space-y-1">
-                                            <Label className="text-[9px] font-black uppercase text-slate-400 ml-1">RIF / Cédula</Label>
+                                            <Label className="text-[8px] font-black text-slate-400 ml-1 uppercase">Identificación</Label>
                                             <div className="flex gap-1">
-                                                <Select value={formData.cliente.prefijoRif} onValueChange={v => handleChange('cliente.prefijoRif', v)}>
-                                                    <SelectTrigger className="w-16 h-11 border-none bg-white dark:bg-slate-800 font-bold rounded-xl text-xs"><SelectValue /></SelectTrigger>
-                                                    <SelectContent>{PREFIJOS_RIF.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-                                                </Select>
-                                                <Input value={formData.cliente.numeroRif} onChange={e => handleChange('cliente.numeroRif', e.target.value)} className="h-11 border-none bg-white dark:bg-slate-800 font-bold rounded-xl text-xs" placeholder="Número" />
+                                                <Select value={formData.cliente.prefijoRif} onValueChange={v => handleChange('cliente.prefijoRif', v)}><SelectTrigger className="w-12 h-9 border-none bg-white dark:bg-slate-900 font-bold text-[10px] px-1"><SelectValue /></SelectTrigger><SelectContent>{PREFIJOS_RIF.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select>
+                                                <Input value={formData.cliente.numeroRif} onChange={e => handleChange('cliente.numeroRif', e.target.value)} className="h-9 border-none bg-white dark:bg-slate-900 font-bold text-[10px]" placeholder="000" />
                                             </div>
                                         </div>
+                                        {/* CORRECCIÓN: Teléfono con selector de prefijo */}
                                         <div className="space-y-1">
-                                            <Label className="text-[9px] font-black uppercase text-slate-400 ml-1">Teléfono</Label>
+                                            <Label className="text-[8px] font-black text-slate-400 ml-1 uppercase">Teléfono</Label>
                                             <div className="flex gap-1">
-                                                <Select value={formData.cliente.prefijoTelefono} onValueChange={v => handleChange('cliente.prefijoTelefono', v)}>
-                                                    <SelectTrigger className="w-18 h-11 border-none bg-white dark:bg-slate-800 font-bold rounded-xl text-[10px]"><SelectValue /></SelectTrigger>
-                                                    <SelectContent>{PREFIJOS_TELEFONO.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                                                <Select 
+                                                    value={formData.cliente.prefijoTelefono} 
+                                                    onValueChange={v => handleChange('cliente.prefijoTelefono', v)}
+                                                >
+                                                    <SelectTrigger className="w-14 h-9 border-none bg-white dark:bg-slate-900 font-bold text-[10px] px-1">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent className="min-w-[5rem]">
+                                                        {PREFIJOS_TELEFONO.map(p => (
+                                                            <SelectItem key={p} value={p} className="text-[10px] font-bold">{p}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
                                                 </Select>
-                                                <Input value={formData.cliente.numeroTelefono} onChange={e => handleChange('cliente.numeroTelefono', e.target.value)} className="h-11 border-none bg-white dark:bg-slate-800 font-bold rounded-xl text-xs" placeholder="7 dígitos" />
+                                                <Input 
+                                                    value={formData.cliente.numeroTelefono} 
+                                                    onChange={e => handleChange('cliente.numeroTelefono', e.target.value.replace(/\D/g, ''))} 
+                                                    className="h-9 border-none bg-white dark:bg-slate-900 font-bold text-[10px] flex-1" 
+                                                    placeholder="7 dígitos" 
+                                                />
                                             </div>
                                         </div>
                                     </div>
+                                    <div className="flex items-center gap-2">
+                                        <Label className="text-[8px] font-black text-slate-400 uppercase">Estatus:</Label>
+                                        <Tabs value={formData.cliente.tipoCliente} onValueChange={v => handleChange('cliente.tipoCliente', v)} className="flex-1">
+                                            <TabsList className="h-7 w-full p-0.5 bg-slate-200">
+                                                <TabsTrigger value="REGULAR" className="text-[8px] font-black px-4 flex-1">REGULAR</TabsTrigger>
+                                                <TabsTrigger value="ALIADO" className="text-[8px] font-black px-4 flex-1 data-[state=active]:bg-purple-600 data-[state=active]:text-white">ALIADO</TabsTrigger>
+                                            </TabsList>
+                                        </Tabs>
+                                    </div>
+                                    <Button onClick={handleSaveClientData} className="w-full h-8 text-[8px] font-black uppercase text-blue-600 bg-white hover:bg-blue-50 border border-blue-50 rounded-lg gap-1.5"><Save className="w-3 h-3"/> Actualizar perfil en DB</Button>
                                 </div>
                             </section>
 
-                            <div className="space-y-4">
-                                <Label className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-2 tracking-widest"><Calendar className="w-3.5 h-3.5" /> Planificación</Label>
-                                <Input type="date" value={formData.fechaEntrega} onChange={e => handleChange('fechaEntrega', e.target.value)} className="h-12 rounded-xl border-none shadow-sm font-black text-orange-600 bg-orange-50 dark:bg-orange-950/30 text-center" />
-                            </div>
-
-                            <div className="space-y-4">
-                                <Label className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-2 tracking-widest"><Palette className="w-3.5 h-3.5" /> Instrucciones Especiales</Label>
-                                <Textarea value={formData.descripcionDetallada} onChange={e => handleChange('descripcionDetallada', e.target.value)} className="rounded-2xl border-none shadow-sm bg-white dark:bg-slate-800 resize-none h-24 text-xs font-bold p-4" placeholder="Detalles de diseño, acabados..." />
-                            </div>
+                            {/* PLANIFICACIÓN */}
+                            <section className="space-y-4">
+                                <div className="space-y-1">
+                                    <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2"><Calendar className="w-3.5 h-3.5 text-orange-400" /> Entrega Prometida</Label>
+                                    <Input type="date" value={formData.fechaEntrega} onChange={e => handleChange('fechaEntrega', e.target.value)} className="h-9 rounded-lg border-none font-black text-orange-600 bg-orange-50/50 text-center text-xs" />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2"><Palette className="w-3.5 h-3.5 text-blue-400" /> Instrucciones</Label>
+                                    <Textarea value={formData.descripcionDetallada} onChange={e => handleChange('descripcionDetallada', e.target.value)} className="rounded-lg border-none shadow-sm bg-white dark:bg-slate-900 resize-none h-20 text-[10px] font-bold p-3" placeholder="..." />
+                                </div>
+                            </section>
                         </div>
                     </ScrollArea>
 
-                    <div className="p-8 bg-white dark:bg-slate-900 border-t space-y-4 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
-                        <div className="flex justify-between items-center px-2">
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Total Orden</span>
-                            <span className="text-3xl font-black text-blue-600 tracking-tighter">${currentTotal.toFixed(2)}</span>
+                    {/* FOOTER TOTAL - SIEMPRE VISIBLE */}
+                    <div className="p-4 bg-white dark:bg-slate-900 border-t dark:border-slate-800 space-y-3 shrink-0">
+                        <div className="flex justify-between items-center px-1">
+                            <div><p className="text-[8px] font-black text-slate-400 uppercase leading-none mb-1">Subtotal Neto</p>{formData.cliente.tipoCliente === 'ALIADO' && <Badge className="bg-purple-600 text-[6px] h-3.5 px-1.5 font-black text-white uppercase">Tarifa Aliado</Badge>}</div>
+                            <p className="text-2xl font-black tracking-tighter dark:text-white leading-none">${currentTotal.toFixed(2)}</p>
                         </div>
-                        <Button 
-                            disabled={isLoading} 
-                            onClick={handleSaveOrder} 
-                            className="w-full h-16 rounded-[1.8rem] bg-emerald-600 hover:bg-emerald-700 text-white font-black text-lg shadow-xl shadow-emerald-500/20 active:scale-95 transition-all"
-                        >
-                            {isLoading ? <Loader2 className="animate-spin" /> : 'CONFIRMAR Y GUARDAR'}
-                        </Button>
+                        <Button disabled={isLoading} onClick={handleSaveOrder} className={cn("w-full h-11 rounded-xl text-white font-black text-[11px] shadow-lg transition-all", formData.cliente.tipoCliente === 'ALIADO' ? "bg-purple-600 hover:bg-purple-700" : "bg-slate-900 dark:bg-blue-600")}>{isLoading ? <Loader2 className="animate-spin" /> : <span className="flex items-center gap-2 uppercase tracking-widest">Confirmar Orden <ChevronRight className="w-4 h-4" /></span>}</Button>
                     </div>
                 </aside>
             </main>
 
             <ItemFormModal
-                isOpen={isItemModalOpen}
-                onClose={() => { setIsItemModalOpen(false); setEditingItemIndex(null); }}
-                onAddItem={handleSaveItem}
+                isOpen={isItemModalOpen} onClose={() => { setIsItemModalOpen(false); setEditingItemIndex(null); }}
+                onAddItem={(item: any) => { const next = [...formData.items]; if (editingItemIndex !== null) next[editingItemIndex] = item; else next.push(item); handleChange('items', next); setIsItemModalOpen(false); }}
                 itemToEdit={editingItemIndex !== null ? formData.items[editingItemIndex] : undefined}
-                designers={designersList}
-                customColors={customColors}
+                tipoCliente={formData.cliente.tipoCliente} designers={designersList} customColors={customColors}
                 onRegisterColor={(newColor: any) => saveNewColor(newColor)}
             />
-        </div>
-    )
-}
+        </motion.div>
+    );
+};

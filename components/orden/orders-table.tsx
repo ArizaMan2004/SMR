@@ -9,12 +9,17 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { 
+    AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
+    AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger 
+} from "@/components/ui/alert-dialog"
 import { formatCurrency, formatDate } from "@/lib/utils/order-utils"
 import { generateOrderPDF } from "@/lib/services/pdf-generator"
+import { toast } from "sonner"
 import { 
     Trash2, Eye, Pencil, ChevronLeft, ChevronRight, 
-    ChevronDown, DollarSign, CheckCircle2, Wallet, Landmark,
-    History, X, Clock, Download
+    ChevronDown, CheckCircle2, Wallet, Landmark,
+    History, X, Clock, Download, RefreshCw, Loader2, Sparkles
 } from "lucide-react"
 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
@@ -32,6 +37,7 @@ interface OrdersTableProps {
   pdfLogoBase64?: string
   firmaBase64?: string
   selloBase64?: string
+  onSyncStatus?: () => Promise<{ success: boolean; message: string }>;
 }
 
 function PaymentStatusBadge({ total, abonado }: { total: number, abonado: number }) {
@@ -44,7 +50,7 @@ function PaymentStatusBadge({ total, abonado }: { total: number, abonado: number
 
 export function OrdersTable({ 
     ordenes, onDelete, onEdit, onRegisterPayment, 
-    currentUserId, bcvRate, pdfLogoBase64, firmaBase64, selloBase64 
+    currentUserId, bcvRate, pdfLogoBase64, firmaBase64, selloBase64, onSyncStatus 
 }: OrdersTableProps) {
   
   const [selectedOrden, setSelectedOrden] = useState<OrdenServicio | null>(null)
@@ -53,6 +59,7 @@ export function OrdersTable({
   const [ordenForPayment, setOrdenForPayment] = useState<OrdenServicio | null>(null)
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
   const [orderForHistory, setOrderForHistory] = useState<OrdenServicio | null>(null)
+  const [isSyncing, setIsSyncing] = useState(false)
 
   const [showUnpaid, setShowUnpaid] = useState(true)
   const [showPaid, setShowPaid] = useState(false)
@@ -74,8 +81,62 @@ export function OrdersTable({
     await generateOrderPDF(o, pdfLogoBase64, { bcvRate, firmaBase64, selloBase64 });
   };
 
+  const handleSync = async () => {
+    if (!onSyncStatus) return toast.error("Función de sincronización no configurada");
+    setIsSyncing(true);
+    try {
+        const result = await onSyncStatus();
+        if (result.success) toast.success(result.message, { icon: <Sparkles className="text-blue-500" /> });
+    } catch (error) {
+        toast.error("Error al sincronizar estatus");
+    } finally {
+        setIsSyncing(false);
+    }
+  };
+
   return (
     <div className="space-y-10 pb-24">
+      {/* BOTÓN DE ACCIÓN MINIMALISTA */}
+      <div className="flex justify-end px-6 -mb-6">
+          <AlertDialog>
+              <AlertDialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    disabled={isSyncing}
+                    className={cn(
+                        "h-8 px-3 rounded-xl font-bold text-[9px] uppercase tracking-tight transition-all gap-2",
+                        "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-white/5",
+                        isSyncing && "opacity-50"
+                    )}
+                  >
+                    {isSyncing ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                        <RefreshCw className="w-3 h-3 opacity-50" />
+                    )}
+                    {isSyncing ? "Sincronizando..." : "Sincronizar Estatus"}
+                  </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent className="rounded-[2rem] max-w-[400px]">
+                  <AlertDialogHeader>
+                      <AlertDialogTitle className="text-lg font-black uppercase tracking-tight">Mantenimiento de Datos</AlertDialogTitle>
+                      <AlertDialogDescription className="text-xs font-medium text-slate-500">
+                          Esta acción actualizará el estatus de Aliado/Regular en todas las órdenes según tu base de datos de clientes actual.
+                      </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter className="gap-2">
+                      <AlertDialogCancel className="rounded-xl font-bold uppercase text-[9px] h-9">Cancelar</AlertDialogCancel>
+                      <AlertDialogAction 
+                        onClick={handleSync} 
+                        className="bg-slate-900 dark:bg-blue-600 hover:bg-black rounded-xl font-black uppercase text-[9px] h-9"
+                      >
+                        Confirmar
+                      </AlertDialogAction>
+                  </AlertDialogFooter>
+              </AlertDialogContent>
+          </AlertDialog>
+      </div>
+
       {/* SECCIÓN 1: CUENTAS POR COBRAR */}
       <section className="space-y-4 px-2 sm:px-4">
         <button onClick={() => setShowUnpaid(!showUnpaid)} className="group flex items-center justify-between w-full p-4 bg-white dark:bg-zinc-900 rounded-[2rem] border border-black/5 dark:border-white/10 shadow-sm transition-all outline-none">
@@ -159,8 +220,15 @@ function OrdersSubTable({ data, actions }: any) {
                             <TableRow key={o.id} className="group border-b border-slate-50 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
                                 <TableCell className="py-5 px-8 text-xl font-black tracking-tighter text-slate-900 dark:text-white">#{o.ordenNumero}</TableCell>
                                 <TableCell className="py-5">
-                                    <div className="flex flex-col">
-                                        <span className="font-bold text-slate-800 dark:text-slate-200 text-sm truncate max-w-[220px] leading-tight uppercase italic">{o.cliente?.nombreRazonSocial || "Cliente S/N"}</span>
+                                    <div className="flex flex-col gap-1.5">
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm truncate max-w-[200px] leading-tight uppercase italic">{o.cliente?.nombreRazonSocial || "Cliente S/N"}</span>
+                                            {o.cliente?.tipoCliente === 'ALIADO' ? (
+                                                <Badge className="bg-purple-100 text-purple-600 dark:bg-purple-500/20 dark:text-purple-400 border-none text-[7px] font-black uppercase px-2 h-4">Aliado</Badge>
+                                            ) : (
+                                                <Badge className="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border-none text-[7px] font-black uppercase px-2 h-4">Regular</Badge>
+                                            )}
+                                        </div>
                                         <span className="text-[10px] text-slate-400 dark:text-slate-600 font-mono tracking-tighter">{o.cliente?.rifCedula || "S/R"}</span>
                                     </div>
                                 </TableCell>
@@ -191,7 +259,19 @@ function OrdersSubTable({ data, actions }: any) {
                 </Table>
             </div>
             {/* PAGINACIÓN */}
-            {totalPages > 1 && (<div className="p-4 bg-slate-50/50 dark:bg-zinc-800/30 border-t dark:border-white/5 flex justify-between items-center"><span className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest px-4">Página {page} de {totalPages}</span><div className="flex gap-2 px-4"><Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} className="h-9 w-9 p-0 rounded-xl dark:border-white/10 dark:text-slate-400"><ChevronLeft className="w-4 h-4"/></Button><Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages} className="h-9 w-9 p-0 rounded-xl dark:border-white/10 dark:text-slate-400"><ChevronRight className="w-4 h-4"/></Button></div></div>)}
+            {totalPages > 1 && (
+                <div className="p-4 bg-slate-50/50 dark:bg-zinc-800/30 border-t dark:border-white/5 flex justify-between items-center">
+                    <span className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest px-4">Página {page} de {totalPages}</span>
+                    <div className="flex gap-2 px-4">
+                        <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} className="h-9 w-9 p-0 rounded-xl dark:border-white/10 dark:text-slate-400">
+                            <ChevronLeft className="w-4 h-4"/>
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages} className="h-9 w-9 p-0 rounded-xl dark:border-white/10 dark:text-slate-400">
+                            <ChevronRight className="w-4 h-4"/>
+                        </Button>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

@@ -27,7 +27,6 @@ import { ClientsAndPaymentsView } from "@/components/dashboard/ClientsAndPayment
 import { NotificationCenter, type Notification } from "@/components/dashboard/NotificationCenter"
 import { OrderFormWizardV2 } from "@/components/orden/order-form-wizard"
 import { DesignerPayrollView } from "@/components/dashboard/DesignerPayrollView" 
-// CORRECCIÓN: Se eliminó AccountsPayableView
 import TasksView from "@/components/dashboard/tasks-view"
 import BudgetEntryView from "@/components/dashboard/BudgetEntryView" 
 import CalculatorView from "@/components/dashboard/CalculatorView" 
@@ -53,6 +52,10 @@ import {
 import { type OrdenServicio } from "@/lib/types/orden"
 import { subscribeToOrdenes, deleteOrden, updateOrdenStatus, createOrden, actualizarOrden } from "@/lib/services/ordenes-service"
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
+// CORRECCIÓN: Importar servicio de clientes y mantenimiento
+import { subscribeToClients } from "@/lib/services/clientes-service"
+import { syncAllOrdersClientStatus } from "@/lib/services/maintenance-service"
+
 import { 
     createGasto, 
     subscribeToGastos, 
@@ -117,8 +120,10 @@ export default function Dashboard() {
     const [gastosFijos, setGastosFijos] = useState<GastoFijo[]>([])
     const [empleados, setEmpleados] = useState<Empleado[]>([])
     const [pagos, setPagos] = useState<PagoEmpleado[]>([]) 
+    // CORRECCIÓN: Estado de clientes
+    const [clientes, setClientes] = useState<any[]>([])
 
-    // --- 3. NAV ITEMS (AJUSTADO) ---
+    // --- 3. NAV ITEMS ---
     const navItems = useMemo(() => [
         { id: 'orders', label: 'Facturación', icon: <LayoutDashboard className="w-4 h-4" /> }, 
         { 
@@ -140,8 +145,8 @@ export default function Dashboard() {
             icon: <Building2 className="w-4 h-4" />,
             children: [
                 { id: 'financial_stats', label: 'Balance y Estadísticas' },
-                { id: 'clients', label: 'Cobranza' }, // Movido desde Cuentas
-                { id: 'design_production', label: 'Pago Diseños' }, // Renombrado y movido aquí
+                { id: 'clients', label: 'Cobranza' },
+                { id: 'design_production', label: 'Pago Diseños' },
                 { id: 'fixed_expenses', label: 'Gastos Fijos' },
                 { id: 'insumos_mgmt', label: 'Insumos y Materiales' },
                 { id: 'employees_mgmt', label: 'Gestión de Personal' },
@@ -280,6 +285,8 @@ export default function Dashboard() {
         const unsubGastosFijos = subscribeToGastosFijos(currentUserId, (data) => setGastosFijos(data));
         const unsubEmpleados = subscribeToEmpleados(currentUserId, (data) => setEmpleados(data));
         const unsubPagos = subscribeToPagos(currentUserId, (data) => setPagos(data)); 
+        // CORRECCIÓN: Activar suscripción a clientes
+        const unsubClientes = subscribeToClients((data) => setClientes(data));
         
         const unsubNotis = subscribeToNotifications(currentUserId, (data) => {
             setSystemEvents(data.filter(n => n.category !== 'expense'));
@@ -288,7 +295,8 @@ export default function Dashboard() {
 
         return () => { 
             unsubOrdenes(); unsubDesigners(); unsubGastos(); 
-            unsubGastosFijos(); unsubEmpleados(); unsubPagos(); unsubNotis();
+            unsubGastosFijos(); unsubEmpleados(); unsubPagos(); 
+            unsubNotis(); unsubClientes();
         };
     }, [currentUserId]);
 
@@ -435,20 +443,19 @@ export default function Dashboard() {
                             <Button onClick={() => { setEditingOrder(null); setIsWizardOpen(true); }} className="px-8 py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-[1.8rem] font-bold text-sm gap-3 shrink-0"><Plus /> NUEVA ORDEN</Button>
                         </div>
                         <div className="bg-white dark:bg-[#1c1c1e] rounded-[2rem] border border-black/5 shadow-2xl overflow-hidden">
-                            
-
-<OrdersTable 
-    ordenes={filteredOrdenes} 
-    onDelete={deleteOrden} 
-    onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}} 
-    onRegisterPayment={handleRegisterOrderPayment}
-    currentUserId={currentUserId || ""}
-    bcvRate={currentBcvRate} 
-    // NUEVOS CAMPOS REQUERIDOS:
-    pdfLogoBase64={assets.logo}
-    firmaBase64={assets.firma}
-    selloBase64={assets.sello}
-/>
+                            <OrdersTable 
+                                ordenes={filteredOrdenes} 
+                                onDelete={deleteOrden} 
+                                onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}} 
+                                onRegisterPayment={handleRegisterOrderPayment}
+                                currentUserId={currentUserId || ""}
+                                bcvRate={currentBcvRate} 
+                                pdfLogoBase64={assets.logo}
+                                firmaBase64={assets.firma}
+                                selloBase64={assets.sello}
+                                // CORRECCIÓN: Pasar función de sincronización
+                                onSyncStatus={syncAllOrdersClientStatus}
+                            />
                         </div>
                     </div>
                 )}
@@ -491,10 +498,17 @@ export default function Dashboard() {
                         gastosFijos={gastosFijos} 
                         empleados={empleados} 
                         pagosEmpleados={pagos} 
+                        // CORRECCIÓN: Incluir la fecha en el mapeo para granularidad diaria
                         cobranzas={ordenes.map(o => ({
-                            id: o.id, montoUSD: (o as any).totalUSD || 0, montoBs: (o as any).totalBs || 0,
-                            estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente'
+                            id: o.id, 
+                            montoUSD: (o as any).totalUSD || 0, 
+                            montoBs: (o as any).totalBs || 0,
+                            estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente',
+                            fecha: o.fecha // <--- IMPORTANTE PARA LA GRÁFICA
                         })) as any}
+                        // CORRECCIÓN: Pasar arrays de ordenes y clientes para el conteo de aliados
+                        ordenes={ordenes}
+                        clientes={clientes}
                     />
                 )}
 
@@ -504,7 +518,7 @@ export default function Dashboard() {
                         handleLogoUpload={(e: any) => handleFileUpload(e, 'logo')} handleClearLogo={() => handleClearAsset('logo')}
                         firmaBase64={assets.firma} handleFirmaUpload={(e: any) => handleFileUpload(e, 'firma')} handleClearFirma={() => handleClearAsset('firma')}
                         selloBase64={assets.sello} handleSelloUpload={(e: any) => handleFileUpload(e, 'sello')} handleClearSello={() => handleClearAsset('sello')}
-                        currentUserId={currentUserId} // CORRECCIÓN: Se añade el ID de usuario
+                        currentUserId={currentUserId}
                     />
                 )}
                 {activeView.startsWith("tasks_") && <TasksView ordenes={ordenes} currentUserId={currentUserId || ""} areaPriorizada={activeView.replace("tasks_", "")} />}
@@ -518,37 +532,32 @@ export default function Dashboard() {
                     />
                 )}
                 {activeView === "old_calculator" && <CalculatorView />}
-                {/* --- VISTA DE NOTIFICACIONES COMPLETA --- */}
-{activeView === "notifications_full" && (
-    <div className="max-w-4xl mx-auto space-y-6">
-        <div className="flex items-center justify-between mb-8">
-            <div>
-                <h2 className="text-3xl font-extrabold tracking-tight">Centro de Actividades</h2>
-                <p className="text-muted-foreground">Historial completo de eventos y notificaciones del sistema</p>
-            </div>
-            <Button 
-                variant="outline" 
-                onClick={() => setActiveView("orders")}
-                className="rounded-2xl gap-2"
-            >
-                <ChevronLeft className="w-4 h-4" /> Volver al Panel
-            </Button>
-        </div>
 
-        <div className="flex flex-col gap-4">
-            {allNotifications.length > 0 ? (
-                allNotifications.map((noti) => (
-                    <ActivityRow key={noti.id} n={noti} />
-                ))
-            ) : (
-                <div className="text-center py-20 bg-white/50 dark:bg-white/5 rounded-[2.5rem] border border-dashed border-black/10">
-                    <Bell className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                    <p className="text-muted-foreground font-medium">No hay notificaciones para mostrar</p>
-                </div>
-            )}
-        </div>
-    </div>
-)}
+                {activeView === "notifications_full" && (
+                    <div className="max-w-4xl mx-auto space-y-6">
+                        <div className="flex items-center justify-between mb-8">
+                            <div>
+                                <h2 className="text-3xl font-extrabold tracking-tight">Centro de Actividades</h2>
+                                <p className="text-muted-foreground">Historial completo de eventos y notificaciones del sistema</p>
+                            </div>
+                            <Button variant="outline" onClick={() => setActiveView("orders")} className="rounded-2xl gap-2">
+                                <ChevronLeft className="w-4 h-4" /> Volver al Panel
+                            </Button>
+                        </div>
+                        <div className="flex flex-col gap-4">
+                            {allNotifications.length > 0 ? (
+                                allNotifications.map((noti) => (
+                                    <ActivityRow key={noti.id} n={noti} />
+                                ))
+                            ) : (
+                                <div className="text-center py-20 bg-white/50 dark:bg-white/5 rounded-[2.5rem] border border-dashed border-black/10">
+                                    <Bell className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                                    <p className="text-muted-foreground font-medium">No hay notificaciones para mostrar</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
 
               </motion.div>
             </AnimatePresence>
@@ -567,7 +576,7 @@ export default function Dashboard() {
     )
 }
 
-// Subcomponentes auxiliares
+// Subcomponentes auxiliares (Se mantienen iguales)
 function TasaHeaderBadge({ label, value, icon, color, onClick }: any) {
     const colors: any = { emerald: "bg-emerald-500/10 text-emerald-600", orange: "bg-orange-500/10 text-orange-600", blue: "bg-blue-500/10 text-blue-600" }
     return (

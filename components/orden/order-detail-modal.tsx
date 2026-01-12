@@ -13,7 +13,7 @@ import { type OrdenServicio, type ItemOrden } from "@/lib/types/orden";
 import { 
     X, User, Calendar, FileText, MapPin, Phone, 
     Mail, Box, Layers, Hammer, Receipt, ArrowRight, 
-    Timer, Scissors, Printer, FileCode, FileImage 
+    Timer, Scissors, Printer, Star, ShieldCheck 
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,14 +24,13 @@ interface OrderDetailModalProps {
   bcvRate: number;
 }
 
-// --- UTILIDADES DE CÁLCULO DE SEGURIDAD ---
+// --- UTILIDADES DE CÁLCULO ---
 const getItemSubtotal = (item: ItemOrden) => {
   const qty = parseFloat(item.cantidad.toString()) || 0;
   const price = parseFloat(item.precioUnitario.toString()) || 0;
   const x = parseFloat((item as any).medidaXCm) || 0;
   const y = parseFloat((item as any).medidaYCm) || 0;
 
-  // Cálculo según unidad: m2 requiere área, el resto usa precio directo
   if (item.unidad === "m2" && x > 0 && y > 0) {
     return (x / 100) * (y / 100) * price * qty;
   }
@@ -41,7 +40,9 @@ const getItemSubtotal = (item: ItemOrden) => {
 export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailModalProps) {
   if (!orden) return null;
 
-  // RECALCULO DE TOTALES: Si la orden llega con total $0, sumamos los ítems en tiempo real
+  // Lógica de detección de Aliado
+  const isAliado = orden.cliente?.tipoCliente === "ALIADO";
+
   const totalBaseUSD = orden.totalUSD > 0 
     ? orden.totalUSD 
     : orden.items.reduce((acc, item) => acc + getItemSubtotal(item), 0);
@@ -54,43 +55,66 @@ export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailM
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-[95vw] md:max-w-6xl h-[92vh] p-0 border-none bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-2xl overflow-hidden rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl flex flex-col">
         
-        {/* --- HEADER --- */}
-        <header className="shrink-0 relative p-6 md:p-10 bg-white/50 dark:bg-slate-900/50 border-b border-slate-200/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 z-10">
+        {/* --- HEADER DINÁMICO --- */}
+        <header className={cn(
+            "shrink-0 relative p-6 md:p-10 border-b border-slate-200/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 z-10",
+            isAliado ? "bg-purple-50/50 dark:bg-purple-900/10" : "bg-white/50 dark:bg-slate-900/50"
+        )}>
             <div className="flex items-center gap-5">
-                <div className="h-14 w-14 md:h-16 md:w-16 bg-blue-600 rounded-[1.2rem] md:rounded-[1.5rem] flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
-                    <Receipt className="w-7 h-7 md:w-8 md:h-8" />
+                <div className={cn(
+                    "h-14 w-14 md:h-16 md:w-16 rounded-[1.2rem] md:rounded-[1.5rem] flex items-center justify-center text-white shadow-lg",
+                    isAliado ? "bg-purple-600 shadow-purple-500/30" : "bg-blue-600 shadow-blue-500/30"
+                )}>
+                    {isAliado ? <Star className="w-7 h-7 md:w-8 md:h-8 fill-current" /> : <Receipt className="w-7 h-7 md:w-8 md:h-8" />}
                 </div>
                 <div>
                     <div className="flex items-center gap-3">
-                        <DialogTitle className="text-xl md:text-3xl font-black tracking-tighter text-slate-900 dark:text-white uppercase">
+                        <DialogTitle className="text-xl md:text-3xl font-black tracking-tighter text-slate-900 dark:text-white uppercase leading-none">
                             Orden #{orden.ordenNumero}
                         </DialogTitle>
+                        
+                        {isAliado && (
+                            <Badge className="bg-purple-600 text-white animate-pulse rounded-full px-3 py-1 text-[9px] md:text-[10px] font-black uppercase tracking-widest border-none">
+                                Aliado 🤝
+                            </Badge>
+                        )}
+
                         <Badge className={cn(
                             "rounded-full px-3 py-1 text-[9px] md:text-[10px] font-black uppercase tracking-widest border-none",
-                            orden.estado === 'TERMINADO' ? "bg-emerald-500 text-white" : "bg-orange-500 text-white"
+                            orden.estado === 'TERMINADO' ? "bg-emerald-500 text-white" : "bg-orange-50 text-white"
                         )}>
                             {orden.estado}
                         </Badge>
                     </div>
-                    <p className="text-slate-500 font-bold text-xs md:text-sm uppercase tracking-wide">{formatDate(orden.fecha)}</p>
+                    <p className="text-slate-500 font-bold text-xs md:text-sm uppercase tracking-wide mt-1">{formatDate(orden.fecha)}</p>
                 </div>
             </div>
 
-            <Button variant="outline" size="icon" onClick={onClose} className="rounded-full h-10 w-10 md:h-12 md:w-12 border-slate-200 bg-white shadow-sm hover:bg-slate-50 transition-colors">
+            <Button variant="outline" size="icon" onClick={onClose} className="rounded-full h-10 w-10 md:h-12 md:w-12 border-slate-200 bg-white shadow-sm hover:bg-slate-50">
                 <X className="h-5 w-5" />
             </Button>
         </header>
 
-        {/* --- ÁREA DE CONTENIDO --- */}
+        {/* --- CONTENIDO --- */}
         <div className="flex-1 min-h-0 relative"> 
             <ScrollArea className="h-full">
                 <div className="px-6 md:px-10 py-8 max-w-5xl mx-auto space-y-8 pb-24">
                     
-                    {/* SECCIÓN CLIENTE Y ENTREGA */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <SectionCard title="Cliente" icon={<User className="text-blue-500 w-4 h-4"/>} className="md:col-span-2">
+                        <SectionCard title="Cliente" icon={<User className={isAliado ? "text-purple-500 w-4 h-4" : "text-blue-500 w-4 h-4"}/>} className="md:col-span-2">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-6 gap-x-8">
                                 <InfoField label="Razón Social" value={orden.cliente.nombreRazonSocial} primary className="sm:col-span-2" />
+                                <div className="flex flex-col gap-1.5">
+                                    <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-1.5">
+                                        <ShieldCheck className="w-3 h-3" /> Estatus de Cuenta
+                                    </p>
+                                    <Badge variant="outline" className={cn(
+                                        "w-fit font-black text-[10px] uppercase px-2",
+                                        isAliado ? "border-purple-200 text-purple-600 bg-purple-50" : "border-blue-200 text-blue-600 bg-blue-50"
+                                    )}>
+                                        {isAliado ? "Tarifa Aliado Aplicada" : "Cliente Regular"}
+                                    </Badge>
+                                </div>
                                 <InfoField label="RIF / CI" value={orden.cliente.rifCedula} icon={FileText} />
                                 <InfoField label="Teléfono" value={orden.cliente.telefono} icon={Phone} />
                                 <InfoField label="Correo" value={orden.cliente.correo} icon={Mail} />
@@ -107,7 +131,6 @@ export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailM
                                 <div className="space-y-3">
                                     <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Servicios</p>
                                     <div className="flex flex-wrap gap-2">
-                                        {/* SOLUCIÓN: Fallback con objeto vacío para evitar error de undefined */}
                                         {Object.entries(orden.serviciosSolicitados || {}).filter(([,v])=>v).map(([k]) => (
                                             <Badge key={k} variant="secondary" className="rounded-xl bg-white border-slate-200 font-bold text-[9px] py-1 px-3 uppercase">
                                                 {k.replace(/([A-Z])/g, ' $1').trim()}
@@ -119,13 +142,11 @@ export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailM
                         </SectionCard>
                     </div>
 
-                    {/* SECCIÓN DETALLE DE PRODUCCIÓN */}
                     <div className="space-y-4">
                         <div className="flex items-center gap-2 px-2">
                             <Layers className="w-5 h-5 text-slate-400" />
                             <h3 className="font-black text-lg tracking-tighter uppercase text-slate-800 dark:text-slate-200">Detalle de Producción</h3>
                         </div>
-
                         <div className="space-y-3">
                             {orden.items.map((item, idx) => (
                                 <ItemRow key={idx} item={item} />
@@ -133,36 +154,38 @@ export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailM
                         </div>
                     </div>
 
-                    {/* SECCIÓN FINANCIERA */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch pt-4">
                         <div className="p-8 bg-slate-200/30 dark:bg-slate-900/30 rounded-[2.5rem] border border-dashed border-slate-300">
                             <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Notas de Producción</h4>
                             <p className="text-slate-600 dark:text-slate-400 text-sm italic whitespace-pre-line leading-relaxed">
-                                {orden.descripcionDetallada || "No hay instrucciones adicionales para esta orden."}
+                                {orden.descripcionDetallada || "Sin instrucciones adicionales."}
                             </p>
                         </div>
 
-                        <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 shadow-xl border border-slate-200/50 flex flex-col justify-between space-y-6">
+                        <div className={cn(
+                            "rounded-[2.5rem] p-8 shadow-xl border flex flex-col justify-between space-y-6 transition-all",
+                            isAliado ? "bg-purple-600 text-white border-purple-500" : "bg-white dark:bg-slate-900 border-slate-200/50"
+                        )}>
                             <div className="space-y-4">
-                                <div className="flex justify-between text-slate-500 font-bold uppercase text-[10px] tracking-widest">
+                                <div className={cn("flex justify-between font-bold uppercase text-[10px] tracking-widest", isAliado ? "text-purple-100" : "text-slate-500")}>
                                     <span>Subtotal Base</span>
                                     <span>{formatCurrency(totalBaseUSD)} USD</span>
                                 </div>
-                                <div className="flex justify-between text-emerald-500 font-bold uppercase text-[10px] tracking-widest">
+                                <div className={cn("flex justify-between font-bold uppercase text-[10px] tracking-widest", isAliado ? "text-white" : "text-emerald-500")}>
                                     <span>Total Abonado</span>
                                     <span>- {formatCurrency(montoPagadoUSD)} USD</span>
                                 </div>
-                                <Separator className="opacity-50" />
+                                <Separator className={cn("opacity-50", isAliado ? "bg-white" : "bg-slate-200")} />
                                 <div className="flex justify-between items-end">
                                     <div>
-                                        <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Restante</p>
-                                        <p className="text-xs font-bold text-slate-400 mt-1">Ref. BCV: {formatCurrency(bcvRate)}</p>
+                                        <p className={cn("text-[10px] font-black uppercase tracking-widest", isAliado ? "text-purple-100" : "text-slate-400")}>Restante</p>
+                                        <p className={cn("text-xs font-bold mt-1", isAliado ? "text-purple-200" : "text-slate-400")}>Ref. BCV: {formatCurrency(bcvRate)}</p>
                                     </div>
                                     <div className="text-right">
-                                        <p className={cn("text-4xl md:text-5xl font-black tracking-tighter leading-none", isPagado ? "text-emerald-500" : "text-red-500")}>
+                                        <p className={cn("text-4xl md:text-5xl font-black tracking-tighter leading-none", isPagado ? "text-emerald-400" : isAliado ? "text-white" : "text-red-500")}>
                                             {formatCurrency(montoPendiente)}
                                         </p>
-                                        <p className="text-lg md:text-xl font-black text-slate-400 mt-1">
+                                        <p className={cn("text-lg md:text-xl font-black mt-1", isAliado ? "text-purple-100" : "text-slate-400")}>
                                             ≈ {formatCurrency(montoPendiente * bcvRate)} Bs.
                                         </p>
                                     </div>
@@ -178,7 +201,7 @@ export function OrderDetailModal({ open, onClose, orden, bcvRate }: OrderDetailM
   );
 }
 
-// --- SUB-COMPONENTES INTERNOS ---
+// --- SUB-COMPONENTES AUXILIARES ---
 
 function SectionCard({ title, icon, children, className }: any) {
     return (
@@ -227,7 +250,7 @@ function ItemRow({ item }: { item: ItemOrden }) {
                             
                             {itemExtra.empleadoAsignado && itemExtra.empleadoAsignado !== "N/A" && (
                                 <Badge variant="outline" className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 text-[9px] font-black uppercase px-2 py-0 gap-1">
-                                    <User className="w-2.5 h-2.5" /> Responsable: {itemExtra.empleadoAsignado}
+                                    <User className="w-2.5 h-2.5" /> {itemExtra.empleadoAsignado}
                                 </Badge>
                             )}
                         </div>
