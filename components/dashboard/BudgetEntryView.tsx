@@ -27,7 +27,7 @@ import { toast } from 'sonner';
 import { 
     Plus, Trash2, FileText, Save, Clock, Download, 
     User, Calculator, TrendingUp, Sparkles, Layers, Zap, Wallet, X,
-    DollarSign, CheckCircle2, Calendar, Pencil
+    DollarSign, CheckCircle2, Calendar, Pencil, RotateCcw, Check
 } from "lucide-react"; 
 
 import { cn } from "@/lib/utils";
@@ -49,20 +49,42 @@ export default function BudgetEntryView({
     currentUserId
 }: any) {
     
-    const [budgetData, setBudgetData] = useState({ clienteNombre: '', items: [] as any[] });
-    const [newItem, setNewItem] = useState({ descripcion: '', cantidad: 1, precioUnitarioUSD: 0 });
+    // --- ESTADO INICIAL ---
+    const initialBudgetState = { 
+        id: null as string | null, 
+        clienteNombre: '', 
+        items: [] as any[],
+        dateCreated: null as string | null 
+    };
+
+    const [budgetData, setBudgetData] = useState(initialBudgetState);
+    const [newItem, setNewItem] = useState({ 
+        id: null as number | null, 
+        descripcion: '', 
+        cantidad: 1, 
+        precioUnitarioUSD: 0 
+    });
     const [history, setHistory] = useState<any[]>([]); 
     const [isLoading, setIsLoading] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const suggestionRef = useRef<HTMLDivElement>(null);
 
-    const totalUSD = useMemo(() => budgetData.items.reduce((sum, i) => sum + i.totalUSD, 0), [budgetData.items]);
+    // --- CÁLCULOS ---
+    const totalUSD = useMemo(() => 
+        budgetData.items.reduce((sum: number, i: any) => sum + i.totalUSD, 0), 
+    [budgetData.items]);
 
-    // --- CARGAR HISTORIAL ---
+    // --- CARGAR HISTORIAL (DEDUPLICADO POR ID) ---
     const fetchHistory = useCallback(async () => {
         try {
             const data = await loadBudgetsFromFirestore();
-            if (data) setHistory(data.map(b => ({ ...b, id: b.id! })));
+            if (data) {
+                // Evitamos el error de keys duplicadas en React filtrando por ID único
+                const uniqueEntries = Array.from(
+                    new Map(data.map((item: any) => [item.id, item])).values()
+                );
+                setHistory(uniqueEntries);
+            }
         } catch (e) { 
             console.error("Error al cargar historial:", e); 
         }
@@ -70,72 +92,81 @@ export default function BudgetEntryView({
 
     useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
-    // --- LÓGICA DE ITEMS ---
-    const handleAddItem = () => {
-        if (!newItem.descripcion || newItem.cantidad <= 0) return;
-        setBudgetData(prev => ({ 
-            ...prev, 
-            items: [...prev.items, { ...newItem, id: Date.now(), totalUSD: newItem.cantidad * newItem.precioUnitarioUSD }] 
-        }));
-        setNewItem({ descripcion: '', cantidad: 1, precioUnitarioUSD: 0 });
+    // --- LÓGICA DE ITEMS (AÑADIR / ACTUALIZAR) ---
+    const handleAddOrUpdateItem = () => {
+        const desc = newItem.descripcion.trim() || "Concepto General";
+        const calculatedTotal = newItem.cantidad * newItem.precioUnitarioUSD;
+
+        if (newItem.id) {
+            // Actualizar item que ya está en la tabla (modo edición de item)
+            setBudgetData((prev: any) => ({
+                ...prev,
+                items: prev.items.map((item: any) => 
+                    item.id === newItem.id 
+                    ? { ...newItem, descripcion: desc, totalUSD: calculatedTotal } 
+                    : item
+                )
+            }));
+            toast.success("Concepto actualizado");
+        } else {
+            // Añadir nuevo item a la tabla
+            setBudgetData((prev: any) => ({ 
+                ...prev, 
+                items: [...prev.items, { ...newItem, descripcion: desc, id: Date.now(), totalUSD: calculatedTotal }] 
+            }));
+            toast.success("Concepto añadido");
+        }
+
+        setNewItem({ id: null, descripcion: '', cantidad: 1, precioUnitarioUSD: 0 });
         setShowSuggestions(false);
     };
 
-    const handleEditItem = (item: any) => {
+    const handleEditItemRequest = (item: any) => {
         setNewItem({
+            id: item.id,
             descripcion: item.descripcion,
             cantidad: item.cantidad,
             precioUnitarioUSD: item.precioUnitarioUSD
         });
-        setBudgetData(prev => ({
-            ...prev,
-            items: prev.items.filter(i => i.id !== item.id)
-        }));
-        toast.info("Item cargado para edición");
     };
 
-    // --- LÓGICA DE GUARDADO ---
+    // --- LÓGICA DE GUARDADO (CREAR O ACTUALIZAR) ---
     const handleSaveDraft = async () => {
         if (!budgetData.clienteNombre) return toast.error("El nombre del cliente es obligatorio");
-        if (budgetData.items.length === 0) return toast.error("Agrega al menos un concepto");
+        if (budgetData.items.length === 0) return toast.error("La tabla está vacía");
 
         setIsLoading(true);
         try {
-            const payload = {
-                ...budgetData,
-                totalUSD: totalUSD, 
-                dateCreated: new Date().toISOString(),
-                userId: currentUserId
+            // Separamos el ID para enviarlo solo si existe (evita error 'undefined' en Firestore)
+            const { id, ...rest } = budgetData;
+            const payload: any = {
+                ...rest,
+                totalUSD: totalUSD,
+                dateCreated: budgetData.id ? budgetData.dateCreated : new Date().toISOString(),
+                userId: currentUserId || "express"
             };
 
+            if (id) payload.id = id;
+
             await saveBudgetToFirestore(payload);
-            toast.success("Borrador guardado en la nube");
+            toast.success(id ? "Cambios actualizados" : "Borrador guardado");
             
-            setBudgetData({ clienteNombre: '', items: [] });
+            setBudgetData(initialBudgetState);
             await fetchHistory();
         } catch (error) {
-            toast.error("Error al guardar el borrador");
+            toast.error("Error al guardar en la base de datos");
             console.error(error);
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleEditBudget = (entry: any) => {
-        setBudgetData({
-            clienteNombre: entry.clienteNombre,
-            items: entry.items || []
-        });
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        toast.info("Presupuesto completo cargado");
-    };
-
+    // --- CONVERSIÓN A FACTURA (CON ELIMINACIÓN DEL PRESUPUESTO) ---
     const handleConvertToOrder = async (targetBudget?: any) => {
         const data = targetBudget || budgetData;
-        if (!currentUserId) return toast.error("Error de sesión.");
-        if (!data.clienteNombre || data.items.length === 0) return toast.error("Datos insuficientes.");
+        if (data.items.length === 0) return toast.error("No hay conceptos para facturar");
 
-        const confirmConversion = window.confirm(`¿Convertir presupuesto de ${data.clienteNombre} en una factura real?`);
+        const confirmConversion = window.confirm(`¿Convertir presupuesto de ${data.clienteNombre} en factura real? (Se borrará del historial)`);
         if (!confirmConversion) return;
 
         setIsLoading(true);
@@ -143,41 +174,70 @@ export default function BudgetEntryView({
             const lastNumber = await getLastOrderNumber();
             const nextNumber = lastNumber + 1;
             
-            const mappedItems = data.items.map((item: any) => ({
-                nombre: item.descripcion,
-                cantidad: item.cantidad,
-                precioUnitario: item.precioUnitarioUSD,
-                unidad: 'und',
-                tipoServicio: 'OTROS',
-                subtotal: item.totalUSD
-            }));
-
-            const finalPayload = {
+            const orderPayload = {
                 ordenNumero: nextNumber,
                 fecha: new Date().toISOString(),
                 fechaEntrega: new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0],
                 cliente: {
                     nombreRazonSocial: data.clienteNombre,
                     rifCedula: "EXPRESS",
-                    telefono: "EXPRESS",
-                    domicilioFiscal: "PRESUPUESTO CONVERTIDO",
+                    telefono: "N/A",
+                    domicilioFiscal: "N/A",
                     correo: ""
                 },
-                items: mappedItems,
-                totalUSD: data.totalUSD || mappedItems.reduce((acc:any, i:any) => acc + i.subtotal, 0),
+                items: data.items.map((item: any) => ({
+                    nombre: item.descripcion,
+                    cantidad: item.cantidad,
+                    precioUnitario: item.precioUnitarioUSD,
+                    unidad: 'und',
+                    tipoServicio: 'OTROS',
+                    subtotal: item.totalUSD
+                })),
+                totalUSD: data.totalUSD || totalUSD,
                 montoPagadoUSD: 0,
                 estado: 'PENDIENTE',
-                userId: currentUserId,
-                descripcionDetallada: `Originado desde presupuesto de ${data.clienteNombre}`
+                userId: currentUserId
             };
 
-            await createOrden(finalPayload);
-            toast.success(`Orden #${nextNumber} creada.`);
-            if (!targetBudget) setBudgetData({ clienteNombre: '', items: [] });
+            // 1. Crear la orden de producción
+            await createOrden(orderPayload);
+
+            // 2. Eliminar el presupuesto original de Firestore
+            if (data.id) {
+                await deleteBudgetFromFirestore(data.id);
+            }
+
+            toast.success(`Orden #${nextNumber} creada con éxito.`);
+            setBudgetData(initialBudgetState);
+            await fetchHistory();
         } catch (e) {
             toast.error("Error al facturar.");
+            console.error(e);
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleEditBudget = (entry: any) => {
+        setBudgetData({
+            id: entry.id,
+            clienteNombre: entry.clienteNombre,
+            items: entry.items || [],
+            dateCreated: entry.dateCreated || null
+        });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleDeleteBudget = async (id: string) => {
+        if (!id) return;
+        if (!window.confirm("¿Eliminar este presupuesto permanentemente?")) return;
+
+        try {
+            await deleteBudgetFromFirestore(id);
+            toast.success("Presupuesto eliminado");
+            await fetchHistory();
+        } catch (error) {
+            toast.error("Error al borrar el registro");
         }
     };
 
@@ -191,8 +251,11 @@ export default function BudgetEntryView({
                         <FileText className="text-white w-7 h-7" />
                     </div>
                     <div>
-                        <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Presupuestos</h1>
-                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-500 mt-2 flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> Smart Budgeting</p>
+                        <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight italic uppercase">Presupuestos</h1>
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-500 mt-2 flex items-center gap-1.5">
+                            <Sparkles className="w-3 h-3" /> 
+                            {budgetData.id ? "Editando Registro" : "Nuevo Documento"}
+                        </p>
                     </div>
                 </div>
                 <div className="flex flex-wrap justify-center gap-3">
@@ -214,21 +277,31 @@ export default function BudgetEntryView({
                 <div className="lg:col-span-8 space-y-6">
                     <Card className="rounded-[3rem] border-none shadow-2xl bg-white dark:bg-slate-900 overflow-hidden">
                         <div className="p-8 md:p-12 space-y-10">
-                            <div className="space-y-4">
-                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4">Cliente</Label>
-                                <div className="relative">
-                                    <User className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
-                                    <Input 
-                                        value={budgetData.clienteNombre} 
-                                        onChange={(e) => setBudgetData({...budgetData, clienteNombre: e.target.value})} 
-                                        className="h-16 rounded-[1.5rem] bg-slate-50 dark:bg-slate-800/50 border-none font-black text-xl px-16 shadow-inner" 
-                                        placeholder="NOMBRE DEL CLIENTE..." 
-                                    />
-                                </div>
+                            
+                            <div className="flex justify-between items-center">
+                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4">Datos del Cliente</Label>
+                                {(budgetData.id || budgetData.items.length > 0) && (
+                                    <Button variant="ghost" size="sm" onClick={() => setBudgetData(initialBudgetState)} className="text-[9px] font-black uppercase text-red-400 gap-1 hover:bg-red-50">
+                                        <RotateCcw className="w-3 h-3"/> Resetear Formulario
+                                    </Button>
+                                )}
                             </div>
 
+                            <div className="relative">
+                                <User className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
+                                <Input 
+                                    value={budgetData.clienteNombre} 
+                                    onChange={(e) => setBudgetData({...budgetData, clienteNombre: e.target.value})} 
+                                    className="h-16 rounded-[1.5rem] bg-slate-50 dark:bg-slate-800/50 border-none font-black text-xl px-16 shadow-inner" 
+                                    placeholder="NOMBRE DEL CLIENTE..." 
+                                />
+                            </div>
+
+                            {/* CONCEPTOS */}
                             <div className="space-y-4">
-                                <h3 className="font-black text-[10px] uppercase tracking-widest text-slate-400 ml-4 flex items-center gap-2"><Layers className="w-4 h-4 text-blue-500" /> Conceptos</h3>
+                                <h3 className="font-black text-[10px] uppercase tracking-widest text-slate-400 ml-4 flex items-center gap-2">
+                                    <Layers className="w-4 h-4 text-blue-500" /> Conceptos {newItem.id && <Badge className="bg-amber-500 ml-2">Editando</Badge>}
+                                </h3>
                                 <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-[2rem] border border-black/5 space-y-4">
                                     <div className="relative" ref={suggestionRef}>
                                         <Input 
@@ -249,51 +322,50 @@ export default function BudgetEntryView({
                                     </div>
                                     <div className="grid grid-cols-12 gap-3">
                                         <div className="col-span-3">
-                                            <Input type="number" value={newItem.cantidad} onChange={(e) => setNewItem({...newItem, cantidad: parseFloat(e.target.value) || 1})} className="h-14 rounded-xl bg-white dark:bg-slate-900 border-none text-center font-black" placeholder="Cant." />
+                                            <Input type="number" value={newItem.cantidad} onChange={(e) => setNewItem({...newItem, cantidad: Number(e.target.value) || 0})} className="h-14 rounded-xl bg-white dark:bg-slate-900 border-none text-center font-black" placeholder="Cant." />
                                         </div>
                                         <div className="col-span-6 relative">
                                             <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
-                                            <Input type="number" value={newItem.precioUnitarioUSD} onChange={(e) => setNewItem({...newItem, precioUnitarioUSD: parseFloat(e.target.value) || 0})} className="h-14 rounded-xl bg-white dark:bg-slate-900 border-none pl-10 font-black text-blue-600" placeholder="Precio Unitario" />
+                                            <Input type="number" value={newItem.precioUnitarioUSD} onChange={(e) => setNewItem({...newItem, precioUnitarioUSD: Number(e.target.value) || 0})} className="h-14 rounded-xl bg-white dark:bg-slate-900 border-none pl-10 font-black text-blue-600" placeholder="Precio Unitario" />
                                         </div>
                                         <div className="col-span-3">
-                                            <Button onClick={handleAddItem} className="w-full h-14 rounded-xl bg-blue-600 text-white shadow-lg active:scale-95 transition-all"><Plus /></Button>
+                                            <Button 
+                                                onClick={handleAddOrUpdateItem} 
+                                                className={cn(
+                                                    "w-full h-14 rounded-xl text-white shadow-lg active:scale-95 transition-all",
+                                                    newItem.id ? "bg-amber-500 hover:bg-amber-600" : "bg-blue-600 hover:bg-blue-700"
+                                                )}
+                                            >
+                                                {newItem.id ? <Check /> : <Plus />}
+                                            </Button>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
+                            {/* TABLA DE ITEMS */}
                             <div className="rounded-[2rem] border border-slate-100 dark:border-slate-800 overflow-hidden">
                                 <Table>
                                     <TableHeader className="bg-slate-50 dark:bg-slate-800/30">
                                         <TableRow className="border-none">
-                                            <TableHead className="px-8 text-[9px] font-black uppercase">Descripción</TableHead>
-                                            <TableHead className="text-right px-8 text-[9px] font-black uppercase">Subtotal</TableHead>
+                                            <TableHead className="px-8 text-[9px] font-black uppercase tracking-widest">Descripción</TableHead>
+                                            <TableHead className="text-right px-8 text-[9px] font-black uppercase tracking-widest">Subtotal</TableHead>
                                             <TableHead className="w-24"></TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                         {budgetData.items.map(item => (
-                                            <TableRow key={item.id} className="h-16 border-b border-slate-50 dark:border-slate-800 last:border-none">
+                                            <TableRow key={item.id} className={cn("h-16 border-b dark:border-slate-800 last:border-none transition-colors", newItem.id === item.id && "bg-blue-50/50 dark:bg-blue-500/5")}>
                                                 <TableCell className="px-8 font-bold uppercase text-[11px] text-slate-600 dark:text-slate-300">
-                                                    {item.descripcion} <span className="ml-2 text-slate-400 font-black">x{item.cantidad}</span>
+                                                    {item.descripcion} <span className="ml-2 text-slate-400 font-black italic">x{item.cantidad}</span>
                                                 </TableCell>
                                                 <TableCell className="text-right px-8 font-black text-blue-600 text-sm tracking-tight">${item.totalUSD.toFixed(2)}</TableCell>
                                                 <TableCell className="pr-6">
                                                     <div className="flex items-center justify-end gap-1">
-                                                        <Button 
-                                                            variant="ghost" 
-                                                            size="icon" 
-                                                            onClick={() => handleEditItem(item)} 
-                                                            className="text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10"
-                                                        >
+                                                        <Button variant="ghost" size="icon" onClick={() => handleEditItemRequest(item)} className="text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10">
                                                             <Pencil className="w-4 h-4" />
                                                         </Button>
-                                                        <Button 
-                                                            variant="ghost" 
-                                                            size="icon" 
-                                                            onClick={() => setBudgetData(p => ({...p, items: p.items.filter(i => i.id !== item.id)}))} 
-                                                            className="text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10"
-                                                        >
+                                                        <Button variant="ghost" size="icon" onClick={() => setBudgetData((p:any) => ({...p, items: p.items.filter((i:any) => i.id !== item.id)}))} className="text-red-400 hover:bg-red-50">
                                                             <Trash2 className="w-4 h-4"/>
                                                         </Button>
                                                     </div>
@@ -304,30 +376,15 @@ export default function BudgetEntryView({
                                 </Table>
                             </div>
 
-                            {/* ACCIONES PRINCIPALES */}
+                            {/* BOTONES DE ACCIÓN */}
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <Button 
-                                    onClick={() => handleConvertToOrder()} 
-                                    disabled={isLoading || budgetData.items.length === 0} 
-                                    className="h-16 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black uppercase text-xs gap-3 shadow-xl shadow-blue-500/20 active:scale-95 transition-all"
-                                >
-                                    {isLoading ? <Clock className="animate-spin w-5 h-5" /> : <Zap className="w-5 h-5" />} Registrar Factura
+                                <Button onClick={() => handleConvertToOrder()} disabled={isLoading || budgetData.items.length === 0} className="h-16 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black uppercase text-xs gap-3 shadow-xl active:scale-95 transition-all">
+                                    {isLoading ? <Clock className="animate-spin w-5 h-5" /> : <Zap className="w-5 h-5" />} Facturar ahora
                                 </Button>
-                                
-                                <Button 
-                                    onClick={handleSaveDraft} 
-                                    disabled={isLoading || budgetData.items.length === 0} 
-                                    className="h-16 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-black uppercase text-xs gap-3 active:scale-95 transition-all"
-                                >
-                                    {isLoading ? <Clock className="animate-spin w-5 h-5" /> : <Save className="w-5 h-5" />} 
-                                    {isLoading ? "Guardando..." : "Guardar Borrador"}
+                                <Button onClick={handleSaveDraft} disabled={isLoading || budgetData.items.length === 0} className="h-16 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-black uppercase text-xs gap-3 active:scale-95 transition-all">
+                                    <Save className="w-5 h-5" /> {budgetData.id ? "Actualizar Registro" : "Guardar Borrador"}
                                 </Button>
-
-                                <Button 
-                                    onClick={() => generateBudgetPDF(budgetData, pdfLogoBase64, { bcvRate: currentBcvRate, firmaBase64, selloBase64 })} 
-                                    disabled={budgetData.items.length === 0} 
-                                    className="h-16 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-xs gap-3 active:scale-95 transition-all"
-                                >
+                                <Button onClick={() => generateBudgetPDF(budgetData, pdfLogoBase64, { bcvRate: currentBcvRate, firmaBase64, selloBase64 })} disabled={budgetData.items.length === 0} className="h-16 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-xs gap-3 active:scale-95 transition-all">
                                     <Download className="w-5 h-5" /> Exportar PDF
                                 </Button>
                             </div>
@@ -335,44 +392,40 @@ export default function BudgetEntryView({
                     </Card>
                 </div>
 
-                {/* HISTORIAL */}
+                {/* HISTORIAL LATERAL */}
                 <aside className="lg:col-span-4 space-y-6">
                     <div className="flex items-center justify-between px-4">
-                        <h2 className="text-xl font-black tracking-tighter text-slate-900 dark:text-white italic uppercase flex items-center gap-3">
-                            <Clock className="w-5 h-5 text-blue-600" /> Historial
+                        <h2 className="text-xl font-black italic uppercase flex items-center gap-3 text-slate-900 dark:text-white">
+                            <Clock className="w-5 h-5 text-blue-600" /> Recientes
                         </h2>
                         <Badge className="rounded-full bg-blue-100 text-blue-600 px-3 border-none font-black">{history.length}</Badge>
                     </div>
 
                     <div className="space-y-3 overflow-y-auto max-h-[700px] pr-2 custom-scrollbar">
                         {history.map((entry) => (
-                            <motion.div key={entry.id} layout whileHover={{ x: 5 }}>
-                                <Card className="p-5 rounded-[2rem] border-none shadow-lg bg-white dark:bg-slate-900 group relative overflow-hidden transition-all">
+                            <motion.div key={entry.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                                <Card className="p-5 rounded-[2.5rem] border-none shadow-lg bg-white dark:bg-slate-900 group relative overflow-hidden transition-all hover:scale-[1.02]">
                                     <div className="flex justify-between items-start">
                                         <div className="space-y-1 min-w-0 pr-4">
-                                            <h4 className="font-black text-slate-800 dark:text-slate-100 text-sm truncate uppercase italic">{entry.clienteNombre}</h4>
+                                            <h4 className="font-black text-slate-800 dark:text-slate-100 text-sm truncate uppercase italic tracking-tight">{entry.clienteNombre}</h4>
                                             <p className="text-[10px] font-bold text-slate-400 flex items-center gap-2">
                                                 <Calendar className="w-3 h-3" /> {entry.dateCreated ? new Date(entry.dateCreated).toLocaleDateString() : 'Sin fecha'}
                                             </p>
                                         </div>
-                                        <div className="text-right">
-                                            <p className="text-lg font-black text-blue-600 tracking-tighter leading-none">
-                                                ${entry.totalUSD?.toFixed(2) || '0.00'}
-                                            </p>
-                                        </div>
+                                        <p className="text-lg font-black text-blue-600 tracking-tighter leading-none">${entry.totalUSD?.toFixed(2)}</p>
                                     </div>
                                     
-                                    <div className="mt-4 flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <Button size="icon" onClick={() => handleEditBudget(entry)} className="h-10 w-10 rounded-xl bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white transition-colors">
+                                    <div className="mt-4 flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-all">
+                                        <Button size="icon" onClick={() => handleEditBudget(entry)} className="h-10 w-10 rounded-xl bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white transition-colors shadow-sm">
                                             <Pencil className="w-4 h-4" />
                                         </Button>
-                                        <Button size="icon" onClick={() => handleConvertToOrder(entry)} className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white">
-                                            <Zap className="w-4 h-4" />
-                                        </Button>
-                                        <Button size="icon" onClick={() => generateBudgetPDF(entry, pdfLogoBase64, { bcvRate: currentBcvRate, firmaBase64, selloBase64 })} className="h-10 w-10 rounded-xl bg-slate-50 text-slate-500 hover:bg-slate-900 hover:text-white">
+                                        <Button size="icon" onClick={() => generateBudgetPDF(entry, pdfLogoBase64, { bcvRate: currentBcvRate, firmaBase64, selloBase64 })} className="h-10 w-10 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-colors shadow-sm">
                                             <Download className="w-4 h-4" />
                                         </Button>
-                                        <Button size="icon" onClick={() => { if(confirm("¿Eliminar?")) deleteBudgetFromFirestore(entry.id).then(fetchHistory); }} className="h-10 w-10 rounded-xl bg-red-50 text-red-400 hover:bg-red-500 hover:text-white">
+                                        <Button size="icon" onClick={() => handleConvertToOrder(entry)} className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors shadow-sm">
+                                            <Zap className="w-4 h-4" />
+                                        </Button>
+                                        <Button size="icon" onClick={() => handleDeleteBudget(entry.id)} className="h-10 w-10 rounded-xl bg-red-50 text-red-400 hover:bg-red-500 hover:text-white transition-colors shadow-sm">
                                             <Trash2 className="w-4 h-4" />
                                         </Button>
                                     </div>
@@ -386,12 +439,12 @@ export default function BudgetEntryView({
     );
 }
 
-// --- SUB-COMPONENTES ---
+// --- SUB-COMPONENTES AUXILIARES ---
 
 function StatCard({ label, value, icon, color, className }: any) {
     const colors: any = { 
         blue: "bg-blue-600 text-white shadow-blue-500/20", 
-        emerald: "bg-white dark:bg-slate-900 border-black/5 dark:border-white/5", 
+        emerald: "bg-white dark:bg-slate-900 border-black/5 dark:border-white/5 shadow-md", 
         amber: "bg-amber-100 dark:bg-amber-900/30 text-amber-600 border-none" 
     };
     return (

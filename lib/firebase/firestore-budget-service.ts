@@ -1,10 +1,20 @@
 // src/lib/services/firestore-budget-service.ts
 
-import { db } from "@/lib/firebase/firebase-config"; // Asegúrate de que tu archivo de configuración de Firebase existe y exporta 'db'
-import { collection, addDoc, getDocs, query, orderBy, deleteDoc, doc } from "firebase/firestore";
+import { db } from "@/lib/firebase/firebase-config"; 
+import { 
+    collection, 
+    addDoc, 
+    getDocs, 
+    query, 
+    orderBy, 
+    deleteDoc, 
+    doc, 
+    setDoc, // Necesario para actualizar documentos existentes
+    serverTimestamp 
+} from "firebase/firestore";
 
-// --- TIPOS DE DATOS BASE ---
-interface BudgetItem {
+// --- INTERFACES DE DATOS ---
+export interface BudgetItem {
     id: number;
     descripcion: string;
     cantidad: number;
@@ -12,64 +22,93 @@ interface BudgetItem {
     totalUSD: number;
 }
 
-interface BudgetData {
+export interface DbBudgetEntry {
+    id?: string; // ID de Firestore (opcional al crear, obligatorio al editar)
     clienteNombre: string;
     items: BudgetItem[];
-}
-
-// Interfaz para la entrada de la base de datos (DbBudgetEntry)
-export interface DbBudgetEntry extends BudgetData {
-    id?: string; // El ID de Firestore
-    dateCreated: string; // Fecha de creación persistente (ISO String)
     totalUSD: number;
+    dateCreated: string;
+    userId?: string;
 }
 
-const BUDGETS_COLLECTION = "budgets"; // Nombre de la colección en Firestore
+const BUDGETS_COLLECTION = "budgets";
 
 /**
- * Guarda un nuevo presupuesto en Firestore.
+ * Guarda o Actualiza un presupuesto en Firestore.
+ * Si el objeto tiene un 'id', lo actualiza. Si no, crea uno nuevo.
  */
-export async function saveBudgetToFirestore(budgetData: Omit<DbBudgetEntry, 'id'>): Promise<string> {
+export async function saveBudgetToFirestore(budgetData: DbBudgetEntry): Promise<string> {
     try {
-        const docRef = await addDoc(collection(db, BUDGETS_COLLECTION), budgetData);
-        return docRef.id;
+        // 1. Extraemos el ID y separamos el resto de los datos para el payload
+        const { id, ...data } = budgetData;
+
+        // 2. Limpieza de datos: Evitar enviar valores 'undefined' que rompen Firebase
+        const cleanData = JSON.parse(JSON.stringify(data));
+
+        if (id) {
+            // --- MODO ACTUALIZACIÓN ---
+            // Usamos setDoc para apuntar al ID específico que ya existe
+            const docRef = doc(db, BUDGETS_COLLECTION, id);
+            
+            // merge: true asegura que no se borren otros campos si existieran
+            await setDoc(docRef, cleanData, { merge: true });
+            console.log("Presupuesto actualizado:", id);
+            return id;
+        } else {
+            // --- MODO CREACIÓN ---
+            // Si no hay ID, addDoc genera uno nuevo automáticamente
+            const docRef = await addDoc(collection(db, BUDGETS_COLLECTION), cleanData);
+            console.log("Nuevo presupuesto creado con ID:", docRef.id);
+            return docRef.id;
+        }
     } catch (e) {
-        console.error("Error al añadir documento a Firestore: ", e);
-        throw new Error("No se pudo guardar el presupuesto en la base de datos.");
+        console.error("Error en saveBudgetToFirestore:", e);
+        throw new Error("No se pudo procesar la solicitud en la base de datos.");
     }
 }
 
 /**
- * Carga todo el historial de presupuestos desde Firestore.
+ * Carga todo el historial de presupuestos ordenados por fecha.
  */
 export async function loadBudgetsFromFirestore(): Promise<DbBudgetEntry[]> {
     try {
-        // Consulta: Obtener documentos ordenados por fecha de creación descendente
-        const q = query(collection(db, BUDGETS_COLLECTION), orderBy("dateCreated", "desc"));
-        const querySnapshot = await getDocs(q);
+        const q = query(
+            collection(db, BUDGETS_COLLECTION), 
+            orderBy("dateCreated", "desc")
+        );
         
+        const querySnapshot = await getDocs(q);
         const budgets: DbBudgetEntry[] = [];
+
         querySnapshot.forEach((doc) => {
             budgets.push({
-                id: doc.id,
+                id: doc.id, // Capturamos el ID real de Firestore
                 ...doc.data(),
             } as DbBudgetEntry);
         });
+
         return budgets;
     } catch (e) {
-        console.error("Error al cargar documentos desde Firestore: ", e);
+        console.error("Error al cargar presupuestos:", e);
         return []; 
     }
 }
 
 /**
- * Elimina un presupuesto de Firestore por su ID.
+ * Elimina un presupuesto permanentemente usando su ID de Firestore.
  */
 export async function deleteBudgetFromFirestore(id: string): Promise<void> {
+    if (!id) {
+        console.error("Intento de borrar sin ID válido");
+        return;
+    }
+
     try {
-        await deleteDoc(doc(db, BUDGETS_COLLECTION, id));
+        const docRef = doc(db, BUDGETS_COLLECTION, id);
+        await deleteDoc(docRef);
+        console.log("Documento eliminado:", id);
     } catch (e) {
-        console.error("Error al eliminar documento de Firestore: ", e);
-        throw new Error("No se pudo eliminar el presupuesto de la base de datos.");
+        console.error("Error al eliminar presupuesto:", e);
+        throw new Error("Error al eliminar el registro de la base de datos.");
     }
 }
