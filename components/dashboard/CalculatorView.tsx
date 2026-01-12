@@ -19,10 +19,10 @@ import {
     Calculator as CalcIcon, Ruler, DollarSign, Timer, Trash2, Plus, 
     Repeat2, Save, FolderOpen, X, Clock, Eye, Pencil, 
     ArrowLeftRight, Landmark, CheckCircle2, Search, ChevronLeft, ChevronRight,
-    Wand2, RotateCcw, Package
+    Wand2, RotateCcw, Package, Zap, Coins, Scissors, Printer
 } from "lucide-react";
 
-import { fetchBCVRateFromAPI } from "@/lib/bcv-service";
+import { fetchBCVRateFromAPI } from "@/lib/services/bcv-service";
 import { cn } from "@/lib/utils";
 
 // Servicios Firestore
@@ -107,10 +107,10 @@ const PremiumResultWidget = ({
     isRounded?: boolean, 
     onToggleRound?: () => void 
 }) => {
-    const [rateMode, setRateMode] = useState<'USD' | 'EUR'>('USD');
+    const [rateMode, setRateMode] = useState<'USD' | 'EUR' | 'USDT'>('USD');
     if (!usdAmount || usdAmount <= 0) return null;
 
-    const activeRate = rateMode === 'USD' ? rates.usdRate : rates.eurRate;
+    const activeRate = rateMode === 'USD' ? rates.usd : (rateMode === 'EUR' ? rates.eur : rates.usdtRate);
     const bsAmount = activeRate ? usdAmount * activeRate : 0;
 
     return (
@@ -142,7 +142,7 @@ const PremiumResultWidget = ({
                     </div>
                     <div className="flex flex-col items-end gap-1.5">
                         <div className="bg-white/10 backdrop-blur-md p-0.5 rounded-xl flex border border-white/10">
-                            {['USD', 'EUR'].map((m) => (
+                            {['USD', 'EUR', 'USDT'].map((m) => (
                                 <button key={m} onClick={() => setRateMode(m as any)} className={cn("px-3 py-1 rounded-lg text-[8px] font-black transition-all", rateMode === m ? "bg-white text-emerald-700 shadow-sm" : "text-white/60 hover:text-white")}>{m}</button>
                             ))}
                         </div>
@@ -164,7 +164,7 @@ const PremiumResultWidget = ({
 };
 
 const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
-    const [rateMode, setRateMode] = useState<'USD' | 'EUR'>('USD');
+    const [rateMode, setRateMode] = useState<'USD' | 'EUR' | 'USDT'>('USD');
     const [localRound, setLocalRound] = useState(false);
 
     useEffect(() => {
@@ -195,7 +195,7 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
     };
 
     const displayTotal = calculateTotal();
-    const activeRate = rateMode === 'USD' ? rates.usdRate : rates.eurRate;
+    const activeRate = rateMode === 'USD' ? rates.usd : (rateMode === 'EUR' ? rates.eur : rates.usdtRate);
     const totalBs = activeRate ? displayTotal * activeRate : 0;
 
     return (
@@ -206,7 +206,12 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
                     <div className="bg-slate-900 p-6 text-white text-center relative">
                         <div className="absolute top-4 right-5 text-emerald-400"><CheckCircle2 size={20}/></div>
                         <h3 className="text-xl font-black italic tracking-tighter">{data.name}</h3>
-                        <p className="text-slate-400 text-[9px] font-bold uppercase tracking-[0.2em] mt-1">{data.date}</p>
+                        <div className="flex items-center justify-center gap-2 mt-1">
+                            <p className="text-slate-400 text-[9px] font-bold uppercase tracking-[0.2em]">{data.date}</p>
+                            <Badge className="bg-emerald-500/20 text-emerald-400 border-none text-[8px] font-black uppercase h-4">
+                                {type === 'area' ? 'Impresión' : 'Corte'}
+                            </Badge>
+                        </div>
                     </div>
 
                     <div className="p-6 space-y-5">
@@ -216,16 +221,16 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
                                     <TableRow className="hover:bg-transparent border-none">
                                         {type === 'area' ? (
                                             <>
-                                                <TableHead className="text-[9px] font-black uppercase h-8 w-12 text-center">Cant.</TableHead>
+                                                <TableHead className="text-[9px] font-black uppercase h-8 w-10 text-center">Cant.</TableHead>
                                                 <TableHead className="text-[9px] font-black uppercase h-8">Descripción</TableHead>
-                                                <TableHead className="text-[9px] font-black uppercase h-8 text-center">Medidas</TableHead>
-                                                <TableHead className="text-[9px] font-black uppercase h-8 text-right">Precio</TableHead>
+                                                <TableHead className="text-[9px] font-black uppercase h-8 text-center">Metraje</TableHead>
+                                                <TableHead className="text-[9px] font-black uppercase h-8 text-right">Total</TableHead>
                                             </>
                                         ) : (
                                             <>
                                                 <TableHead className="text-[9px] font-black uppercase h-8 w-12 text-center">Unid.</TableHead>
                                                 <TableHead className="text-[9px] font-black uppercase h-8">Descripción</TableHead>
-                                                <TableHead className="text-[9px] font-black uppercase h-8 text-center">{data.tiempos?.some((t:any) => t.type === 'time') ? 'Tiempo' : '-'}</TableHead>
+                                                <TableHead className="text-[9px] font-black uppercase h-8 text-center">Tiempo/Serv</TableHead>
                                                 <TableHead className="text-[9px] font-black uppercase h-8 text-right">Precio</TableHead>
                                             </>
                                         )}
@@ -234,13 +239,16 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
                                 <TableBody>
                                     {type === 'area' ? data.mediciones?.map((m: any, i: number) => {
                                         const qty = m.cantidad || 1;
-                                        const areaPrice = ((m.cmAlto/100)*(m.cmAncho/100))*m.precioDolar;
+                                        const m2Unitario = (m.cmAlto / 100) * (m.cmAncho / 100);
+                                        const areaPrice = m2Unitario * m.precioDolar;
                                         const itemTotal = Math.max(1, areaPrice) * qty;
                                         return (
                                             <TableRow key={i} className="border-slate-100 dark:border-slate-800">
                                                 <TableCell className="text-[10px] font-bold text-center py-2">{qty}</TableCell>
                                                 <TableCell className="text-[10px] font-bold py-2">{m.name}</TableCell>
-                                                <TableCell className="text-[10px] font-medium text-slate-400 text-center py-2">{m.cmAlto}x{m.cmAncho}cm</TableCell>
+                                                <TableCell className="text-[10px] font-medium text-slate-400 text-center py-2">
+                                                    {(m2Unitario * qty).toFixed(2)} m²
+                                                </TableCell>
                                                 <TableCell className="text-[10px] font-black text-right py-2">${formatUSD(itemTotal)}</TableCell>
                                             </TableRow>
                                         );
@@ -251,7 +259,7 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
                                             <TableRow key={i} className="border-slate-100 dark:border-slate-800">
                                                 <TableCell className="text-[10px] font-bold text-center py-2">{isService ? t.qty : '-'}</TableCell>
                                                 <TableCell className="text-[10px] font-bold py-2">{t.name}</TableCell>
-                                                <TableCell className="text-[10px] font-medium text-slate-400 text-center py-2">{!isService ? formatTime(t.minutes + t.seconds/60) : '-'}</TableCell>
+                                                <TableCell className="text-[10px] font-medium text-slate-400 text-center py-2">{!isService ? formatTime(t.minutes + t.seconds/60) : 'Servicio'}</TableCell>
                                                 <TableCell className="text-[10px] font-black text-right py-2">${formatUSD(itemCost)}</TableCell>
                                             </TableRow>
                                         );
@@ -263,8 +271,9 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
                         <div className="flex justify-between items-center px-2">
                             <div className="flex items-center gap-2">
                                 <div className="bg-slate-100 dark:bg-slate-900 p-0.5 rounded-lg flex gap-0.5">
-                                    <button onClick={() => setRateMode('USD')} className={cn("px-2 py-1 rounded-md text-[8px] font-black", rateMode === 'USD' ? "bg-white dark:bg-slate-800 text-blue-600 shadow-sm" : "text-slate-400")}>USD</button>
-                                    <button onClick={() => setRateMode('EUR')} className={cn("px-2 py-1 rounded-md text-[8px] font-black", rateMode === 'EUR' ? "bg-white dark:bg-slate-800 text-blue-600 shadow-sm" : "text-slate-400")}>EUR</button>
+                                    {['USD', 'EUR', 'USDT'].map((curr) => (
+                                        <button key={curr} onClick={() => setRateMode(curr as any)} className={cn("px-2 py-1 rounded-md text-[8px] font-black", rateMode === curr ? "bg-white dark:bg-slate-800 text-blue-600 shadow-sm" : "text-slate-400")}>{curr}</button>
+                                    ))}
                                 </div>
                                 <Button variant="ghost" size="icon" onClick={() => setLocalRound(!localRound)} className={cn("h-7 w-7 rounded-lg", localRound ? "bg-amber-100 text-amber-600" : "text-slate-300")}>
                                     <Wand2 size={12} />
@@ -277,7 +286,7 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
                         </div>
 
                         <div className="bg-blue-600 p-4 rounded-3xl text-white text-center shadow-lg shadow-blue-500/20 relative overflow-hidden">
-                            <p className="text-[8px] font-black uppercase opacity-60 mb-0.5 tracking-widest relative z-10">Equivalente en Bolívares</p>
+                            <p className="text-[8px] font-black uppercase opacity-60 mb-0.5 tracking-widest relative z-10">Equivalente en Bolívares ({rateMode})</p>
                             <p className="text-2xl font-black tracking-tighter relative z-10">Bs. {formatBs(totalBs)}</p>
                             <Landmark className="absolute -right-2 -bottom-2 opacity-10 rotate-12" size={80}/>
                         </div>
@@ -290,10 +299,11 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
 };
 
 // --- CALCULADORA 1: METRO CUADRADO ---
-const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
-    const [mediciones, setMediciones] = useState<any[]>([{ id: Date.now(), name: "Pieza #1", cmAlto: 0, cmAncho: 0, precioDolar: 0, cantidad: 1 }]);
+const MetroCuadradoCalculator = ({ rates, onSendToProduction }: { rates: any, onSendToProduction?: (calc: any, type: 'area' | 'laser') => void }) => {
+    const [mediciones, setMediciones] = useState<any[]>([{ id: Date.now(), name: "Pieza #1", cmAlto: 0, cmAncho: 0, precioDolar: 0, cantidad: 1, serviceType: 'impresion' }]);
     const [editingId, setEditingId] = useState<number | null>(null);
     const [resultadoTotal, setResultadoTotal] = useState<number | null>(null);
+    const [totalM2General, setTotalM2General] = useState(0);
     const [isSaving, setIsSaving] = useState(false);
     const [saveName, setSaveName] = useState("");
     const [history, setHistory] = useState<any[]>([]);
@@ -306,17 +316,20 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
     useEffect(() => { getAreaHistory().then(setHistory); }, []);
     
     useEffect(() => {
-        let total = 0; let ok = false;
+        let total = 0; let totalM2 = 0; let ok = false;
         mediciones.forEach(m => { 
             if(m.cmAlto > 0 && m.cmAncho > 0 && m.precioDolar > 0) { 
                 const qty = m.cantidad || 1;
-                const areaPrice = (m.cmAlto/100)*(m.cmAncho/100)*m.precioDolar;
+                const m2 = (m.cmAlto/100)*(m.cmAncho/100);
+                const areaPrice = m2 * m.precioDolar;
                 total += Math.max(1, areaPrice) * qty; 
+                totalM2 += (m2 * qty);
                 ok = true; 
             }
         });
         const finalAmount = shouldRoundTotal ? Math.ceil(total) : total;
         setResultadoTotal(ok ? finalAmount : null);
+        setTotalM2General(totalM2);
     }, [mediciones, shouldRoundTotal]);
 
     const filteredHistory = useMemo(() => {
@@ -328,7 +341,22 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
 
     const handleSave = async () => {
         if (!saveName.trim() || resultadoTotal === null) return;
-        const newItem = await saveAreaCalculation({ name: saveName, date: new Date().toLocaleDateString(), mediciones, totalCost: resultadoTotal, totalM2: 0 });
+        
+        // Mapeamos para asegurar que cada ítem tenga el serviceType correcto para el wizard
+        const medicionesFinales = mediciones.map(m => ({
+            ...m,
+            serviceType: "impresion",
+            m2Total: (m.cmAlto/100)*(m.cmAncho/100) * (m.cantidad || 1)
+        }));
+
+        const newItem = await saveAreaCalculation({ 
+            name: saveName, 
+            date: new Date().toLocaleDateString(), 
+            mediciones: medicionesFinales, 
+            totalCost: resultadoTotal, 
+            totalM2: totalM2General,
+            serviceType: "impresion" 
+        });
         setHistory([newItem as any, ...history]); setIsSaving(false); setSaveName(""); setCurrentPage(1);
     };
 
@@ -349,14 +377,19 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
                                 <div className="flex justify-between items-center mb-3">
                                     <div className="flex items-center gap-2">
                                         <Badge className="bg-slate-900 h-6 w-6 rounded-lg p-0 flex items-center justify-center text-[9px] font-black italic">{idx + 1}</Badge>
-                                        {editingId === m.id ? (
-                                            <Input autoFocus className="h-7 w-32 rounded-md font-bold text-xs" value={m.name} onChange={e => setMediciones(mediciones.map(i => i.id === m.id ? {...i, name: e.target.value} : i))} onBlur={() => setEditingId(null)} />
-                                        ) : (
-                                            <div className="flex items-center gap-1">
-                                                <span className="font-black text-xs text-slate-700 dark:text-white italic">{m.name}</span>
-                                                <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400" onClick={() => setEditingId(m.id)}><Pencil size={12}/></Button>
-                                            </div>
-                                        )}
+                                        <div className="flex flex-col">
+                                            {editingId === m.id ? (
+                                                <Input autoFocus className="h-7 w-32 rounded-md font-bold text-xs" value={m.name} onChange={e => setMediciones(mediciones.map(i => i.id === m.id ? {...i, name: e.target.value} : i))} onBlur={() => setEditingId(null)} />
+                                            ) : (
+                                                <div className="flex items-center gap-1">
+                                                    <span className="font-black text-xs text-slate-700 dark:text-white italic">{m.name}</span>
+                                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400" onClick={() => setEditingId(m.id)}><Pencil size={12}/></Button>
+                                                </div>
+                                            )}
+                                            <span className="text-[8px] font-bold text-emerald-500 uppercase tracking-tighter">
+                                                {((m.cmAlto/100)*(m.cmAncho/100)*(m.cantidad||1)).toFixed(2)} m² Totales
+                                            </span>
+                                        </div>
                                     </div>
                                     <Button variant="ghost" size="icon" onClick={() => setMediciones(mediciones.length > 1 ? mediciones.filter(i => i.id !== m.id) : mediciones)} className="h-8 w-8 text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors"><Trash2 size={16}/></Button>
                                 </div>
@@ -373,10 +406,17 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
             </LayoutGroup>
 
             <motion.div {...hoverScale} {...tapAnimation}>
-                <Button variant="outline" onClick={() => setMediciones([...mediciones, { id: Date.now(), name: `Pieza #${mediciones.length+1}`, cmAlto: 0, cmAncho: 0, precioDolar: 0, cantidad: 1 }])} className="w-full h-10 rounded-2xl border-dashed border-2 font-black text-[10px] text-slate-400 gap-2 hover:bg-slate-50 transition-all">
+                <Button variant="outline" onClick={() => setMediciones([...mediciones, { id: Date.now(), name: `Pieza #${mediciones.length+1}`, cmAlto: 0, cmAncho: 0, precioDolar: 0, cantidad: 1, serviceType: 'impresion' }])} className="w-full h-10 rounded-2xl border-dashed border-2 font-black text-[10px] text-slate-400 gap-2 hover:bg-slate-50 transition-all">
                     <Plus size={16}/> Añadir otra pieza
                 </Button>
             </motion.div>
+
+            {totalM2General > 0 && (
+                <div className="bg-slate-900 text-white p-3 rounded-2xl flex justify-between items-center px-5">
+                    <div className="flex items-center gap-2"><Ruler size={14} className="text-slate-400"/><span className="text-[9px] font-black uppercase tracking-widest">Metraje Total</span></div>
+                    <span className="font-black italic text-lg">{totalM2General.toFixed(2)} m²</span>
+                </div>
+            )}
 
             <PremiumResultWidget 
                 usdAmount={resultadoTotal} 
@@ -405,7 +445,7 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
             <div className="pt-8 space-y-4">
                 <div className="flex flex-row justify-between items-center gap-2 px-1">
                     <div className="flex items-center gap-1.5 text-slate-400 font-black uppercase text-[9px] tracking-widest">
-                        <FolderOpen size={12}/> Historial de Área
+                        <FolderOpen size={12}/> Historial de Impresión
                     </div>
                     <div className="relative w-40 sm:w-56">
                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
@@ -418,11 +458,16 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
                         {paginatedHistory.map(h => (
                             <motion.div layout variants={historyItemVariants} exit="exit" key={h.id} className="bg-white dark:bg-slate-900/40 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-800 flex justify-between items-center shadow-sm group">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-9 h-9 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-400 flex items-center justify-center font-black italic text-[10px]">M2</div>
-                                    <div><p className="font-black text-xs text-slate-800 dark:text-white leading-tight">{h.name}</p><p className="text-[8px] font-bold text-slate-400 mt-0.5 uppercase tracking-tighter">{h.date}</p></div>
+                                    <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 text-emerald-500 flex items-center justify-center">
+                                        <Printer size={16} />
+                                    </div>
+                                    <div><p className="font-black text-xs text-slate-800 dark:text-white leading-tight uppercase">{h.name}</p><p className="text-[8px] font-bold text-slate-400 mt-0.5 uppercase tracking-tighter">{h.date} • {h.totalM2?.toFixed(2)} m²</p></div>
                                 </div>
                                 <div className="flex items-center gap-1">
                                     <span className="font-black text-emerald-600 text-sm mr-2">${formatUSD(h.totalCost)}</span>
+                                    {onSendToProduction && (
+                                        <Button variant="ghost" size="icon" onClick={() => onSendToProduction(h, 'area')} className="h-8 w-8 text-indigo-500 hover:bg-indigo-50" title="Facturar / Producción"><Zap size={14}/></Button>
+                                    )}
                                     <Button variant="ghost" size="icon" onClick={() => handleEditFromHistory(h)} className="h-8 w-8 text-amber-500"><Pencil size={14}/></Button>
                                     <Button variant="ghost" size="icon" onClick={() => setSelectedItem(h)} className="h-8 w-8 text-blue-500"><Eye size={14}/></Button>
                                     <Button variant="ghost" size="icon" onClick={async () => { if(confirm("¿Borrar?")) { await deleteAreaCalculation(h.id); setHistory(history.filter(i => i.id !== h.id)); } }} className="h-8 w-8 text-red-300 hover:text-red-500"><Trash2 size={14}/></Button>
@@ -431,7 +476,6 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
                         ))}
                     </AnimatePresence>
                 </motion.div>
-
                 {totalPages > 1 && (
                     <div className="flex justify-center items-center gap-4 pt-2">
                         <Button variant="ghost" disabled={currentPage === 1} onClick={() => setCurrentPage(prev => prev - 1)} className="h-8 w-8 p-0"><ChevronLeft size={16} /></Button>
@@ -446,17 +490,18 @@ const MetroCuadradoCalculator = ({ rates }: { rates: any }) => {
 };
 
 // --- CALCULADORA 2: LÁSER ---
-const LaserCutsCalculator = ({ rates }: { rates: any }) => {
+const LaserCutsCalculator = ({ rates, onSendToProduction }: { rates: any, onSendToProduction?: (calc: any, type: 'area' | 'laser') => void }) => {
     const [items, setItems] = useState<any[]>([{ 
         id: Date.now(), 
-        name: "Ítem #1", 
+        name: "Corte #1", 
         type: "time", 
         minutes: 0, 
         seconds: 0, 
         qty: 1,
         unitPrice: 0,
         includeMaterial: false, 
-        materialCost: 0 
+        materialCost: 0,
+        serviceType: 'corte'
     }]);
     
     const [editingId, setEditingId] = useState<number | null>(null);
@@ -508,12 +553,20 @@ const LaserCutsCalculator = ({ rates }: { rates: any }) => {
 
     const handleSave = async () => {
         if (!saveName.trim() || !resultado) return;
+
+        // Aseguramos que cada ítem en el arreglo tiempos tenga el serviceType corte
+        const tiemposFinales = items.map(t => ({
+            ...t,
+            serviceType: "corte"
+        }));
+
         const newItem = await saveLaserCalculation({ 
             name: saveName, 
             date: new Date().toLocaleDateString(), 
-            tiempos: items, 
+            tiempos: tiemposFinales, 
             totalCost: resultado.totalCost, 
-            totalMinutes: resultado.totalMinutes 
+            totalMinutes: resultado.totalMinutes,
+            serviceType: "corte"
         });
         setHistory([newItem as any, ...history]); setIsSaving(false); setSaveName(""); setCurrentPage(1);
     };
@@ -587,7 +640,7 @@ const LaserCutsCalculator = ({ rates }: { rates: any }) => {
                 </div>
             </LayoutGroup>
 
-            <Button variant="outline" onClick={() => setItems([...items, { id: Date.now(), name: `Nuevo Cobro #${items.length+1}`, type: "time", minutes: 0, seconds: 0, qty: 1, unitPrice: 0, includeMaterial: false, materialCost: 0 }])} className="w-full h-10 rounded-2xl border-dashed text-[10px] font-black text-slate-400 gap-2 hover:bg-slate-50">
+            <Button variant="outline" onClick={() => setItems([...items, { id: Date.now(), name: `Corte #${items.length+1}`, type: "time", minutes: 0, seconds: 0, qty: 1, unitPrice: 0, includeMaterial: false, materialCost: 0, serviceType: 'corte' }])} className="w-full h-10 rounded-2xl border-dashed text-[10px] font-black text-slate-400 gap-2 hover:bg-slate-50">
                 <Plus size={16}/> Añadir Concepto
             </Button>
 
@@ -623,7 +676,7 @@ const LaserCutsCalculator = ({ rates }: { rates: any }) => {
             
             <div className="pt-8 space-y-4">
                 <div className="flex justify-between items-center px-1">
-                    <div className="flex items-center gap-1.5 text-slate-400 font-black uppercase text-[9px] tracking-widest"><Clock size={12}/> Historial Láser</div>
+                    <div className="flex items-center gap-1.5 text-slate-400 font-black uppercase text-[9px] tracking-widest"><Clock size={12}/> Historial de Corte</div>
                     <div className="relative w-40"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={12} /><Input placeholder="Buscar..." className="h-8 pl-8 rounded-lg bg-slate-100 dark:bg-slate-900 border-none text-[10px] font-bold" value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }} /></div>
                 </div>
 
@@ -632,11 +685,16 @@ const LaserCutsCalculator = ({ rates }: { rates: any }) => {
                         {paginatedHistory.map(h => (
                             <motion.div layout variants={historyItemVariants} exit="exit" key={h.id} className="bg-white dark:bg-slate-900/40 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-800 flex justify-between items-center shadow-sm group">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-400 flex items-center justify-center"><Timer size={16}/></div>
-                                    <div><p className="font-black text-xs text-slate-800 dark:text-white leading-tight">{h.name}</p><p className="text-[8px] font-bold text-slate-400 mt-0.5 tracking-tighter">{h.date}</p></div>
+                                    <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-400 flex items-center justify-center">
+                                        <Scissors size={16}/>
+                                    </div>
+                                    <div><p className="font-black text-xs text-slate-800 dark:text-white leading-tight uppercase">{h.name}</p><p className="text-[8px] font-bold text-slate-400 mt-0.5 tracking-tighter">{h.date}</p></div>
                                 </div>
                                 <div className="flex items-center gap-1">
                                     <span className="font-black text-indigo-600 text-sm mr-2">${formatUSD(h.totalCost)}</span>
+                                    {onSendToProduction && (
+                                        <Button variant="ghost" size="icon" onClick={() => onSendToProduction(h, 'laser')} className="h-8 w-8 text-indigo-500 hover:bg-indigo-50" title="Facturar / Producción"><Zap size={14}/></Button>
+                                    )}
                                     <Button variant="ghost" size="icon" onClick={() => handleEditFromHistory(h)} className="h-8 w-8 text-amber-500"><Pencil size={14}/></Button>
                                     <Button variant="ghost" size="icon" onClick={() => setSelectedItem(h)} className="h-8 w-8 text-blue-500"><Eye size={14}/></Button>
                                     <Button variant="ghost" size="icon" onClick={async () => { if(confirm("¿Borrar?")) { await deleteLaserCalculation(h.id); setHistory(history.filter(i => i.id !== h.id)); } }} className="h-8 w-8 text-red-300"><Trash2 size={14}/></Button>
@@ -661,10 +719,15 @@ const LaserCutsCalculator = ({ rates }: { rates: any }) => {
 // --- CALCULADORA 3: DIVISAS ---
 const CurrencyConverterCalculator = ({ rates }: { rates: any }) => {
     const [inputAmount, setInputAmount] = useState("");
-    const [selectedCurrency, setSelectedCurrency] = useState<'USD' | 'EUR'>('USD');
+    const [selectedCurrency, setSelectedCurrency] = useState<'USD' | 'EUR' | 'USDT'>('USD');
     const [isForeignToBs, setIsForeignToBs] = useState(true);
 
-    const currentRate = selectedCurrency === 'USD' ? rates.usdRate : rates.eurRate;
+    const currentRate = useMemo(() => {
+        if (selectedCurrency === 'USD') return rates.usd;
+        if (selectedCurrency === 'EUR') return rates.eur;
+        return rates.usdtRate; 
+    }, [selectedCurrency, rates]);
+
     const result = isForeignToBs ? (parseFloat(inputAmount)||0) * (currentRate||0) : (parseFloat(inputAmount)||0) / (currentRate||1);
 
     const handleSwapDirection = () => {
@@ -672,17 +735,26 @@ const CurrencyConverterCalculator = ({ rates }: { rates: any }) => {
         setIsForeignToBs(!isForeignToBs);
     };
 
+    const getSymbol = () => {
+        if (!isForeignToBs) return 'Bs';
+        if (selectedCurrency === 'USD') return '$';
+        if (selectedCurrency === 'EUR') return '€';
+        return '₮'; 
+    };
+
     return (
         <div className="space-y-8">
             <div className="flex flex-row justify-between items-center gap-4">
                 <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl w-full sm:w-auto">
-                    {['USD', 'EUR'].map((curr) => (
+                    {['USD', 'EUR', 'USDT'].map((curr) => (
                         <motion.button key={curr} {...tapAnimation} onClick={() => setSelectedCurrency(curr as any)} className={cn("flex-1 px-6 py-2 rounded-lg text-[9px] font-black uppercase transition-all", selectedCurrency === curr ? "bg-white dark:bg-slate-800 text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600")}>{curr}</motion.button>
                     ))}
                 </div>
                 <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100/50">
-                    <Landmark className="w-3.5 h-3.5 text-blue-500" />
-                    <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 uppercase italic">BCV: {currentRate?.toFixed(2)}</span>
+                    {selectedCurrency === 'USDT' ? <Coins className="w-3.5 h-3.5 text-orange-500" /> : <Landmark className="w-3.5 h-3.5 text-blue-500" />}
+                    <span className={cn("text-[9px] font-black uppercase italic", selectedCurrency === 'USDT' ? "text-orange-600" : "text-blue-600")}>
+                        {selectedCurrency === 'USDT' ? 'PARALELO' : 'BCV'}: {currentRate?.toFixed(2)}
+                    </span>
                 </div>
             </div>
 
@@ -690,7 +762,7 @@ const CurrencyConverterCalculator = ({ rates }: { rates: any }) => {
                 <div className="space-y-1.5">
                     <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">{isForeignToBs ? selectedCurrency : 'Bolívares'}</Label>
                     <div className="relative group">
-                        <span className="absolute left-6 top-1/2 -translate-y-1/2 text-2xl font-black text-slate-300 italic group-focus-within:text-blue-500 transition-colors">{isForeignToBs ? (selectedCurrency === 'USD' ? '$' : '€') : 'Bs'}</span>
+                        <span className="absolute left-6 top-1/2 -translate-y-1/2 text-2xl font-black text-slate-300 italic group-focus-within:text-blue-500 transition-colors">{getSymbol()}</span>
                         <Input type="number" placeholder="0.00" className="h-16 rounded-[1.5rem] bg-slate-50 dark:bg-slate-900 border-none text-2xl font-black pl-14 transition-all focus:ring-4 focus:ring-blue-500/5" value={inputAmount} onChange={e => setInputAmount(e.target.value)} />
                     </div>
                 </div>
@@ -701,10 +773,14 @@ const CurrencyConverterCalculator = ({ rates }: { rates: any }) => {
 
                 <div className="space-y-1.5">
                     <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">{!isForeignToBs ? selectedCurrency : 'Bolívares'}</Label>
-                    <div className="h-16 rounded-[1.5rem] bg-blue-600 flex flex-col justify-center px-10 text-white shadow-xl shadow-blue-500/10 relative overflow-hidden">
+                    <div className={cn("h-16 rounded-[1.5rem] flex flex-col justify-center px-10 text-white shadow-xl relative overflow-hidden transition-colors", selectedCurrency === 'USDT' ? "bg-orange-600 shadow-orange-500/10" : "bg-blue-600 shadow-blue-500/10")}>
                         <p className="text-[8px] font-black uppercase opacity-60 italic mb-0.5 tracking-widest">Equivalente</p>
-                        <h2 className="text-2xl font-black tracking-tighter italic z-10">{isForeignToBs ? 'Bs. ' : (selectedCurrency === 'USD' ? '$' : '€')}{isForeignToBs ? formatBs(result) : formatUSD(result)}</h2>
-                        <div className="absolute right-0 top-0 p-4 opacity-10 rotate-12"><Landmark size={80}/></div>
+                        <h2 className="text-2xl font-black tracking-tighter italic z-10">
+                            {isForeignToBs ? 'Bs. ' : (selectedCurrency === 'USD' ? '$ ' : (selectedCurrency === 'EUR' ? '€ ' : '₮ '))}{isForeignToBs ? formatBs(result) : formatUSD(result)}
+                        </h2>
+                        <div className="absolute right-0 top-0 p-4 opacity-10 rotate-12">
+                            {selectedCurrency === 'USDT' ? <Coins size={80}/> : <Landmark size={80}/>}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -713,14 +789,31 @@ const CurrencyConverterCalculator = ({ rates }: { rates: any }) => {
 };
 
 // --- VISTA PRINCIPAL ---
-const CalculatorView = () => {
+const CalculatorView = ({ onSendToProduction }: { onSendToProduction?: (calc: any, type: 'area' | 'laser') => void }) => {
     const [activeTab, setActiveTab] = useState("currency");
-    const [rates, setRates] = useState<any>({ usdRate: null, eurRate: null, loading: true });
+    const [rates, setRates] = useState<any>({ usd: 0, eur: 0, usdtRate: 0, loading: true });
 
     useEffect(() => {
-        fetchBCVRateFromAPI().then(data => {
-            setRates({ usdRate: parseFloat((data as any).usdRate)||0, eurRate: parseFloat((data as any).eurRate)||0, loading: false });
-        });
+        const loadAllRates = async () => {
+            try {
+                const [bcvData, parallelRes] = await Promise.all([
+                    fetchBCVRateFromAPI(),
+                    fetch('https://ve.dolarapi.com/v1/dolares/paralelo').then(res => res.json())
+                ]);
+
+                setRates({ 
+                    usd: parseFloat((bcvData as any).usd) || 0, 
+                    eur: parseFloat((bcvData as any).eur) || 0, 
+                    usdtRate: parseFloat(parallelRes.promedio) || 0, 
+                    loading: false 
+                });
+            } catch (error) {
+                console.error("Error al cargar las tasas:", error);
+                setRates(prev => ({ ...prev, loading: false }));
+            }
+        };
+
+        loadAllRates();
     }, []);
 
     return (
@@ -735,7 +828,7 @@ const CalculatorView = () => {
                 </motion.div>
                 <motion.div initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="flex gap-2">
                     <Badge className="rounded-xl bg-white dark:bg-slate-900 text-blue-600 border border-slate-100 dark:border-slate-800 px-4 py-3 font-black italic text-sm shadow-sm">
-                        <span className="opacity-40 text-[10px] mr-1">$</span> {rates.usdRate?.toFixed(2)}
+                        <span className="opacity-40 text-[10px] mr-1">$</span> {rates.usd?.toFixed(2)}
                     </Badge>
                 </motion.div>
             </header>
@@ -768,14 +861,13 @@ const CalculatorView = () => {
                                 transition={{ type: "spring", stiffness: 200, damping: 25 }}
                             >
                                 {activeTab === "currency" && <CurrencyConverterCalculator rates={rates} />}
-                                {activeTab === "area" && <MetroCuadradoCalculator rates={rates} />}
-                                {activeTab === "laser" && <LaserCutsCalculator rates={rates} />}
+                                {activeTab === "area" && <MetroCuadradoCalculator rates={rates} onSendToProduction={onSendToProduction} />}
+                                {activeTab === "laser" && <LaserCutsCalculator rates={rates} onSendToProduction={onSendToProduction} />}
                             </motion.div>
                         </AnimatePresence>
                     </div>
                 </Tabs>
             </Card>
-           
         </motion.div>
     );
 };

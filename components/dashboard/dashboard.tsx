@@ -19,6 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { toast } from "sonner" // Asegúrate de tener sonner para las confirmaciones visuales
 
 // Componentes SMR/Siskoven
 import Sidebar from "@/components/dashboard/sidebar"
@@ -52,7 +53,6 @@ import {
 import { type OrdenServicio } from "@/lib/types/orden"
 import { subscribeToOrdenes, deleteOrden, updateOrdenStatus, createOrden, actualizarOrden } from "@/lib/services/ordenes-service"
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
-// CORRECCIÓN: Importar servicio de clientes y mantenimiento
 import { subscribeToClients } from "@/lib/services/clientes-service"
 import { syncAllOrdersClientStatus } from "@/lib/services/maintenance-service"
 
@@ -120,7 +120,6 @@ export default function Dashboard() {
     const [gastosFijos, setGastosFijos] = useState<GastoFijo[]>([])
     const [empleados, setEmpleados] = useState<Empleado[]>([])
     const [pagos, setPagos] = useState<PagoEmpleado[]>([]) 
-    // CORRECCIÓN: Estado de clientes
     const [clientes, setClientes] = useState<any[]>([])
 
     // --- 3. NAV ITEMS ---
@@ -165,6 +164,46 @@ export default function Dashboard() {
     ], []);
 
     // --- 4. MANEJADORES ---
+    
+    // NUEVA FUNCIÓN: Enviar datos de la calculadora a la facturación
+    const handleSendCalcToOrder = (calc: any, type: 'area' | 'laser') => {
+        const mappedItems = type === 'area' 
+            ? calc.mediciones.map((m: any) => ({
+                nombre: m.name || "Pieza de Área",
+                cantidad: m.cantidad || 1,
+                precioUnitario: m.precioDolar,
+                medidaXCm: m.cmAncho,
+                medidaYCm: m.cmAlto,
+                unidad: 'm2',
+                tipoServicio: 'OTROS'
+              }))
+            : (calc.tiempos || calc.items).map((t: any) => {
+                const isService = t.type === 'service';
+                return {
+                    nombre: t.name || "Trabajo Láser",
+                    cantidad: isService ? t.qty : 1,
+                    precioUnitario: isService 
+                        ? t.unitPrice 
+                        : ((t.minutes + t.seconds/60) * 0.80 + (t.materialCost || 0)),
+                    unidad: 'und',
+                    tipoServicio: 'CORTE_LASER'
+                };
+              });
+
+        const initialOrderData = {
+            cliente: { 
+                nombreRazonSocial: calc.name.toUpperCase(),
+                tipoCliente: "REGULAR" 
+            },
+            items: mappedItems,
+            descripcionDetallada: `CÁLCULO DE ${type === 'area' ? 'ÁREA' : 'LÁSER'} IMPORTADO AUTOMÁTICAMENTE.`
+        };
+
+        setEditingOrder(initialOrderData as any);
+        setIsWizardOpen(true);
+        toast.success("Cálculo cargado en el terminal de ventas");
+    };
+
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'firma' | 'sello') => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -285,7 +324,6 @@ export default function Dashboard() {
         const unsubGastosFijos = subscribeToGastosFijos(currentUserId, (data) => setGastosFijos(data));
         const unsubEmpleados = subscribeToEmpleados(currentUserId, (data) => setEmpleados(data));
         const unsubPagos = subscribeToPagos(currentUserId, (data) => setPagos(data)); 
-        // CORRECCIÓN: Activar suscripción a clientes
         const unsubClientes = subscribeToClients((data) => setClientes(data));
         
         const unsubNotis = subscribeToNotifications(currentUserId, (data) => {
@@ -333,24 +371,6 @@ export default function Dashboard() {
         });
         return all.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
     }, [ordenes, systemEvents]);
-
-    const paginatedNotis = useMemo(() => {
-        const filtered = allNotifications.filter(n => {
-            const matchesSearch = n.description.toLowerCase().includes(notiSearch.toLowerCase()) || 
-                                n.title.toLowerCase().includes(notiSearch.toLowerCase());
-            const matchesFilter = notiFilter === "all" || n.type === notiFilter;
-            return matchesSearch && matchesFilter;
-        });
-        const start = (currentPage - 1) * itemsPerPage;
-        return filtered.slice(start, start + itemsPerPage);
-    }, [allNotifications, notiSearch, notiFilter, currentPage]);
-
-    const totalPages = Math.ceil(allNotifications.filter(n => {
-        const matchesSearch = n.description.toLowerCase().includes(notiSearch.toLowerCase()) || 
-                            n.title.toLowerCase().includes(notiSearch.toLowerCase());
-        const matchesFilter = notiFilter === "all" || n.type === notiFilter;
-        return matchesSearch && matchesFilter;
-    }).length / itemsPerPage);
 
     const filteredOrdenes = useMemo(() => {
         const term = searchTerm.toLowerCase();
@@ -453,7 +473,6 @@ export default function Dashboard() {
                                 pdfLogoBase64={assets.logo}
                                 firmaBase64={assets.firma}
                                 selloBase64={assets.sello}
-                                // CORRECCIÓN: Pasar función de sincronización
                                 onSyncStatus={syncAllOrdersClientStatus}
                             />
                         </div>
@@ -498,15 +517,13 @@ export default function Dashboard() {
                         gastosFijos={gastosFijos} 
                         empleados={empleados} 
                         pagosEmpleados={pagos} 
-                        // CORRECCIÓN: Incluir la fecha en el mapeo para granularidad diaria
                         cobranzas={ordenes.map(o => ({
                             id: o.id, 
                             montoUSD: (o as any).totalUSD || 0, 
                             montoBs: (o as any).totalBs || 0,
                             estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente',
-                            fecha: o.fecha // <--- IMPORTANTE PARA LA GRÁFICA
+                            fecha: o.fecha
                         })) as any}
-                        // CORRECCIÓN: Pasar arrays de ordenes y clientes para el conteo de aliados
                         ordenes={ordenes}
                         clientes={clientes}
                     />
@@ -531,7 +548,11 @@ export default function Dashboard() {
                         onRegisterPayment={handleRegisterOrderPayment} 
                     />
                 )}
-                {activeView === "old_calculator" && <CalculatorView />}
+                
+                {/* CORRECCIÓN: Pasar la función handleSendCalcToOrder a la Calculadora */}
+                {activeView === "old_calculator" && (
+                    <CalculatorView onSendToProduction={handleSendCalcToOrder} />
+                )}
 
                 {activeView === "notifications_full" && (
                     <div className="max-w-4xl mx-auto space-y-6">
@@ -569,14 +590,21 @@ export default function Dashboard() {
         <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
           <DialogContent className="w-full max-w-[95vw] lg:max-w-7xl h-auto p-0 border-none bg-transparent shadow-none focus:outline-none overflow-visible">
             <DialogTitle className="sr-only">{editingOrder ? "Editar Orden" : "Nueva Orden"}</DialogTitle>
-            <OrderFormWizardV2 onClose={() => { setIsWizardOpen(false); setEditingOrder(null); }} initialData={editingOrder || undefined} currentUserId={currentUserId || ""} onCreate={createOrden} onUpdate={actualizarOrden} bcvRate={currentBcvRate} />
+            <OrderFormWizardV2 
+                onClose={() => { setIsWizardOpen(false); setEditingOrder(null); }} 
+                initialData={editingOrder || undefined} 
+                currentUserId={currentUserId || ""} 
+                onCreate={createOrden} 
+                onUpdate={actualizarOrden} 
+                bcvRate={currentBcvRate} 
+            />
           </DialogContent>
         </Dialog>
       </div>
     )
 }
 
-// Subcomponentes auxiliares (Se mantienen iguales)
+// Subcomponentes auxiliares
 function TasaHeaderBadge({ label, value, icon, color, onClick }: any) {
     const colors: any = { emerald: "bg-emerald-500/10 text-emerald-600", orange: "bg-orange-500/10 text-orange-600", blue: "bg-blue-500/10 text-blue-600" }
     return (
