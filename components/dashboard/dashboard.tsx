@@ -32,7 +32,6 @@ import BudgetEntryView from "@/components/dashboard/BudgetEntryView"
 import CalculatorView from "@/components/dashboard/CalculatorView" 
 import { CurrencyToast } from "@/components/dashboard/CurrencyToast" 
 
-
 // Componentes Administrativos
 import { GastosFijosView } from "@/components/dashboard/gastos-fijos-view"
 import { InsumosView } from "@/components/dashboard/InsumosView"
@@ -46,18 +45,16 @@ import {
     LayoutDashboard, FileSpreadsheet, Clock, Zap, Hammer, 
     DollarSign, Menu, Building2, Bell, TrendingUp, Euro, 
     Coins, CheckCircle2, MessageSquareText, Trash2, MailOpen, 
-    ChevronRight, ChevronLeft, Filter, ChevronDown, X, Briefcase, BarChart3, Package, Tag
+    ChevronRight, ChevronLeft, Filter, ChevronDown, X, Briefcase, BarChart3, Package
 } from "lucide-react" 
 
 // Servicios
 import { type OrdenServicio } from "@/lib/types/orden"
 import { subscribeToOrdenes, deleteOrden, updateOrdenStatus, createOrden, actualizarOrden } from "@/lib/services/ordenes-service"
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
+// CORRECCIÓN: Importar servicio de clientes y mantenimiento
 import { subscribeToClients } from "@/lib/services/clientes-service"
 import { syncAllOrdersClientStatus } from "@/lib/services/maintenance-service"
-
-// Servicios de Precios
-import { subscribeToPrices, subscribeToCategories, type PriceItem, type CategoryItem } from "@/lib/services/prices-service"
 
 import { 
     createGasto, 
@@ -123,11 +120,8 @@ export default function Dashboard() {
     const [gastosFijos, setGastosFijos] = useState<GastoFijo[]>([])
     const [empleados, setEmpleados] = useState<Empleado[]>([])
     const [pagos, setPagos] = useState<PagoEmpleado[]>([]) 
+    // CORRECCIÓN: Estado de clientes
     const [clientes, setClientes] = useState<any[]>([])
-
-    // ESTADOS PARA EL CATÁLOGO
-    const [precios, setPrecios] = useState<PriceItem[]>([])
-    const [categoriasPrecios, setCategoriasPrecios] = useState<CategoryItem[]>([])
 
     // --- 3. NAV ITEMS ---
     const navItems = useMemo(() => [
@@ -150,13 +144,13 @@ export default function Dashboard() {
             label: 'Administración',
             icon: <Building2 className="w-4 h-4" />,
             children: [
-
                 { id: 'financial_stats', label: 'Balance y Estadísticas' },
                 { id: 'clients', label: 'Cobranza' },
                 { id: 'design_production', label: 'Pago Diseños' },
                 { id: 'fixed_expenses', label: 'Gastos Fijos' },
                 { id: 'insumos_mgmt', label: 'Insumos y Materiales' },
                 { id: 'employees_mgmt', label: 'Gestión de Personal' },
+
             ]
         },
         {
@@ -291,11 +285,8 @@ export default function Dashboard() {
         const unsubGastosFijos = subscribeToGastosFijos(currentUserId, (data) => setGastosFijos(data));
         const unsubEmpleados = subscribeToEmpleados(currentUserId, (data) => setEmpleados(data));
         const unsubPagos = subscribeToPagos(currentUserId, (data) => setPagos(data)); 
+        // CORRECCIÓN: Activar suscripción a clientes
         const unsubClientes = subscribeToClients((data) => setClientes(data));
-
-        // SUSCRIPCIONES PARA EL CATÁLOGO DE PRECIOS
-        const unsubPrecios = subscribeToPrices((data) => setPrecios(data));
-        const unsubCatsPrecios = subscribeToCategories((data) => setCategoriasPrecios(data));
         
         const unsubNotis = subscribeToNotifications(currentUserId, (data) => {
             setSystemEvents(data.filter(n => n.category !== 'expense'));
@@ -306,7 +297,6 @@ export default function Dashboard() {
             unsubOrdenes(); unsubDesigners(); unsubGastos(); 
             unsubGastosFijos(); unsubEmpleados(); unsubPagos(); 
             unsubNotis(); unsubClientes();
-            unsubPrecios(); unsubCatsPrecios();
         };
     }, [currentUserId]);
 
@@ -392,9 +382,7 @@ export default function Dashboard() {
             <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
                 <Button variant="ghost" size="icon" className="h-10 w-10 rounded-2xl bg-black/5 dark:bg-white/10 shrink-0" onClick={() => setIsSidebarOpen(!isSidebarOpen)}><Menu className="h-5 w-5" /></Button>
                 <h2 className="text-lg sm:text-xl font-bold tracking-tight italic uppercase truncate max-w-[150px] sm:max-w-none">
-                    {activeView.startsWith("tasks_") ? "Taller" : 
-                     activeView === "price_list" ? "Lista de Precios" :
-                     navItems.find(i => i.id === activeView)?.label || 
+                    {activeView.startsWith("tasks_") ? "Taller" : navItems.find(i => i.id === activeView)?.label || 
                      (activeView === "design_production" ? "Pago Diseños" : "Panel")}
                 </h2>
             </div>
@@ -465,6 +453,7 @@ export default function Dashboard() {
                                 pdfLogoBase64={assets.logo}
                                 firmaBase64={assets.firma}
                                 selloBase64={assets.sello}
+                                // CORRECCIÓN: Pasar función de sincronización
                                 onSyncStatus={syncAllOrdersClientStatus}
                             />
                         </div>
@@ -509,13 +498,15 @@ export default function Dashboard() {
                         gastosFijos={gastosFijos} 
                         empleados={empleados} 
                         pagosEmpleados={pagos} 
+                        // CORRECCIÓN: Incluir la fecha en el mapeo para granularidad diaria
                         cobranzas={ordenes.map(o => ({
                             id: o.id, 
                             montoUSD: (o as any).totalUSD || 0, 
                             montoBs: (o as any).totalBs || 0,
                             estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente',
-                            fecha: o.fecha 
+                            fecha: o.fecha // <--- IMPORTANTE PARA LA GRÁFICA
                         })) as any}
+                        // CORRECCIÓN: Pasar arrays de ordenes y clientes para el conteo de aliados
                         ordenes={ordenes}
                         clientes={clientes}
                     />
@@ -530,9 +521,6 @@ export default function Dashboard() {
                         currentUserId={currentUserId}
                     />
                 )}
-
-                {/* VISTA DE LISTA DE PRECIOS - CONECTADA CON DATOS REALES */}
-                
                 {activeView.startsWith("tasks_") && <TasksView ordenes={ordenes} currentUserId={currentUserId || ""} areaPriorizada={activeView.replace("tasks_", "")} />}
                 {activeView === "design_production" && <DesignerPayrollView designers={designers} ordenes={ordenes} bcvRate={currentBcvRate} />}
                 {activeView === "clients" && (
@@ -588,7 +576,7 @@ export default function Dashboard() {
     )
 }
 
-// Subcomponentes auxiliares
+// Subcomponentes auxiliares (Se mantienen iguales)
 function TasaHeaderBadge({ label, value, icon, color, onClick }: any) {
     const colors: any = { emerald: "bg-emerald-500/10 text-emerald-600", orange: "bg-orange-500/10 text-orange-600", blue: "bg-blue-500/10 text-blue-600" }
     return (
@@ -607,7 +595,7 @@ function StatCard({ label, value, icon, subtext, color, className }: any) {
     return (
         <Card className={cn("border shadow-sm rounded-3xl overflow-hidden bg-white dark:bg-[#1c1c1e] transition-all w-full", className)}>
             <CardContent className="p-4 sm:p-6 flex items-center gap-5">
-                <div className={cn("p-4 rounded-[1.8rem] shadow-inner shrink-0", theme[color])}>{icon && React.isValidElement(icon) ? React.cloneElement(icon as React.ReactElement, { className: "w-8 h-8" }) : null}</div>
+                <div className={cn("p-4 rounded-[1.8rem] shadow-inner shrink-0", theme[color])}>{icon && React.cloneElement(icon as any, { className: "w-8 h-8" })}</div>
                 <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase text-black/30 dark:text-white/30 truncate">{label}</p>
                     <p className="text-3xl font-bold tracking-tighter truncate">{value}</p>
