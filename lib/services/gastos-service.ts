@@ -8,14 +8,13 @@ import {
   doc, 
   onSnapshot, 
   query, 
-  where, 
   orderBy,
   Timestamp 
 } from "firebase/firestore";
 import { GastoInsumo, GastoFijo, Empleado, PagoEmpleado } from "@/lib/types/gastos";
 
 /**
- * HELPER: Valida si una fecha es realmente válida para evitar RangeError
+ * HELPER: Valida si una fecha es realmente válida para evitar errores de Firestore
  */
 const isValidDate = (date: any): boolean => {
   const d = date instanceof Date ? date : new Date(date);
@@ -23,7 +22,7 @@ const isValidDate = (date: any): boolean => {
 };
 
 /**
- * UTILIDAD: Mapea los documentos de Firestore convirtiendo Timestamps a Date.
+ * UTILIDAD: Mapea los documentos de Firestore convirtiendo Timestamps a objetos Date de JavaScript.
  */
 const mapSnapshot = (doc: any) => {
   const data = doc.data();
@@ -39,14 +38,13 @@ const mapSnapshot = (doc: any) => {
 };
 
 // ==========================================
-// 1. GASTOS DE INSUMOS / VARIABLES
+// 1. GASTOS DE INSUMOS / VARIABLES (GLOBAL)
 // ==========================================
 
 export const createGasto = async (gasto: any) => {
   try {
-    const { id, ...dataToSave } = gasto;
+    const { id, empresa_id, ...dataToSave } = gasto; // Eliminamos empresa_id si viene en el objeto
     
-    // Validación de fecha de seguridad
     const fechaFinal = isValidDate(dataToSave.fecha) 
       ? (dataToSave.fecha instanceof Date ? dataToSave.fecha : new Date(dataToSave.fecha))
       : new Date();
@@ -74,11 +72,13 @@ export const createGasto = async (gasto: any) => {
   }
 };
 
-export const subscribeToGastos = (empresaId: string, callback: (gastos: GastoInsumo[]) => void) => {
+/**
+ * Suscripción global a todos los gastos de insumos.
+ */
+export const subscribeToGastos = (callback: (gastos: GastoInsumo[]) => void) => {
   const q = query(
     collection(db, "gastos_insumos"),
-    where("empresa_id", "==", empresaId),
-    orderBy("fecha", "desc")
+    orderBy("fecha", "desc") // Ordenamos por fecha de forma descendente
   );
   return onSnapshot(q, (snapshot) => {
     const gastos = snapshot.docs.map(mapSnapshot);
@@ -97,17 +97,19 @@ export const deleteGastoInsumo = async (id: string) => {
 };
 
 // ==========================================
-// 2. GASTOS FIJOS (RECURRENTES)
+// 2. GASTOS FIJOS (RECURRENTES - GLOBAL)
 // ==========================================
 
 export const createGastoFijo = async (gasto: any) => {
   try {
-    const proximoPago = isValidDate(gasto.proximoPago) 
-      ? (gasto.proximoPago instanceof Date ? gasto.proximoPago : new Date(gasto.proximoPago))
+    const { empresa_id, ...cleanData } = gasto; // Limpieza de IDs privados
+    
+    const proximoPago = isValidDate(cleanData.proximoPago) 
+      ? (cleanData.proximoPago instanceof Date ? cleanData.proximoPago : new Date(cleanData.proximoPago))
       : new Date();
 
     const docRef = await addDoc(collection(db, "gastos_fijos"), {
-      ...gasto,
+      ...cleanData,
       createdAt: Timestamp.now(),
       proximoPago: Timestamp.fromDate(proximoPago)
     });
@@ -118,10 +120,13 @@ export const createGastoFijo = async (gasto: any) => {
   }
 };
 
-export const subscribeToGastosFijos = (empresaId: string, callback: (gastos: GastoFijo[]) => void) => {
+/**
+ * Suscripción global a gastos fijos (Sin filtro de empresa_id).
+ */
+export const subscribeToGastosFijos = (callback: (gastos: GastoFijo[]) => void) => {
   const q = query(
     collection(db, "gastos_fijos"),
-    where("empresa_id", "==", empresaId)
+    orderBy("proximoPago", "asc") // Ordenamos por fecha de vencimiento
   );
   return onSnapshot(q, (snapshot) => {
     const gastos = snapshot.docs.map(mapSnapshot);
@@ -133,25 +138,16 @@ export const updateGastoFijo = async (id: string, data: Partial<GastoFijo>) => {
   try {
     const updateData: any = { ...data };
     
-    // CORRECCIÓN: Validar antes de convertir a Timestamp
-    if (data.proximoPago) {
-      if (isValidDate(data.proximoPago)) {
-        updateData.proximoPago = Timestamp.fromDate(
-          data.proximoPago instanceof Date ? data.proximoPago : new Date(data.proximoPago)
-        );
-      } else {
-        delete updateData.proximoPago; // Eliminar si no es válida para no romper Firestore
-      }
+    if (data.proximoPago && isValidDate(data.proximoPago)) {
+      updateData.proximoPago = Timestamp.fromDate(
+        data.proximoPago instanceof Date ? data.proximoPago : new Date(data.proximoPago)
+      );
     }
 
-    if (data.ultimoPago) {
-      if (isValidDate(data.ultimoPago)) {
-        updateData.ultimoPago = Timestamp.fromDate(
-          data.ultimoPago instanceof Date ? data.ultimoPago : new Date(data.ultimoPago)
-        );
-      } else {
-        delete updateData.ultimoPago;
-      }
+    if (data.ultimoPago && isValidDate(data.ultimoPago)) {
+      updateData.ultimoPago = Timestamp.fromDate(
+        data.ultimoPago instanceof Date ? data.ultimoPago : new Date(data.ultimoPago)
+      );
     }
     
     await updateDoc(doc(db, "gastos_fijos", id), {
@@ -174,12 +170,12 @@ export const deleteGastoFijo = async (id: string) => {
 };
 
 // ==========================================
-// 3. GESTIÓN DE PERSONAL (JERÁRQUICA)
+// 3. GESTIÓN DE PERSONAL (COLECCIÓN GLOBAL)
 // ==========================================
 
-export const createEmpleado = async (empresaId: string, empleado: any) => {
+export const createEmpleado = async (empleado: any) => {
   try {
-    const docRef = await addDoc(collection(db, "empresas", empresaId, "empleados"), {
+    const docRef = await addDoc(collection(db, "empleados"), {
       ...empleado,
       createdAt: Timestamp.now()
     });
@@ -190,17 +186,17 @@ export const createEmpleado = async (empresaId: string, empleado: any) => {
   }
 };
 
-export const subscribeToEmpleados = (empresaId: string, callback: (empleados: Empleado[]) => void) => {
-  const q = query(collection(db, "empresas", empresaId, "empleados"));
+export const subscribeToEmpleados = (callback: (empleados: Empleado[]) => void) => {
+  const q = query(collection(db, "empleados"));
   return onSnapshot(q, (snapshot) => {
     const empleados = snapshot.docs.map(mapSnapshot);
     callback(empleados as Empleado[]);
   });
 };
 
-export const updateEmpleado = async (empresaId: string, id: string, data: Partial<Empleado>) => {
+export const updateEmpleado = async (id: string, data: Partial<Empleado>) => {
   try {
-    await updateDoc(doc(db, "empresas", empresaId, "empleados", id), {
+    await updateDoc(doc(db, "empleados", id), {
       ...data,
       updatedAt: Timestamp.now()
     });
@@ -210,9 +206,9 @@ export const updateEmpleado = async (empresaId: string, id: string, data: Partia
   }
 };
 
-export const deleteEmpleado = async (empresaId: string, id: string) => {
+export const deleteEmpleado = async (id: string) => {
   try {
-    await deleteDoc(doc(db, "empresas", empresaId, "empleados", id));
+    await deleteDoc(doc(db, "empleados", id));
   } catch (error) {
     console.error("Error en deleteEmpleado:", error);
     throw error;
@@ -220,12 +216,12 @@ export const deleteEmpleado = async (empresaId: string, id: string) => {
 };
 
 // ==========================================
-// 4. PAGOS DE NÓMINA (JERÁRQUICA)
+// 4. PAGOS DE NÓMINA (COLECCIÓN GLOBAL)
 // ==========================================
 
-export const createPago = async (empresaId: string, pago: any) => {
+export const createPago = async (pago: any) => {
   try {
-    const docRef = await addDoc(collection(db, "empresas", empresaId, "pagos"), {
+    const docRef = await addDoc(collection(db, "pagos"), {
       ...pago,
       fecha: Timestamp.now()
     });
@@ -236,9 +232,9 @@ export const createPago = async (empresaId: string, pago: any) => {
   }
 };
 
-export const subscribeToPagos = (empresaId: string, callback: (pagos: PagoEmpleado[]) => void) => {
+export const subscribeToPagos = (callback: (pagos: PagoEmpleado[]) => void) => {
   const q = query(
-    collection(db, "empresas", empresaId, "pagos"), 
+    collection(db, "pagos"), 
     orderBy("fecha", "desc")
   );
   return onSnapshot(q, (snapshot) => {
@@ -248,14 +244,13 @@ export const subscribeToPagos = (empresaId: string, callback: (pagos: PagoEmplea
 };
 
 // ==========================================
-// 5. NOTIFICACIONES PERSISTENTES
+// 5. NOTIFICACIONES (GLOBAL)
 // ==========================================
 
-export const createNotification = async (userId: string, notification: any) => {
+export const createNotification = async (notification: any) => {
   try {
     await addDoc(collection(db, "notificaciones"), {
       ...notification,
-      empresa_id: userId,
       timestamp: Timestamp.now(),
       isRead: false
     });
@@ -264,10 +259,9 @@ export const createNotification = async (userId: string, notification: any) => {
   }
 };
 
-export const subscribeToNotifications = (userId: string, callback: (notis: any[]) => void) => {
+export const subscribeToNotifications = (callback: (notis: any[]) => void) => {
   const q = query(
     collection(db, "notificaciones"),
-    where("empresa_id", "==", userId),
     orderBy("timestamp", "desc")
   );
   return onSnapshot(q, (snapshot) => {

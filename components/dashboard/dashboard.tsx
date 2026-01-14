@@ -19,7 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { toast } from "sonner" // Asegúrate de tener sonner para las confirmaciones visuales
+import { toast } from "sonner" 
 
 // Componentes SMR/Siskoven
 import Sidebar from "@/components/dashboard/sidebar"
@@ -164,8 +164,6 @@ export default function Dashboard() {
     ], []);
 
     // --- 4. MANEJADORES ---
-    
-    // NUEVA FUNCIÓN: Enviar datos de la calculadora a la facturación
     const handleSendCalcToOrder = (calc: any, type: 'area' | 'laser') => {
         const mappedItems = type === 'area' 
             ? calc.mediciones.map((m: any) => ({
@@ -254,7 +252,7 @@ export default function Dashboard() {
             setRateToastMessage(msg); setShowRateToast(true);
             setTimeout(() => setShowRateToast(false), 4000);
 
-            await createNotification(currentUserId, {
+            await createNotification({
                 title: `Sincronización ${label}`,
                 description: msg,
                 type: 'info',
@@ -266,7 +264,6 @@ export default function Dashboard() {
     }, [currentUserId]);
 
     const handleRegisterOrderPayment = async (ordenId: string, monto: number, nota?: string, imagenUrl?: string) => {
-        if (!currentUserId) return;
         try {
             const ordenActual = ordenes.find(o => o.id === ordenId);
             if (!ordenActual) return;
@@ -287,7 +284,7 @@ export default function Dashboard() {
                 estadoPago: nuevoEstadoPago,
                 registroPagos: arrayUnion(nuevoRecibo)
             });
-            await createNotification(currentUserId, {
+            await createNotification({
                 title: "Pago Registrado",
                 description: `Se recibió un pago de $${monto} para la Orden #${ordenActual.ordenNumero}`,
                 type: 'success',
@@ -300,8 +297,6 @@ export default function Dashboard() {
 
     // --- 5. CARGA DE DATOS ---
     useEffect(() => {
-        if (!currentUserId) return 
-
         const cached = getBCVRateFromStorage();
         if (cached.usd > 0) {
             setCurrentBcvRate(cached.usd);
@@ -318,15 +313,16 @@ export default function Dashboard() {
             setAssets({ logo: l || "", firma: f || "", sello: s || "" }); 
         });
 
-        const unsubOrdenes = subscribeToOrdenes(currentUserId, (data) => setOrdenes(data));
+        // CORRECCIÓN: SUSCRIPCIONES GLOBALES (Sin pasar currentUserId ni empresaId)
+        const unsubOrdenes = subscribeToOrdenes(currentUserId!, (data) => setOrdenes(data));
         const unsubDesigners = subscribeToDesigners((data) => setDesigners(data));
-        const unsubGastos = subscribeToGastos(currentUserId, (data) => setGastos(data));
-        const unsubGastosFijos = subscribeToGastosFijos(currentUserId, (data) => setGastosFijos(data));
-        const unsubEmpleados = subscribeToEmpleados(currentUserId, (data) => setEmpleados(data));
-        const unsubPagos = subscribeToPagos(currentUserId, (data) => setPagos(data)); 
+        const unsubGastos = subscribeToGastos((data) => setGastos(data));
+        const unsubGastosFijos = subscribeToGastosFijos((data) => setGastosFijos(data));
+        const unsubEmpleados = subscribeToEmpleados((data) => setEmpleados(data));
+        const unsubPagos = subscribeToPagos((data) => setPagos(data)); 
         const unsubClientes = subscribeToClients((data) => setClientes(data));
         
-        const unsubNotis = subscribeToNotifications(currentUserId, (data) => {
+        const unsubNotis = subscribeToNotifications((data) => {
             setSystemEvents(data.filter(n => n.category !== 'expense'));
             setExpenseEvents(data.filter(n => n.category === 'expense') as any);
         });
@@ -469,18 +465,16 @@ export default function Dashboard() {
                                 onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}} 
                                 onRegisterPayment={handleRegisterOrderPayment}
                                 currentUserId={currentUserId || ""}
-    // CAMBIA ESTO:
-    rates={{
-        usd: currentBcvRate,
-        eur: eurRate,
-        usdt: parallelRate
-    }}
+                                rates={{
+                                    usd: currentBcvRate,
+                                    eur: eurRate,
+                                    usdt: parallelRate
+                                }}
                                 bcvRate={currentBcvRate} 
                                 pdfLogoBase64={assets.logo}
                                 firmaBase64={assets.firma}
                                 selloBase64={assets.sello}
                                 onSyncStatus={syncAllOrdersClientStatus}
-                                
                             />
                         </div>
                     </div>
@@ -489,13 +483,13 @@ export default function Dashboard() {
                 {activeView === "fixed_expenses" && (
                     <GastosFijosView 
                         gastos={gastosFijos} 
-                        empresaId={currentUserId || ""} 
+                        // CORRECCIÓN: Eliminado empresaId para que la vista use la lógica global
                         rates={{ usd: currentBcvRate, eur: eurRate }} 
                         onNotification={(t, d) => { 
                             setRateToastMessage(d); 
                             setShowRateToast(true);
                             setTimeout(() => setShowRateToast(false), 4000);
-                            createNotification(currentUserId!, { title: t, description: d, type: 'warning', category: 'expense' });
+                            createNotification({ title: t, description: d, type: 'warning', category: 'expense' });
                         }} 
                     />
                 )}
@@ -504,19 +498,18 @@ export default function Dashboard() {
                     <InsumosView 
                         gastos={gastos} 
                         currentBcvRate={currentBcvRate} 
-                        currentUserId={currentUserId || ""} 
                         onCreateGasto={createGasto} 
                         onDeleteGasto={deleteGastoInsumo} 
                     />
                 )}
 
                 {activeView === "employees_mgmt" && (
-                    <EmpleadosView 
-                        empleados={empleados} 
-                        empresaId={currentUserId || ""} 
-                        rates={{ usd: currentBcvRate, eur: eurRate }} 
-                    />
-                )}
+    <EmpleadosView 
+        empleados={empleados} 
+        pagos={pagos} // <--- FALTA ESTA LÍNEA
+        rates={{ usd: currentBcvRate, eur: eurRate }} 
+    />
+)}
 
                 {activeView === "financial_stats" && (
                     <EstadisticasDashboard 
@@ -542,7 +535,6 @@ export default function Dashboard() {
                         handleLogoUpload={(e: any) => handleFileUpload(e, 'logo')} handleClearLogo={() => handleClearAsset('logo')}
                         firmaBase64={assets.firma} handleFirmaUpload={(e: any) => handleFileUpload(e, 'firma')} handleClearFirma={() => handleClearAsset('firma')}
                         selloBase64={assets.sello} handleSelloUpload={(e: any) => handleFileUpload(e, 'sello')} handleClearSello={() => handleClearAsset('sello')}
-                        currentUserId={currentUserId}
                     />
                 )}
                 {activeView.startsWith("tasks_") && <TasksView ordenes={ordenes} currentUserId={currentUserId || ""} areaPriorizada={activeView.replace("tasks_", "")} />}
@@ -551,12 +543,10 @@ export default function Dashboard() {
                     <ClientsAndPaymentsView 
                         ordenes={ordenes} 
                         bcvRate={currentBcvRate} 
-                        currentUserId={currentUserId || ""} 
                         onRegisterPayment={handleRegisterOrderPayment} 
                     />
                 )}
                 
-                {/* CORRECCIÓN: Pasar la función handleSendCalcToOrder a la Calculadora */}
                 {activeView === "old_calculator" && (
                     <CalculatorView onSendToProduction={handleSendCalcToOrder} />
                 )}
@@ -611,7 +601,6 @@ export default function Dashboard() {
     )
 }
 
-// Subcomponentes auxiliares
 function TasaHeaderBadge({ label, value, icon, color, onClick }: any) {
     const colors: any = { emerald: "bg-emerald-500/10 text-emerald-600", orange: "bg-orange-500/10 text-orange-600", blue: "bg-blue-500/10 text-blue-600" }
     return (

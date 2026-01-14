@@ -21,7 +21,7 @@ interface GastosFijosListProps {
   onDelete: (id: string) => Promise<void>;
   onEdit: (gasto: GastoFijo) => void;
   isLoading?: boolean;
-  isPaidMode?: boolean; // Define si es la lista de pendientes o la de solventes
+  isPaidMode?: boolean; 
 }
 
 export function GastosFijosList({ 
@@ -33,7 +33,7 @@ export function GastosFijosList({
   isPaidMode = false 
 }: GastosFijosListProps) {
 
-  // --- ESTADO VACÍO ---
+  // --- 1. ESTADO VACÍO ---
   if (!gastos || gastos.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center p-16 bg-white/50 dark:bg-white/5 rounded-[3rem] border-2 border-dashed border-black/5">
@@ -50,10 +50,17 @@ export function GastosFijosList({
   return (
     <div className="grid gap-4 px-2">
       {gastos.map((gasto) => {
-        // --- LÓGICA DE FECHAS (Firebase Timestamp vs Date) ---
+        
+        // --- 2. MANEJO DE FECHAS ROBUSTO ---
         const formatFecha = (fecha: any) => {
-          if (!fecha) return "N/A";
-          const d = fecha instanceof Date ? fecha : fecha?.toDate?.() || new Date(fecha);
+          if (!fecha) return "Pendiente";
+          // Maneja Date, Firestore Timestamp o String ISO
+          const d = fecha instanceof Date 
+            ? fecha 
+            : fecha?.toDate ? fecha.toDate() : new Date(fecha);
+          
+          if (isNaN(d.getTime())) return "Fecha inválida";
+
           return d.toLocaleDateString('es-ES', { 
             day: '2-digit', 
             month: 'short'
@@ -64,11 +71,13 @@ export function GastosFijosList({
           ? formatFecha(gasto.ultimoPago) 
           : formatFecha(gasto.proximoPago);
 
-        // --- LÓGICA DE MONTO (Real vs Referencial) ---
-        // Si está pagado, mostramos el monto real que se calculó en el modal
+        // --- 3. LÓGICA DE MONTO (Sincronizada con Global) ---
         const montoPrincipal = isPaidMode 
           ? (Number(gasto.ultimoMontoPagadoUSD) || Number(gasto.monto)) 
           : Number(gasto.monto);
+
+        // Definimos si es variable (Impuestos o monto 0) para cambiar el texto del botón
+        const isVariable = gasto.categoria?.toLowerCase().includes("impuesto") || montoPrincipal === 0;
 
         return (
           <div 
@@ -80,7 +89,7 @@ export function GastosFijosList({
                 : "hover:shadow-2xl hover:shadow-black/5 hover:-translate-y-1"
             )}
           >
-            {/* IZQUIERDA: ICONO E INFORMACIÓN */}
+            {/* SECCIÓN IZQUIERDA: IDENTIFICACIÓN */}
             <div className="flex items-center gap-5 flex-1 w-full">
               <div className={cn(
                 "w-16 h-16 rounded-[1.8rem] flex items-center justify-center text-white shadow-xl shrink-0 transition-transform group-hover:scale-105",
@@ -97,14 +106,14 @@ export function GastosFijosList({
               
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                    <h4 className="font-black text-slate-900 dark:text-white text-xl tracking-tight truncate">
+                    <h4 className="font-black text-slate-900 dark:text-white text-xl tracking-tight truncate uppercase italic">
                         {gasto.nombre}
                     </h4>
                     <span className={cn(
                         "text-[8px] font-black uppercase px-2 py-0.5 rounded-full",
                         isPaidMode ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20" : "bg-orange-100 text-orange-600 dark:bg-orange-500/20"
                     )}>
-                        {gasto.moneda === 'USD' ? 'Divisas' : gasto.moneda?.replace('_', ' ')}
+                        {gasto.moneda?.replace('_', ' ') || 'USD'}
                     </span>
                 </div>
 
@@ -113,7 +122,7 @@ export function GastosFijosList({
                     {gasto.categoria}
                   </span>
                   
-                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 italic">
                     <Calendar size={14} className="text-blue-500" />
                     <span>
                         {isPaidMode ? `Pagado: ${fechaAMostrar}` : `Vence: ${fechaAMostrar}`}
@@ -123,7 +132,7 @@ export function GastosFijosList({
               </div>
             </div>
 
-            {/* DERECHA: MONTO Y ACCIONES */}
+            {/* SECCIÓN DERECHA: IMPORTES Y ACCIONES */}
             <div className="flex items-center justify-between w-full sm:w-auto gap-8 border-t sm:border-t-0 pt-4 sm:pt-0 border-black/5">
               <div className="text-right">
                 <div className="flex flex-col">
@@ -141,32 +150,36 @@ export function GastosFijosList({
                   <button 
                     disabled={isLoading}
                     onClick={() => onPay(gasto)}
-                    className="group/btn text-[10px] font-black uppercase tracking-widest text-blue-600 hover:text-blue-700 mt-2 flex items-center gap-2 ml-auto transition-all"
+                    className="group/btn text-[10px] font-black uppercase tracking-widest text-blue-600 hover:text-blue-700 mt-2 flex items-center gap-2 ml-auto transition-all disabled:opacity-50"
                   >
                     {isLoading ? (
                         <Loader2 className="w-3 h-3 animate-spin" />
                     ) : (
                         <DollarSign size={12} className="group-hover/btn:scale-125 transition-transform" />
                     )}
-                    {gasto.categoria === 'Impuestos' ? 'Registrar Monto' : 'Marcar Pagado'}
+                    {isVariable ? 'Registrar Monto' : 'Marcar Pagado'}
                   </button>
                 )}
               </div>
 
-              {/* ACCIONES (EDITAR/ELIMINAR) - Solo en modo pendiente */}
+              {/* BOTONES DE EDICIÓN / ELIMINACIÓN */}
               {!isPaidMode && (
                 <div className="flex items-center gap-1 bg-slate-50 dark:bg-white/5 p-1.5 rounded-2xl">
                   <button 
+                    disabled={isLoading}
                     onClick={() => onEdit(gasto)}
-                    className="p-3 text-slate-400 hover:text-blue-500 hover:bg-white dark:hover:bg-slate-800 rounded-xl transition-all shadow-sm"
+                    title="Editar servicio"
+                    className="p-3 text-slate-400 hover:text-blue-500 hover:bg-white dark:hover:bg-slate-800 rounded-xl transition-all shadow-sm disabled:opacity-30"
                   >
                     <Edit2 size={18} />
                   </button>
                   <button 
+                    disabled={isLoading}
                     onClick={() => onDelete(gasto.id)}
-                    className="p-3 text-slate-400 hover:text-red-500 hover:bg-white dark:hover:bg-slate-800 rounded-xl transition-all shadow-sm"
+                    title="Eliminar de la lista global"
+                    className="p-3 text-slate-400 hover:text-red-500 hover:bg-white dark:hover:bg-slate-800 rounded-xl transition-all shadow-sm disabled:opacity-30"
                   >
-                    <Trash2 size={18} />
+                    {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
                   </button>
                 </div>
               )}

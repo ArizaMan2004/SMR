@@ -48,6 +48,7 @@
     "firebase": "11.1.0",
     "framer-motion": "^12.23.26",
     "geist": "^1.5.1",
+    "html-to-image": "^1.11.13",
     "input-otp": "1.4.1",
     "jspdf": "2.5.2",
     "jspdf-autotable": "3.8.2",

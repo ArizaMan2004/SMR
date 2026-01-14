@@ -4,15 +4,8 @@
 import React, { useState, useEffect } from "react"
 import { motion } from "framer-motion"
 import { 
-  Save, 
-  DollarSign, 
-  Calendar, 
-  Tag, 
-  Loader2, 
-  Info,
-  Layers,
-  Coins,
-  ShieldCheck
+  Save, DollarSign, Calendar, Tag, Loader2, 
+  Layers, Coins, ShieldCheck 
 } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -27,20 +20,47 @@ export function GastosFijosForm({ onSubmit, isLoading, rates, initialData }: any
     moneda: "USD" 
   });
 
-  // Tasa y conversión con protección contra NaN
+  // --- CORRECCIÓN: Sincronizar datos al editar ---
+  useEffect(() => {
+    if (initialData) {
+      // Manejo de fecha si viene de Firestore (Timestamp) o String
+      let dateValue = "";
+      if (initialData.proximoPago) {
+        const d = initialData.proximoPago?.toDate ? initialData.proximoPago.toDate() : new Date(initialData.proximoPago);
+        dateValue = d.toISOString().split('T')[0];
+      }
+
+      setFormData({
+        nombre: initialData.nombre || "",
+        // Al editar, mostramos el monto original si lo guardamos, 
+        // o el montoUSD por defecto
+        monto: initialData.ultimoMontoPagadoBs?.toString() || initialData.monto?.toString() || "",
+        categoria: initialData.categoria || "Servicios",
+        proximoPago: dateValue,
+        moneda: initialData.moneda || "USD"
+      });
+    }
+  }, [initialData]);
+
   const currentRate = formData.moneda === 'BS_EUR' ? (rates?.eur || 0) : (rates?.usd || 0);
   const rawInput = parseFloat(formData.monto) || 0;
   const isBolivares = formData.moneda !== 'USD';
-  const displayConversion = isBolivares ? (rawInput / (currentRate || 1)) : (rawInput * (rates?.usd || 1));
+  
+  // Conversión visual
+  const displayConversion = isBolivares 
+    ? (rawInput / (currentRate || 1)) 
+    : (rawInput * (rates?.usd || 1));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.nombre || !formData.monto) return;
     
+    // Normalizamos los datos para que el servicio reciba montos coherentes
     await onSubmit({
       ...formData,
-      monto: isBolivares ? displayConversion : rawInput,
-      montoBs: isBolivares ? rawInput : (rawInput * (rates?.usd || 0))
+      monto: isBolivares ? displayConversion : rawInput, // Guardamos siempre base USD para estadísticas
+      montoOriginal: rawInput, // Guardamos lo que el usuario escribió
+      tasaAlMomento: currentRate
     });
   };
 
@@ -51,30 +71,31 @@ export function GastosFijosForm({ onSubmit, isLoading, rates, initialData }: any
       className="w-full max-w-xl mx-auto"
     >
       <Card className="overflow-hidden border-0 shadow-2xl bg-white/70 dark:bg-[#1c1c1e]/70 backdrop-blur-3xl rounded-[3rem]">
-        {/* Banner Decorativo Superior */}
         <div className="h-32 bg-gradient-to-br from-blue-600 to-indigo-700 p-8 relative">
            <div className="relative z-10">
               <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter">
-                {initialData ? "Editar Servicio" : "Nuevo Servicio"}
+                {initialData ? "Editar Registro" : "Nuevo Servicio"}
               </h3>
-              <p className="text-blue-100 text-[10px] font-bold uppercase tracking-[0.2em] opacity-80">Gestión de costos SMR</p>
+              <p className="text-blue-100 text-[10px] font-bold uppercase tracking-[0.2em] opacity-80 italic">
+                {initialData ? "Modificando gasto existente" : "Cargando gasto global"}
+              </p>
            </div>
            <ShieldCheck className="absolute right-8 top-8 text-white/10 w-24 h-24 -rotate-12" />
         </div>
 
         <form onSubmit={handleSubmit} className="p-8 -mt-8 bg-white dark:bg-[#1c1c1e] rounded-t-[3rem] space-y-6">
           
-          {/* Selector de Moneda - Estilo Segmented Control de iOS */}
-          <div className="flex p-1.5 bg-slate-100 dark:bg-white/5 rounded-[2rem] gap-1">
+          {/* Selector de Moneda */}
+          <div className="flex p-1.5 bg-slate-100 dark:bg-white/5 rounded-[2rem] gap-1 shadow-inner">
             {['USD', 'BS_USD', 'BS_EUR'].map((m) => (
               <button
                 key={m}
                 type="button"
-                onClick={() => setFormData({...formData, moneda: m, monto: ""})}
+                onClick={() => setFormData({...formData, moneda: m})}
                 className={cn(
                   "flex-1 py-2.5 rounded-[1.5rem] text-[9px] font-black transition-all uppercase tracking-widest",
                   formData.moneda === m 
-                    ? "bg-white dark:bg-slate-800 text-blue-600 shadow-xl scale-[1.02]" 
+                    ? "bg-white dark:bg-slate-800 text-blue-600 shadow-md scale-[1.02]" 
                     : "text-slate-400 hover:text-slate-600"
                 )}
               >
@@ -84,7 +105,6 @@ export function GastosFijosForm({ onSubmit, isLoading, rates, initialData }: any
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Nombre */}
             <div className="space-y-1.5">
               <label className="text-[9px] font-black uppercase text-slate-400 ml-4 tracking-widest">Identificación</label>
               <div className="relative group">
@@ -99,7 +119,6 @@ export function GastosFijosForm({ onSubmit, isLoading, rates, initialData }: any
               </div>
             </div>
 
-            {/* Categoría */}
             <div className="space-y-1.5">
               <label className="text-[9px] font-black uppercase text-slate-400 ml-4 tracking-widest">Categoría</label>
               <div className="relative">
@@ -118,21 +137,20 @@ export function GastosFijosForm({ onSubmit, isLoading, rates, initialData }: any
             </div>
           </div>
 
-          {/* Área del Monto - Diseño Destacado */}
-          <div className="bg-slate-50 dark:bg-white/5 p-6 rounded-[2.5rem] border border-black/5">
+          <div className="bg-slate-50 dark:bg-white/5 p-6 rounded-[2.5rem] border border-black/5 shadow-inner">
              <div className="flex justify-between items-center mb-3">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Importe de Gasto</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Importe Estimado</span>
                 <div className={cn(
                   "px-3 py-1 rounded-full text-[9px] font-black uppercase",
                   isBolivares ? "bg-blue-100 text-blue-600" : "bg-emerald-100 text-emerald-600"
                 )}>
-                  {isBolivares ? "Entrada en Bs" : "Entrada en $"}
+                  {isBolivares ? "Base en Bolívares" : "Base en Dólares"}
                 </div>
              </div>
              
              <div className="flex items-center gap-4">
                 <div className={cn(
-                  "w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg",
+                  "w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-colors",
                   isBolivares ? "bg-blue-600" : "bg-emerald-600"
                 )}>
                   {isBolivares ? <Coins className="text-white w-6 h-6" /> : <DollarSign className="text-white w-6 h-6" />}
@@ -147,10 +165,9 @@ export function GastosFijosForm({ onSubmit, isLoading, rates, initialData }: any
                 />
              </div>
 
-             {/* Conversión Inteligente */}
              {rawInput > 0 && (
-               <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="mt-4 pt-4 border-t border-black/5 flex justify-between items-center">
-                  <p className="text-[10px] font-bold text-slate-400 italic">Equivalente Contable:</p>
+               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4 pt-4 border-t border-black/5 flex justify-between items-center">
+                  <p className="text-[10px] font-bold text-slate-400 italic">Conversión a Tasa Actual:</p>
                   <p className="text-sm font-black text-blue-600">
                     {isBolivares ? `${displayConversion.toFixed(2)} $` : `${displayConversion.toLocaleString('es-VE')} Bs.`}
                   </p>
@@ -158,7 +175,6 @@ export function GastosFijosForm({ onSubmit, isLoading, rates, initialData }: any
              )}
           </div>
 
-          {/* Fecha y Botón Guardar */}
           <div className="flex flex-col sm:flex-row gap-4 items-end">
             <div className="flex-1 w-full space-y-1.5">
               <label className="text-[9px] font-black uppercase text-slate-400 ml-4 tracking-widest">Próximo Vencimiento</label>
@@ -168,7 +184,7 @@ export function GastosFijosForm({ onSubmit, isLoading, rates, initialData }: any
                   type="date"
                   value={formData.proximoPago}
                   onChange={(e) => setFormData({...formData, proximoPago: e.target.value})}
-                  className="w-full pl-12 pr-6 py-4 bg-slate-50 dark:bg-white/5 rounded-2xl border-none font-bold text-sm"
+                  className="w-full pl-12 pr-6 py-4 bg-slate-50 dark:bg-white/5 rounded-2xl border-none font-bold text-sm cursor-pointer"
                 />
               </div>
             </div>
@@ -176,10 +192,10 @@ export function GastosFijosForm({ onSubmit, isLoading, rates, initialData }: any
             <Button
               type="submit"
               disabled={isLoading}
-              className="h-[52px] px-8 rounded-2xl bg-slate-900 dark:bg-white dark:text-black font-black uppercase text-[10px] tracking-widest gap-3 shadow-xl active:scale-95 transition-all w-full sm:w-auto"
+              className="h-[52px] px-10 rounded-2xl bg-slate-900 dark:bg-white dark:text-black font-black uppercase text-[10px] tracking-[0.2em] gap-3 shadow-xl active:scale-95 transition-all w-full sm:w-auto"
             >
               {isLoading ? <Loader2 className="animate-spin w-4 h-4" /> : <Save className="w-4 h-4" />}
-              Guardar
+              {initialData ? "Actualizar" : "Registrar"}
             </Button>
           </div>
 

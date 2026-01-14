@@ -79,7 +79,6 @@ export default function BudgetEntryView({
         try {
             const data = await loadBudgetsFromFirestore();
             if (data) {
-                // Evitamos el error de keys duplicadas en React filtrando por ID único
                 const uniqueEntries = Array.from(
                     new Map(data.map((item: any) => [item.id, item])).values()
                 );
@@ -92,13 +91,12 @@ export default function BudgetEntryView({
 
     useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
-    // --- LÓGICA DE ITEMS (AÑADIR / ACTUALIZAR) ---
+    // --- LÓGICA DE ITEMS ---
     const handleAddOrUpdateItem = () => {
         const desc = newItem.descripcion.trim() || "Concepto General";
         const calculatedTotal = newItem.cantidad * newItem.precioUnitarioUSD;
 
         if (newItem.id) {
-            // Actualizar item que ya está en la tabla (modo edición de item)
             setBudgetData((prev: any) => ({
                 ...prev,
                 items: prev.items.map((item: any) => 
@@ -109,7 +107,6 @@ export default function BudgetEntryView({
             }));
             toast.success("Concepto actualizado");
         } else {
-            // Añadir nuevo item a la tabla
             setBudgetData((prev: any) => ({ 
                 ...prev, 
                 items: [...prev.items, { ...newItem, descripcion: desc, id: Date.now(), totalUSD: calculatedTotal }] 
@@ -130,14 +127,13 @@ export default function BudgetEntryView({
         });
     };
 
-    // --- LÓGICA DE GUARDADO (CREAR O ACTUALIZAR) ---
+    // --- LÓGICA DE GUARDADO ---
     const handleSaveDraft = async () => {
         if (!budgetData.clienteNombre) return toast.error("El nombre del cliente es obligatorio");
         if (budgetData.items.length === 0) return toast.error("La tabla está vacía");
 
         setIsLoading(true);
         try {
-            // Separamos el ID para enviarlo solo si existe (evita error 'undefined' en Firestore)
             const { id, ...rest } = budgetData;
             const payload: any = {
                 ...rest,
@@ -161,7 +157,7 @@ export default function BudgetEntryView({
         }
     };
 
-    // --- CONVERSIÓN A FACTURA (CON ELIMINACIÓN DEL PRESUPUESTO) ---
+    // --- CONVERSIÓN A FACTURA ---
     const handleConvertToOrder = async (targetBudget?: any) => {
         const data = targetBudget || budgetData;
         if (data.items.length === 0) return toast.error("No hay conceptos para facturar");
@@ -199,13 +195,8 @@ export default function BudgetEntryView({
                 userId: currentUserId
             };
 
-            // 1. Crear la orden de producción
             await createOrden(orderPayload);
-
-            // 2. Eliminar el presupuesto original de Firestore
-            if (data.id) {
-                await deleteBudgetFromFirestore(data.id);
-            }
+            if (data.id) await deleteBudgetFromFirestore(data.id);
 
             toast.success(`Orden #${nextNumber} creada con éxito.`);
             setBudgetData(initialBudgetState);
@@ -384,7 +375,16 @@ export default function BudgetEntryView({
                                 <Button onClick={handleSaveDraft} disabled={isLoading || budgetData.items.length === 0} className="h-16 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-black uppercase text-xs gap-3 active:scale-95 transition-all">
                                     <Save className="w-5 h-5" /> {budgetData.id ? "Actualizar Registro" : "Guardar Borrador"}
                                 </Button>
-                                <Button onClick={() => generateBudgetPDF(budgetData, pdfLogoBase64, { bcvRate: currentBcvRate, firmaBase64, selloBase64 })} disabled={budgetData.items.length === 0} className="h-16 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-xs gap-3 active:scale-95 transition-all">
+                                {/* CORRECCIÓN AQUÍ: Se inyecta el totalUSD calculado manualmente */}
+                                <Button 
+                                    onClick={() => generateBudgetPDF(
+                                        { ...budgetData, totalUSD }, 
+                                        pdfLogoBase64, 
+                                        { bcvRate: currentBcvRate, firmaBase64, selloBase64 }
+                                    )} 
+                                    disabled={budgetData.items.length === 0} 
+                                    className="h-16 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-xs gap-3 active:scale-95 transition-all"
+                                >
                                     <Download className="w-5 h-5" /> Exportar PDF
                                 </Button>
                             </div>
