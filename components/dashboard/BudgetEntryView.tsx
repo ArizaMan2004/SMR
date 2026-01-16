@@ -139,7 +139,7 @@ export default function BudgetEntryView({
                 ...rest,
                 totalUSD: totalUSD,
                 dateCreated: budgetData.id ? budgetData.dateCreated : new Date().toISOString(),
-                userId: currentUserId || "express"
+                userId: "" // CORRECCIÓN: Se deja vacío para ambiente compartido
             };
 
             if (id) payload.id = id;
@@ -192,7 +192,7 @@ export default function BudgetEntryView({
                 totalUSD: data.totalUSD || totalUSD,
                 montoPagadoUSD: 0,
                 estado: 'PENDIENTE',
-                userId: currentUserId
+                userId: "" // CORRECCIÓN: Se deja vacío para ambiente compartido
             };
 
             await createOrden(orderPayload);
@@ -375,7 +375,6 @@ export default function BudgetEntryView({
                                 <Button onClick={handleSaveDraft} disabled={isLoading || budgetData.items.length === 0} className="h-16 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-black uppercase text-xs gap-3 active:scale-95 transition-all">
                                     <Save className="w-5 h-5" /> {budgetData.id ? "Actualizar Registro" : "Guardar Borrador"}
                                 </Button>
-                                {/* CORRECCIÓN AQUÍ: Se inyecta el totalUSD calculado manualmente */}
                                 <Button 
                                     onClick={() => generateBudgetPDF(
                                         { ...budgetData, totalUSD }, 

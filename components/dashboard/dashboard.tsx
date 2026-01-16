@@ -53,21 +53,10 @@ import {
 import { type OrdenServicio } from "@/lib/types/orden"
 import { subscribeToOrdenes, deleteOrden, updateOrdenStatus, createOrden, actualizarOrden } from "@/lib/services/ordenes-service"
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
+import { subscribeToPagos, subscribeToGastos, subscribeToGastosFijos, subscribeToEmpleados, subscribeToNotifications, deleteGastoInsumo, createNotification, deleteNotification, updateNotificationStatus } from "@/lib/services/gastos-service"
 import { subscribeToClients } from "@/lib/services/clientes-service"
 import { syncAllOrdersClientStatus } from "@/lib/services/maintenance-service"
 
-import { 
-    createGasto, 
-    subscribeToGastos, 
-    subscribeToGastosFijos, 
-    subscribeToEmpleados,
-    subscribeToPagos,
-    deleteGastoInsumo,
-    createNotification,
-    subscribeToNotifications,
-    deleteNotification,
-    updateNotificationStatus
-} from "@/lib/services/gastos-service"
 import { fetchBCVRateFromAPI, getBCVRateFromStorage } from "@/lib/services/bcv-service"
 import { 
     getLogoBase64, setLogoBase64, 
@@ -313,8 +302,8 @@ export default function Dashboard() {
             setAssets({ logo: l || "", firma: f || "", sello: s || "" }); 
         });
 
-        // CORRECCIÓN: SUSCRIPCIONES GLOBALES (Sin pasar currentUserId ni empresaId)
-        const unsubOrdenes = subscribeToOrdenes(currentUserId!, (data) => setOrdenes(data));
+        // CORRECCIÓN: SUSCRIPCIONES GLOBALES (Al pasar "" permitimos que el servicio ignore el filtro de usuario si está programado así)
+        const unsubOrdenes = subscribeToOrdenes("", (data) => setOrdenes(data));
         const unsubDesigners = subscribeToDesigners((data) => setDesigners(data));
         const unsubGastos = subscribeToGastos((data) => setGastos(data));
         const unsubGastosFijos = subscribeToGastosFijos((data) => setGastosFijos(data));
@@ -332,7 +321,7 @@ export default function Dashboard() {
             unsubGastosFijos(); unsubEmpleados(); unsubPagos(); 
             unsubNotis(); unsubClientes();
         };
-    }, [currentUserId]);
+    }, []); // Eliminado currentUserId para mantener la suscripción global estable
 
     // --- 6. LÓGICA DE NOTIFICACIONES Y FILTROS ---
     const allNotifications = useMemo(() => {
@@ -483,7 +472,6 @@ export default function Dashboard() {
                 {activeView === "fixed_expenses" && (
                     <GastosFijosView 
                         gastos={gastosFijos} 
-                        // CORRECCIÓN: Eliminado empresaId para que la vista use la lógica global
                         rates={{ usd: currentBcvRate, eur: eurRate }} 
                         onNotification={(t, d) => { 
                             setRateToastMessage(d); 
@@ -506,7 +494,7 @@ export default function Dashboard() {
                 {activeView === "employees_mgmt" && (
     <EmpleadosView 
         empleados={empleados} 
-        pagos={pagos} // <--- FALTA ESTA LÍNEA
+        pagos={pagos} 
         rates={{ usd: currentBcvRate, eur: eurRate }} 
     />
 )}
@@ -531,6 +519,7 @@ export default function Dashboard() {
 
                 {activeView === "calculator" && (
                     <BudgetEntryView 
+                        currentUserId={currentUserId}
                         currentBcvRate={currentBcvRate} pdfLogoBase64={assets.logo} 
                         handleLogoUpload={(e: any) => handleFileUpload(e, 'logo')} handleClearLogo={() => handleClearAsset('logo')}
                         firmaBase64={assets.firma} handleFirmaUpload={(e: any) => handleFileUpload(e, 'firma')} handleClearFirma={() => handleClearAsset('firma')}
