@@ -17,7 +17,9 @@ import { cn } from "@/lib/utils"
 import { 
     Plus, X, User, Receipt, 
     Users, Loader2, Pencil, Trash2, Save, 
-    Palette, Scissors, Printer, Calendar, Box, ShoppingCart, DollarSign, ChevronRight, CheckCircle2, Sparkles
+    Palette, Scissors, Printer, Calendar, Box, ShoppingCart, 
+    DollarSign, ChevronRight, CheckCircle2, Sparkles,
+    Coins, RotateCcw // Nuevos iconos para el redondeo
 } from "lucide-react" 
 
 import { ItemFormModal } from "@/components/orden/item-form-modal"
@@ -77,16 +79,27 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
         return () => { unsubDesigners(); unsubColors(); };
     }, [initialData]);
 
+    // Función auxiliar para calcular el subtotal real de un item (incluyendo lógica de m2)
+    const getItemSubtotal = useCallback((item: any) => {
+        // Si tiene un monto manual establecido por el botón de redondear, lo usamos
+        if (item.totalAjustado !== undefined) return parseFloat(item.totalAjustado);
+
+        const x = parseFloat(item.medidaXCm) || 0;
+        const y = parseFloat(item.medidaYCm) || 0;
+        const p = parseFloat(item.precioUnitario) || 0;
+        const c = parseFloat(item.cantidad) || 0;
+        const e = item.suministrarMaterial ? (parseFloat(item.costoMaterialExtra) || 0) : 0;
+        
+        return item.unidad === 'm2' 
+            ? ((x / 100) * (y / 100) * p + e) * c 
+            : (p + e) * c;
+    }, []);
+
     const currentTotal = useMemo(() => {
         return formData.items.reduce((sum: number, item: any) => {
-            const x = parseFloat(item.medidaXCm) || 0;
-            const y = parseFloat(item.medidaYCm) || 0;
-            const p = parseFloat(item.precioUnitario) || 0;
-            const c = parseFloat(item.cantidad) || 0;
-            const e = item.suministrarMaterial ? (parseFloat(item.costoMaterialExtra) || 0) : 0;
-            return sum + (item.unidad === 'm2' ? ((x/100)*(y/100)*p + e)*c : (p+e)*c);
+            return sum + getItemSubtotal(item);
         }, 0);
-    }, [formData.items]);
+    }, [formData.items, getItemSubtotal]);
 
     const handleSelectClient = (clientId: string) => {
         setSelectedClientId(clientId);
@@ -141,6 +154,35 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
         });
     }, []);
 
+    const handleAdjustItemPrice = (idx: number) => {
+        const item = formData.items[idx];
+        const currentSub = getItemSubtotal(item);
+        
+        // Si ya está ajustado, ofrecemos resetearlo
+        if (item.totalAjustado !== undefined) {
+            const next = [...formData.items];
+            delete next[idx].totalAjustado;
+            handleChange('items', next);
+            toast.info("Precio vuelto al cálculo original");
+            return;
+        }
+
+        const val = window.prompt(
+            `Ajustar precio total para "${item.nombre}"\nMonto actual calculado: $${currentSub.toFixed(2)}`, 
+            Math.max(1, Math.ceil(currentSub)).toString()
+        );
+
+        if (val !== null) {
+            const num = parseFloat(val);
+            if (!isNaN(num)) {
+                const next = [...formData.items];
+                next[idx] = { ...item, totalAjustado: num };
+                handleChange('items', next);
+                toast.success("Precio ajustado manualmente");
+            }
+        }
+    };
+
     const handleSaveOrder = async () => {
         if (!formData.cliente.nombreRazonSocial || formData.items.length === 0) return toast.error("Datos incompletos");
         setIsLoading(true);
@@ -192,8 +234,24 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-3">
-                                                <p className="text-sm font-black dark:text-white">${((item.unidad === 'm2' ? (item.medidaXCm/100)*(item.medidaYCm/100) : 1) * item.cantidad * item.precioUnitario).toFixed(2)}</p>
+                                                <div className="text-right">
+                                                    <p className="text-sm font-black dark:text-white leading-none">${getItemSubtotal(item).toFixed(2)}</p>
+                                                    {item.totalAjustado !== undefined && (
+                                                        <span className="text-[7px] text-amber-500 font-black uppercase tracking-tighter">Ajustado</span>
+                                                    )}
+                                                </div>
                                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    {/* BOTÓN DE REDONDEO / AJUSTE */}
+                                                    <Button 
+                                                        variant="ghost" 
+                                                        size="icon" 
+                                                        className={cn("h-7 w-7 rounded-md", item.totalAjustado !== undefined ? "bg-amber-50 text-amber-600" : "bg-blue-50 text-blue-600")} 
+                                                        onClick={() => handleAdjustItemPrice(idx)}
+                                                        title="Redondear o ajustar precio"
+                                                    >
+                                                        {item.totalAjustado !== undefined ? <RotateCcw className="w-3 h-3" /> : <Coins className="w-3 h-3" />}
+                                                    </Button>
+                                                    
                                                     <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md bg-slate-50" onClick={() => { setEditingItemIndex(idx); setIsItemModalOpen(true); }}><Pencil className="w-3 h-3" /></Button>
                                                     <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md bg-red-50 text-red-500" onClick={() => handleChange('items', formData.items.filter((_:any, i:number)=> i !== idx))}><Trash2 className="w-3 h-3" /></Button>
                                                 </div>
@@ -244,7 +302,6 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                                                 <Input value={formData.cliente.numeroRif} onChange={e => handleChange('cliente.numeroRif', e.target.value)} className="h-9 border-none bg-white dark:bg-slate-900 font-bold text-[10px]" placeholder="000" />
                                             </div>
                                         </div>
-                                        {/* CORRECCIÓN: Teléfono con selector de prefijo */}
                                         <div className="space-y-1">
                                             <Label className="text-[8px] font-black text-slate-400 ml-1 uppercase">Teléfono</Label>
                                             <div className="flex gap-1">
