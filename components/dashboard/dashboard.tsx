@@ -53,7 +53,18 @@ import {
 import { type OrdenServicio } from "@/lib/types/orden"
 import { subscribeToOrdenes, deleteOrden, updateOrdenStatus, createOrden, actualizarOrden } from "@/lib/services/ordenes-service"
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
-import { subscribeToPagos, subscribeToGastos, subscribeToGastosFijos, subscribeToEmpleados, subscribeToNotifications, deleteGastoInsumo, createNotification, deleteNotification, updateNotificationStatus } from "@/lib/services/gastos-service"
+import { 
+    subscribeToPagos, 
+    subscribeToGastos, 
+    subscribeToGastosFijos, 
+    subscribeToEmpleados, 
+    subscribeToNotifications, 
+    deleteGastoInsumo, 
+    createNotification, 
+    deleteNotification, 
+    updateNotificationStatus,
+    createGasto // <--- DEBES AGREGAR ESTA LÍNEA AQUÍ
+} from "@/lib/services/gastos-service"
 import { subscribeToClients } from "@/lib/services/clientes-service"
 import { syncAllOrdersClientStatus } from "@/lib/services/maintenance-service"
 

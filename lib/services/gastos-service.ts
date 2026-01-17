@@ -23,6 +23,7 @@ const isValidDate = (date: any): boolean => {
 
 /**
  * UTILIDAD: Mapea los documentos de Firestore convirtiendo Timestamps a objetos Date de JavaScript.
+ * Mantiene la lista de campos específicos que definiste originalmente.
  */
 const mapSnapshot = (doc: any) => {
   const data = doc.data();
@@ -41,9 +42,12 @@ const mapSnapshot = (doc: any) => {
 // 1. GASTOS DE INSUMOS / VARIABLES (GLOBAL)
 // ==========================================
 
+/**
+ * Crea o actualiza un gasto de insumo.
+ */
 export const createGasto = async (gasto: any) => {
   try {
-    const { id, empresa_id, ...dataToSave } = gasto; // Eliminamos empresa_id si viene en el objeto
+    const { id, empresa_id, ...dataToSave } = gasto; 
     
     const fechaFinal = isValidDate(dataToSave.fecha) 
       ? (dataToSave.fecha instanceof Date ? dataToSave.fecha : new Date(dataToSave.fecha))
@@ -72,13 +76,10 @@ export const createGasto = async (gasto: any) => {
   }
 };
 
-/**
- * Suscripción global a todos los gastos de insumos.
- */
 export const subscribeToGastos = (callback: (gastos: GastoInsumo[]) => void) => {
   const q = query(
     collection(db, "gastos_insumos"),
-    orderBy("fecha", "desc") // Ordenamos por fecha de forma descendente
+    orderBy("fecha", "desc")
   );
   return onSnapshot(q, (snapshot) => {
     const gastos = snapshot.docs.map(mapSnapshot);
@@ -100,9 +101,12 @@ export const deleteGastoInsumo = async (id: string) => {
 // 2. GASTOS FIJOS (RECURRENTES - GLOBAL)
 // ==========================================
 
+/**
+ * Crea un nuevo gasto fijo.
+ */
 export const createGastoFijo = async (gasto: any) => {
   try {
-    const { empresa_id, ...cleanData } = gasto; // Limpieza de IDs privados
+    const { empresa_id, ...cleanData } = gasto; 
     
     const proximoPago = isValidDate(cleanData.proximoPago) 
       ? (cleanData.proximoPago instanceof Date ? cleanData.proximoPago : new Date(cleanData.proximoPago))
@@ -120,13 +124,10 @@ export const createGastoFijo = async (gasto: any) => {
   }
 };
 
-/**
- * Suscripción global a gastos fijos (Sin filtro de empresa_id).
- */
 export const subscribeToGastosFijos = (callback: (gastos: GastoFijo[]) => void) => {
   const q = query(
     collection(db, "gastos_fijos"),
-    orderBy("proximoPago", "asc") // Ordenamos por fecha de vencimiento
+    orderBy("proximoPago", "asc")
   );
   return onSnapshot(q, (snapshot) => {
     const gastos = snapshot.docs.map(mapSnapshot);
@@ -134,6 +135,9 @@ export const subscribeToGastosFijos = (callback: (gastos: GastoFijo[]) => void) 
   });
 };
 
+/**
+ * Actualiza un gasto fijo existente manejando las fechas de pago.
+ */
 export const updateGastoFijo = async (id: string, data: Partial<GastoFijo>) => {
   try {
     const updateData: any = { ...data };
