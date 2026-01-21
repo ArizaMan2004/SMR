@@ -9,8 +9,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { 
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter 
 } from "@/components/ui/dialog"
@@ -19,14 +17,16 @@ import {
     CheckCircle2, ChevronDown, ChevronUp, DollarSign, 
     CalendarClock, Activity, AlertCircle, Sparkles,
     ChevronLeft, ChevronRight, Layers, CreditCard,
-    UploadCloud, Image as ImageIcon, X, Loader2
+    UploadCloud, Image as ImageIcon, X, Loader2,
+    Printer, FileText
 } from 'lucide-react'
 
 import { PaymentHistoryView } from '@/components/orden/PaymentHistoryView' 
 import { PaymentEditModal } from '@/components/dashboard/PaymentEditModal'
 
-// IMPORTACIÓN DEL SERVICIO DE CLOUDINARY DEL PROYECTO
+// IMPORTACIONES DE SERVICIOS
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service" 
+import { generateGeneralAccountStatusPDF } from "@/lib/services/pdf-generator"
 
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -38,6 +38,15 @@ interface ClientSummary {
     totalOrdenes: number
     totalPendienteUSD: number
     ordenesPendientes: OrdenServicio[]
+}
+
+interface ClientsAndPaymentsViewProps {
+    ordenes: any[];
+    bcvRate: number;
+    onRegisterPayment: any;
+    pdfLogoBase64?: string;
+    firmaBase64?: string;
+    selloBase64?: string;
 }
 
 const containerVariants = {
@@ -54,7 +63,14 @@ const itemVariants = {
     visible: { opacity: 1, scale: 1 }
 }
 
-export function ClientsAndPaymentsView({ ordenes, bcvRate, onRegisterPayment }: any) {
+export function ClientsAndPaymentsView({ 
+    ordenes, 
+    bcvRate, 
+    onRegisterPayment,
+    pdfLogoBase64,
+    firmaBase64,
+    selloBase64 
+}: ClientsAndPaymentsViewProps) {
     // --- ESTADOS DE UI Y FILTROS ---
     const [searchTerm, setSearchTerm] = useState('')
     const [filterStatus, setFilterStatus] = useState<'ALL' | EstadoPago>('ALL')
@@ -111,12 +127,10 @@ export function ClientsAndPaymentsView({ ordenes, bcvRate, onRegisterPayment }: 
             const pendiente = Math.max(0, total - pagado);
             
             const nombreCliente = (orden.cliente?.nombreRazonSocial || '').toLowerCase();
-            const numOrden = (orden.ordenNumero || '').toString();
-
             const coincideEstado = filterStatus === 'ALL' || (orden.estadoPago ?? EstadoPago.PENDIENTE) === filterStatus;
             const coincideBusqueda = !lowerCaseSearch || 
                 nombreCliente.includes(lowerCaseSearch) ||
-                numOrden.includes(lowerCaseSearch);
+                (orden.ordenNumero || '').toString().includes(lowerCaseSearch);
 
             if (pendiente > 0.01 && coincideBusqueda) {
                 totalPendGlobal += pendiente;
@@ -142,7 +156,7 @@ export function ClientsAndPaymentsView({ ordenes, bcvRate, onRegisterPayment }: 
             }
         });
 
-        // Ordenamos las órdenes de cada cliente por antigüedad para la distribución correcta
+        // Ordenamos las órdenes de cada cliente por antigüedad
         summaryMap.forEach(s => {
             s.ordenesPendientes.sort((a, b) => new Date(a.fecha || 0).getTime() - new Date(b.fecha || 0).getTime());
         });
@@ -161,26 +175,61 @@ export function ClientsAndPaymentsView({ ordenes, bcvRate, onRegisterPayment }: 
         return clientSummaries.slice(start, start + itemsPerPage);
     }, [clientSummaries, currentPage]);
 
+    // --- LÓGICA DE GENERACIÓN DE REPORTE GENERAL ---
+    const handleGenerateGeneralReceipt = (summary: ClientSummary) => {
+        try {
+            toast.loading(`Generando estado de cuenta para ${summary.nombre}...`);
+            
+            // Aplanamos todos los ítems de todas las órdenes pendientes
+            const consolidatedItems = summary.ordenesPendientes.flatMap(orden => 
+                (orden.items || []).map((item: any) => ({
+                    parentOrder: `#${orden.ordenNumero || 'S/N'}`,
+                    nombre: item.nombre,
+                    cantidad: item.cantidad,
+                    precioUnitario: item.precioUnitario,
+                    totalUSD: item.cantidad * item.precioUnitario 
+                }))
+            );
+
+            generateGeneralAccountStatusPDF(
+                {
+                    clienteNombre: summary.nombre,
+                    clienteRIF: summary.rif,
+                    items: consolidatedItems,
+                    totalPendienteUSD: summary.totalPendienteUSD,
+                    fechaReporte: new Date().toLocaleDateString('es-VE'),
+                },
+                pdfLogoBase64 || "", 
+                {
+                    bcvRate,
+                    firmaBase64,
+                    selloBase64
+                }
+            );
+
+            toast.dismiss();
+            toast.success("Reporte generado con éxito");
+        } catch (error) {
+            toast.dismiss();
+            toast.error("Error al generar el documento PDF");
+            console.error(error);
+        }
+    };
+
     // --- MANEJADOR DE SUBIDA A CLOUDINARY ---
     const handleGlobalImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         try {
-            // Mostrar previsualización inmediata localmente
             setPreviewUrl(URL.createObjectURL(file));
-            
             setIsGlobalUploading(true);
             toast.loading("Subiendo comprobante...");
-            
-            // Subida al servicio de Cloudinary
             const url = await uploadFileToCloudinary(file);
-
             setGlobalPaymentData(prev => ({ ...prev, imagenUrl: url }));
             toast.dismiss();
             toast.success("Comprobante cargado correctamente");
         } catch (error) {
-            console.error("Error upload global:", error);
             toast.dismiss();
             toast.error("Error al subir la imagen");
             setPreviewUrl(null);
@@ -237,14 +286,14 @@ export function ClientsAndPaymentsView({ ordenes, bcvRate, onRegisterPayment }: 
                     <h2 className="text-4xl font-black italic tracking-tighter uppercase text-slate-900 dark:text-white flex items-center gap-3">
                         <Wallet className="w-10 h-10 text-blue-600 drop-shadow-lg"/> Cobranzas <span className="text-blue-600">Pro</span>
                     </h2>
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Entorno compartido - Tiempo real</p>
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Siskoven SMR - Tiempo Real</p>
                 </div>
                 
                 <div className="bg-white/40 dark:bg-white/5 backdrop-blur-xl p-2 rounded-[2rem] border border-white/20 shadow-2xl flex gap-2">
                     <div className="relative">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 opacity-30" />
                         <input
-                            placeholder="Buscar por nombre..."
+                            placeholder="Buscar cliente o número..."
                             value={searchTerm}
                             onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                             className="pl-12 pr-6 py-3 w-full md:w-[300px] bg-white dark:bg-slate-900 border-0 rounded-[1.5rem] shadow-inner text-sm font-bold outline-none"
@@ -314,19 +363,30 @@ export function ClientsAndPaymentsView({ ordenes, bcvRate, onRegisterPayment }: 
                                                 <Badge variant="outline" className="rounded-lg border-slate-200 dark:border-white/10 text-[9px] font-black tracking-widest">{summary.rif}</Badge>
                                             </div>
                                         </div>
-                                        <div className="flex flex-col md:flex-row items-center gap-6">
-                                            <div className="text-center md:text-right">
+                                        <div className="flex flex-col md:flex-row items-center gap-4">
+                                            <div className="text-center md:text-right mr-4">
                                                 <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-1">Saldo Deudor</p>
                                                 <p className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter">{formatCurrency(summary.totalPendienteUSD)}</p>
                                             </div>
-                                            {summary.ordenesPendientes.length > 1 && (
+                                            
+                                            <div className="flex gap-2">
                                                 <Button 
-                                                    onClick={() => { setSelectedClientForGlobal(summary); setIsGlobalModalOpen(true); }}
-                                                    className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black py-7 px-8 text-xs uppercase italic tracking-widest gap-3 shadow-xl"
+                                                    onClick={() => handleGenerateGeneralReceipt(summary)}
+                                                    variant="outline"
+                                                    className="rounded-2xl border-slate-200 dark:border-white/10 font-black py-7 px-6 text-xs uppercase italic tracking-widest gap-3 shadow-sm hover:bg-slate-100 dark:hover:bg-white/5"
                                                 >
-                                                    <Layers className="w-5 h-5"/> Abono Global
+                                                    <Printer className="w-5 h-5 text-slate-500"/> Recibo General
                                                 </Button>
-                                            )}
+
+                                                {summary.ordenesPendientes.length > 1 && (
+                                                    <Button 
+                                                        onClick={() => { setSelectedClientForGlobal(summary); setIsGlobalModalOpen(true); }}
+                                                        className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black py-7 px-8 text-xs uppercase italic tracking-widest gap-3 shadow-xl"
+                                                    >
+                                                        <Layers className="w-5 h-5"/> Abono Global
+                                                    </Button>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                     <Table>
@@ -358,7 +418,7 @@ export function ClientsAndPaymentsView({ ordenes, bcvRate, onRegisterPayment }: 
             <div className="pt-10 space-y-6 pb-20">
                 <div className="flex items-center gap-4 ml-2">
                     <div className="p-2 bg-emerald-100 dark:bg-emerald-500/20 rounded-xl text-emerald-600"><CheckCircle2 className="w-5 h-5" /></div>
-                    <h3 className="text-xl font-black tracking-tight uppercase italic">Historial Pro (Liquidadas)</h3>
+                    <h3 className="text-xl font-black tracking-tight uppercase italic">Historial Liquidadas</h3>
                 </div>
 
                 <Card className="rounded-[3rem] border-0 bg-white/40 dark:bg-slate-900/20 backdrop-blur-xl shadow-2xl overflow-hidden">
@@ -505,7 +565,7 @@ export function ClientsAndPaymentsView({ ordenes, bcvRate, onRegisterPayment }: 
                     onClose={() => { setIsPaymentModalOpen(false); setSelectedOrdenForPayment(null); }}
                     orden={selectedOrdenForPayment}
                     onSave={async (a, n, i) => { await onRegisterPayment(selectedOrdenForPayment.id, a, n, i); setIsPaymentModalOpen(false); }} 
-                    currentUserId={""} // Entorno compartido
+                    currentUserId={""} 
                 />
             )}
         </motion.div>

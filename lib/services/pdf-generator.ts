@@ -2,7 +2,7 @@
 "use client";
 
 import type { OrdenServicio } from "@/lib/types/orden";
-import { formatCurrency, formatDate } from "@/lib/utils/order-utils";
+import { formatCurrency, formatDate, formatBsCurrency } from "@/lib/utils/order-utils";
 
 // --- HELPER PARA CARGA DINÁMICA DE PDFMAKE (FIX ROBUSTO) ---
 async function loadPdfDependencies() {
@@ -87,6 +87,22 @@ interface BudgetData {
     fechaCreacion: string;
 }
 
+// 🆕 INTERFACES PARA ESTADO DE CUENTA CONSOLIDADO
+export interface ConsolidatedItem {
+    parentOrder: string;
+    nombre: string;
+    cantidad: number;
+    precioUnitario: number;
+    totalUSD: number;
+}
+
+export interface GeneralAccountStatusData {
+    clienteNombre: string;
+    clienteRIF: string;
+    items: ConsolidatedItem[];
+    totalPendienteUSD: number;
+    fechaReporte: string;
+}
 
 // --- FUNCIONES Y LÓGICA DE CÁLCULO ORIGINALES ---
 
@@ -240,10 +256,7 @@ const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: 
 ]);
 
 
-// --- FUNCIÓN 1: GENERACIÓN DE ORDEN DE SERVICIO PDF (ANCHO DE CANTIDAD A 55) ---
-/**
- * 🔹 Genera el documento PDF de la orden de servicio.
- */
+// --- FUNCIÓN 1: GENERACIÓN DE ORDEN DE SERVICIO PDF ---
 export async function generateOrderPDF(
   orden: OrdenServicio,
   SMRLogoBase64: string,
@@ -255,7 +268,6 @@ export async function generateOrderPDF(
   const { bcvRate = 1, firmaBase64, selloBase64 } = options;
 
   const totalUSD = orden.totalUSD;
-  const totalVES = totalUSD * bcvRate;
     
   const itemRows = orden.items.map((item) => {
     const itemAny = item as any;
@@ -330,7 +342,6 @@ export async function generateOrderPDF(
         style: "itemsTable",
         table: {
           headerRows: 1,
-          // Ancho de Cantidad: 55
           widths: [55, "*", 100, 70],
           body: [
             [
@@ -356,26 +367,6 @@ export async function generateOrderPDF(
         },
         layout: customTableLayout,
         margin: [0, 5, 0, 15],
-      },
-
-      {
-        columns: [
-          {
-            width: "50%",
-            text: ` `,
-            style: "bcvRate",
-            margin: [0, 0, 0, 10],
-          },
-          {
-            width: "50%",
-            alignment: "right",
-            text: ` `,
-            style: "totalVesRef",
-            margin: [0, 0, 0, 10],
-          },
-        ],
-        columnGap: 10,
-        margin: [0, 0, 0, 15],
       },
 
       {
@@ -406,9 +397,6 @@ export async function generateOrderPDF(
       finalTotalLabelBig: { fontSize: 13, bold: true, color: "#000000", alignment: "right" },
       finalTotalValueBig: { fontSize: 14, bold: true, color: "#007bff", alignment: "right" },
 
-      bcvRate: { fontSize: 9, bold: false, color: "#666666" },
-      totalVesRef: { fontSize: 11, bold: false, color: "#666666" },
-
       notesHeader: { fontSize: 11, bold: true, color: "#333333" },
       farewellText: { fontSize: 9, italics: true, color: "#333333" },
       contactName: { fontSize: 10, bold: true, color: "#333333", margin: [0, 5, 0, 0] },
@@ -423,10 +411,7 @@ export async function generateOrderPDF(
 }
 
 
-// --- FUNCIÓN 2: GENERACIÓN DE PRESUPUESTO PDF (RE-AÑADIDO PRECIO UNITARIO Y TÍTULO FIJO) ---
-/**
- * 🔹 Genera el documento PDF del presupuesto con la tabla corregida y interfaces simplificadas.
- */
+// --- FUNCIÓN 2: GENERACIÓN DE PRESUPUESTO PDF ---
 export async function generateBudgetPDF( 
     budgetData: BudgetData,
     SMRLogoBase64: string,
@@ -438,9 +423,7 @@ export async function generateBudgetPDF(
     const { bcvRate = 1, firmaBase64, selloBase64 } = options;
     
     const totalUSD = budgetData.totalUSD;
-    const totalVES = totalUSD * bcvRate;
     
-    // 🛠️ Re-añadido item.precioUnitarioUSD a la fila de ítems.
     const itemRows = budgetData.items.map((item) => ([
         { text: item.cantidad, alignment: "left", style: "itemText" },
         { text: item.descripcion, style: "itemText" },
@@ -450,7 +433,6 @@ export async function generateBudgetPDF(
     
     const signatureBlockContent = getSignatureBlockContent(firmaBase64, selloBase64);
     
-    // Se usa la interfaz BudgetData simplificada (sin subtotal, sin nota)
     const docDefinition = {
         pageSize: "LETTER",
         content: [
@@ -469,7 +451,6 @@ export async function generateBudgetPDF(
             },
 
             {
-                // Título fijo como "PRESUPUESTO"
                 text: "PRESUPUESTO", 
                 style: "title",
                 alignment: "center",
@@ -487,13 +468,11 @@ export async function generateBudgetPDF(
                 style: "itemsTable",
                 table: {
                     headerRows: 1,
-                    // 🛠️ Ajustado: Ahora son 4 columnas. 55 para Cantidad, * para Desc., 70 para Precio Unit., 70 para Total.
                     widths: [55, "*", 70, 70], 
                     body: [
                         [
                             { text: "Cantidad", style: "tableHeader", alignment: "left" },
                             { text: "Descripción", style: "tableHeader" },
-                            // 🛠️ Re-añadido el encabezado.
                             { text: "Precio Unit. (USD)", style: "tableHeader", alignment: "right" }, 
                             { text: "Total (USD)", style: "tableHeader", alignment: "right" }, 
                         ],
@@ -504,11 +483,10 @@ export async function generateBudgetPDF(
                                 text: "TOTAL",
                                 style: "finalTotalLabelBig",
                                 alignment: "right",
-                                // 🛠️ Ajustado: colSpan vuelve a 3 para abarcar Cantidad, Descripción y Precio Unit.
                                 colSpan: 3, 
                             },
-                            {}, // Celda vacía (colSpan 3)
-                            {}, // Celda vacía (colSpan 3)
+                            {}, 
+                            {}, 
                             { text: formatCurrency(totalUSD), style: "finalTotalValueBig", alignment: "right" },
                         ],
                     ],
@@ -516,11 +494,7 @@ export async function generateBudgetPDF(
                 layout: customTableLayout,
                 margin: [0, 5, 0, 15],
             },
-            
-            // Sección de Totales en Bs
-           
 
-            // Notas Legales
             {
                 stack: [
                     { text: "NOTA:", style: "notesHeader", margin: [0, 0, 0, 5] },
@@ -533,11 +507,9 @@ export async function generateBudgetPDF(
                 alignment: "left",
             },
 
-            // Bloque de Firma y Sello
             ...signatureBlockContent,
         ],
 
-        // ESTILOS REUTILIZADOS DEL CÓDIGO ORIGINAL
         styles: {
             title: { fontSize: 16, bold: true, color: "#333333" },
             clientInfo: { fontSize: 10, bold: true, color: "#333333" },
@@ -551,9 +523,6 @@ export async function generateBudgetPDF(
             finalTotalLabelBig: { fontSize: 13, bold: true, color: "#000000", alignment: "right" },
             finalTotalValueBig: { fontSize: 14, bold: true, color: "#007bff", alignment: "right" },
 
-            bcvRate: { fontSize: 9, bold: false, color: "#666666" },
-            totalVesRef: { fontSize: 11, bold: false, color: "#666666" },
-
             notesHeader: { fontSize: 11, bold: true, color: "#333333" },
             farewellText: { fontSize: 9, italics: true, color: "#333333" },
             contactName: { fontSize: 10, bold: true, color: "#333333", margin: [0, 5, 0, 0] },
@@ -564,6 +533,122 @@ export async function generateBudgetPDF(
         },
     };
 
-    // Usamos .open() para mostrar el PDF en una nueva pestaña.
+    pdfMake.createPdf(docDefinition).open();
+}
+
+// 🆕 FUNCIÓN 3: GENERACIÓN DE ESTADO DE CUENTA CONSOLIDADO
+/**
+ * 🔹 Genera un PDF consolidado con los ítems de todas las órdenes pendientes de un cliente.
+ */
+export async function generateGeneralAccountStatusPDF(
+    data: GeneralAccountStatusData,
+    SMRLogoBase64: string,
+    options: PDFOptions = {}
+) {
+    const pdfMake = await loadPdfDependencies();
+    if (!pdfMake) return;
+
+    const { bcvRate = 1, firmaBase64, selloBase64 } = options;
+
+    const itemRows = data.items.map((item) => ([
+        { text: item.parentOrder, style: "itemText", alignment: "center" },
+        { text: item.cantidad, style: "itemText", alignment: "center" },
+        { text: item.nombre, style: "itemText" },
+        { text: formatCurrency(item.precioUnitario), style: "itemText", alignment: "right" },
+        { text: formatCurrency(item.totalUSD), style: "itemTotal", alignment: "right" },
+    ]));
+
+    const signatureBlockContent = getSignatureBlockContent(firmaBase64, selloBase64);
+
+    const docDefinition = {
+        pageSize: "LETTER",
+        content: [
+            {
+                text: `Corte al: ${data.fechaReporte}`,
+                style: "dateInfo",
+                alignment: "right",
+                margin: [0, 0, 0, 5],
+            },
+            {
+                image: SMRLogoBase64 || FALLBACK_LOGO_PRINCIPAL,
+                width: 150,
+                alignment: "left",
+                margin: [0, 0, 0, 10],
+            },
+            {
+                text: "ESTADO DE CUENTA CONSOLIDADO",
+                style: "title",
+                alignment: "center",
+                margin: [0, 5, 0, 15],
+            },
+            {
+                stack: [
+                    { text: `CLIENTE: ${data.clienteNombre.toUpperCase()}`, style: "clientInfo" },
+                    { text: `RIF/C.I: ${data.clienteRIF}`, style: "clientInfo", margin: [0, 2, 0, 0] },
+                ],
+                margin: [0, 0, 0, 20],
+            },
+            {
+                style: "itemsTable",
+                table: {
+                    headerRows: 1,
+                    widths: [60, 40, "*", 70, 70],
+                    body: [
+                        [
+                            { text: "Referencia", style: "tableHeader", alignment: "center" },
+                            { text: "Cant.", style: "tableHeader", alignment: "center" },
+                            { text: "Descripción del Servicio", style: "tableHeader" },
+                            { text: "P. Unit", style: "tableHeader", alignment: "right" },
+                            { text: "Subtotal", style: "tableHeader", alignment: "right" },
+                        ],
+                        ...itemRows,
+                        [
+                            {
+                                text: "SALDO TOTAL PENDIENTE",
+                                style: "finalTotalLabelBig",
+                                colSpan: 4,
+                                alignment: "right",
+                            },
+                            {}, {}, {},
+                            { 
+                                text: formatCurrency(data.totalPendienteUSD), 
+                                style: "finalTotalValueBig", 
+                                alignment: "right" 
+                            },
+                        ],
+                    ],
+                },
+                layout: customTableLayout,
+            },
+            {
+                text: bcvRate > 1 
+                    ? `Tasa de referencia BCV: ${bcvRate.toFixed(2)} Bs/$  |  Total en Bolívares: ${formatBsCurrency(data.totalPendienteUSD, bcvRate)}`
+                    : "",
+                style: "bcvRate",
+                margin: [0, 15, 0, 0],
+                alignment: "right"
+            },
+            ...signatureBlockContent,
+        ],
+        styles: {
+            title: { fontSize: 14, bold: true, color: "#1e40af" },
+            clientInfo: { fontSize: 10, bold: true },
+            dateInfo: { fontSize: 9, color: "#666666" },
+            tableHeader: { bold: true, fontSize: 9, color: "black", fillColor: "#f3f4f6" },
+            itemsTable: { margin: [0, 5, 0, 5] },
+            itemText: { fontSize: 8, bold: true },
+            itemTotal: { fontSize: 8, bold: true },
+            finalTotalLabelBig: { fontSize: 11, bold: true, alignment: "right" },
+            finalTotalValueBig: { fontSize: 12, bold: true, color: "#e11d48", alignment: "right" },
+            bcvRate: { fontSize: 9, italics: true, color: "#4b5563" },
+            farewellText: { fontSize: 9, italics: true, color: "#333333" },
+            contactName: { fontSize: 10, bold: true, color: "#333333", margin: [0, 5, 0, 0] },
+            contactInfo: { fontSize: 9, color: "#666666" },
+        },
+        defaultStyle: {
+            font: "Roboto",
+        },
+    };
+
     pdfMake.createPdf(docDefinition).open();
 }

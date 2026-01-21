@@ -544,6 +544,9 @@ export default function Dashboard() {
                         ordenes={ordenes} 
                         bcvRate={currentBcvRate} 
                         onRegisterPayment={handleRegisterOrderPayment} 
+                        pdfLogoBase64={assets.logo}
+        firmaBase64={assets.firma}
+        selloBase64={assets.sello}
                     />
                 )}
                 
