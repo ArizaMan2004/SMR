@@ -25,7 +25,7 @@ import { PaymentHistoryView } from '@/components/orden/PaymentHistoryView'
 import { PaymentEditModal } from '@/components/dashboard/PaymentEditModal'
 
 // IMPORTACIONES DE SERVICIOS
-import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service" 
+import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
 import { generateGeneralAccountStatusPDF } from "@/lib/services/pdf-generator"
 
 import { cn } from '@/lib/utils'
@@ -73,7 +73,6 @@ export function ClientsAndPaymentsView({
 }: ClientsAndPaymentsViewProps) {
     // --- ESTADOS DE UI Y FILTROS ---
     const [searchTerm, setSearchTerm] = useState('')
-    const [filterStatus, setFilterStatus] = useState<'ALL' | EstadoPago>('ALL')
     const [currentPage, setCurrentPage] = useState(1)
     const itemsPerPage = 5
     const [expandedOrdenId, setExpandedOrdenId] = useState<string | null>(null);
@@ -82,7 +81,6 @@ export function ClientsAndPaymentsView({
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
     const [selectedOrdenForPayment, setSelectedOrdenForPayment] = useState<OrdenServicio | null>(null)
     
-    // Estados Abono Global
     const [isGlobalModalOpen, setIsGlobalModalOpen] = useState(false)
     const [selectedClientForGlobal, setSelectedClientForGlobal] = useState<ClientSummary | null>(null)
     const [globalPaymentData, setGlobalPaymentData] = useState({ monto: 0, nota: '', imagenUrl: '' })
@@ -104,21 +102,12 @@ export function ClientsAndPaymentsView({
                 const pagado = Number(o.montoPagadoUSD) || 0;
                 const esPagada = (o.estadoPago === EstadoPago.PAGADO) || (total - pagado <= 0.01);
                 const nombreCliente = (o.cliente?.nombreRazonSocial || '').toLowerCase();
-                const numOrden = (o.ordenNumero || '').toString();
-                
-                const coincideBusqueda = !lowerCaseSearch || 
-                    nombreCliente.includes(lowerCaseSearch) ||
-                    numOrden.includes(lowerCaseSearch);
-
+                const coincideBusqueda = !lowerCaseSearch || nombreCliente.includes(lowerCaseSearch);
                 return esPagada && coincideBusqueda && o.estadoPago !== EstadoPago.ANULADO;
             })
-            .sort((a: any, b: any) => {
-                const dateA = new Date(a.fecha || 0).getTime();
-                const dateB = new Date(b.fecha || 0).getTime();
-                return dateB - dateA;
-            });
+            .sort((a: any, b: any) => new Date(b.fecha || 0).getTime() - new Date(a.fecha || 0).getTime());
 
-        // 2. Procesar deudores con agrupación por NOMBRE
+        // 2. Procesar deudores agrupados
         ordenes.forEach((orden: any) => {
             if (orden.estadoPago === EstadoPago.ANULADO) return;
 
@@ -127,68 +116,76 @@ export function ClientsAndPaymentsView({
             const pendiente = Math.max(0, total - pagado);
             
             const nombreCliente = (orden.cliente?.nombreRazonSocial || '').toLowerCase();
-            const coincideEstado = filterStatus === 'ALL' || (orden.estadoPago ?? EstadoPago.PENDIENTE) === filterStatus;
-            const coincideBusqueda = !lowerCaseSearch || 
-                nombreCliente.includes(lowerCaseSearch) ||
-                (orden.ordenNumero || '').toString().includes(lowerCaseSearch);
+            const coincideBusqueda = !lowerCaseSearch || nombreCliente.includes(lowerCaseSearch);
 
             if (pendiente > 0.01 && coincideBusqueda) {
                 totalPendGlobal += pendiente;
-
-                if (coincideEstado) {
-                    const key = (orden.cliente?.nombreRazonSocial || 'S/N').trim().toUpperCase();
-                    
-                    if (!summaryMap.has(key)) {
-                        summaryMap.set(key, {
-                            key, 
-                            nombre: orden.cliente?.nombreRazonSocial || 'Cliente sin nombre', 
-                            rif: orden.cliente?.rifCedula || 'S/N',
-                            totalOrdenes: 0, 
-                            totalPendienteUSD: 0, 
-                            ordenesPendientes: []
-                        });
-                    }
-                    const s = summaryMap.get(key)!;
-                    s.totalPendienteUSD += pendiente;
-                    s.totalOrdenes += total;
-                    s.ordenesPendientes.push(orden);
+                const key = (orden.cliente?.nombreRazonSocial || 'S/N').trim().toUpperCase();
+                
+                if (!summaryMap.has(key)) {
+                    summaryMap.set(key, {
+                        key, 
+                        nombre: orden.cliente?.nombreRazonSocial || 'Cliente sin nombre', 
+                        rif: orden.cliente?.rifCedula || 'S/N',
+                        totalOrdenes: 0, 
+                        totalPendienteUSD: 0, 
+                        ordenesPendientes: []
+                    });
                 }
+                const s = summaryMap.get(key)!;
+                s.totalPendienteUSD += pendiente;
+                s.totalOrdenes += total;
+                s.ordenesPendientes.push(orden);
             }
         });
 
-        // Ordenamos las órdenes de cada cliente por antigüedad
-        summaryMap.forEach(s => {
-            s.ordenesPendientes.sort((a, b) => new Date(a.fecha || 0).getTime() - new Date(b.fecha || 0).getTime());
-        });
+        // Ordenar órdenes internas por fecha
+        summaryMap.forEach(s => s.ordenesPendientes.sort((a, b) => new Date(a.fecha || 0).getTime() - new Date(b.fecha || 0).getTime()));
 
         return { 
             clientSummaries: Array.from(summaryMap.values()).sort((a, b) => b.totalPendienteUSD - a.totalPendienteUSD), 
             pagadasCompletamente: pagadas, 
             totalPendienteGlobal: totalPendGlobal 
         };
-    }, [ordenes, searchTerm, filterStatus]);
+    }, [ordenes, searchTerm]);
 
-    // --- MANEJO DE PAGINACIÓN ---
     const totalPages = Math.ceil(clientSummaries.length / itemsPerPage);
-    const paginatedClients = useMemo(() => {
-        const start = (currentPage - 1) * itemsPerPage;
-        return clientSummaries.slice(start, start + itemsPerPage);
-    }, [clientSummaries, currentPage]);
+    const paginatedClients = useMemo(() => clientSummaries.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage), [clientSummaries, currentPage]);
 
-    // --- LÓGICA DE GENERACIÓN DE REPORTE GENERAL ---
+    // --- LÓGICA DE REPORTE CON CÁLCULOS TÉCNICOS CORREGIDOS ---
     const handleGenerateGeneralReceipt = (summary: ClientSummary) => {
         try {
-            toast.loading(`Generando estado de cuenta para ${summary.nombre}...`);
+            toast.loading("Sincronizando cálculos técnicos de taller...");
             
-            // Aplanamos todos los ítems de todas las órdenes pendientes
             const consolidatedItems = summary.ordenesPendientes.flatMap(orden => 
-                (orden.items || []).map((item: any) => ({
-                    parentOrder: `#${orden.ordenNumero || 'S/N'}`,
-                    nombre: item.nombre,
-                    cantidad: item.cantidad,
-                    precioUnitario: item.precioUnitario,
-                    totalUSD: item.cantidad * item.precioUnitario 
-                }))
+                (orden.items || []).map((item: any) => {
+                    // Extracción de datos para cálculos idénticos al modal
+                    const qty = parseFloat(item.cantidad?.toString()) || 0;
+                    const price = parseFloat(item.precioUnitario?.toString()) || 0;
+                    const x = parseFloat(item.medidaXCm) || 0;
+                    const y = parseFloat(item.medidaYCm) || 0;
+                    const tiempo = item.tiempoCorte;
+
+                    let medidasDisplay = "N/A";
+                    let itemSubtotal = qty * price;
+
+                    // Aplicación de fórmula de taller para m2
+                    if (item.unidad === "m2" && x > 0 && y > 0) {
+                        medidasDisplay = `${x}x${y}cm`;
+                        itemSubtotal = (x / 100) * (y / 100) * price * qty;
+                    } else if (tiempo && tiempo !== "N/A") {
+                        medidasDisplay = tiempo;
+                    }
+
+                    return {
+                        parentOrder: `#${orden.ordenNumero || 'S/N'}`,
+                        nombre: item.nombre,
+                        cantidad: qty,
+                        medidasTiempo: medidasDisplay, // Ahora se muestra en el PDF
+                        precioUnitario: price,
+                        totalUSD: itemSubtotal 
+                    };
+                })
             );
 
             generateGeneralAccountStatusPDF(
@@ -200,27 +197,21 @@ export function ClientsAndPaymentsView({
                     fechaReporte: new Date().toLocaleDateString('es-VE'),
                 },
                 pdfLogoBase64 || "", 
-                {
-                    bcvRate,
-                    firmaBase64,
-                    selloBase64
-                }
+                { bcvRate, firmaBase64, selloBase64 }
             );
 
             toast.dismiss();
-            toast.success("Reporte generado con éxito");
+            toast.success("Estado de cuenta generado correctamente");
         } catch (error) {
             toast.dismiss();
-            toast.error("Error al generar el documento PDF");
-            console.error(error);
+            toast.error("Error al procesar los datos de producción");
         }
     };
 
-    // --- MANEJADOR DE SUBIDA A CLOUDINARY ---
+    // --- MANEJADORES DE ABONOS ---
     const handleGlobalImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
-
         try {
             setPreviewUrl(URL.createObjectURL(file));
             setIsGlobalUploading(true);
@@ -239,35 +230,26 @@ export function ClientsAndPaymentsView({
         }
     };
 
-    // --- LÓGICA DE PROCESAMIENTO DEL ABONO GLOBAL ---
     const handleProcessGlobalPayment = async () => {
         if (!selectedClientForGlobal || globalPaymentData.monto <= 0 || isGlobalUploading) return;
         let remaining = globalPaymentData.monto;
-        
         try {
             toast.loading("Distribuyendo abono entre órdenes...");
             for (const orden of selectedClientForGlobal.ordenesPendientes) {
                 if (remaining <= 0.009) break;
-                
                 const saldoOrden = Number(orden.totalUSD) - (Number(orden.montoPagadoUSD) || 0);
                 const aPagar = Math.min(remaining, saldoOrden);
-                
                 if (aPagar > 0.009) {
-                    await onRegisterPayment(
-                        orden.id, 
-                        aPagar, 
-                        `${globalPaymentData.nota} (Abono Global Consolidado)`.trim(), 
-                        globalPaymentData.imagenUrl 
-                    );
+                    await onRegisterPayment(orden.id, aPagar, `${globalPaymentData.nota} (Consolidado Global)`.trim(), globalPaymentData.imagenUrl);
                     remaining -= aPagar;
                 }
             }
             toast.dismiss();
-            toast.success("Abono procesado con éxito");
+            toast.success("Abono global aplicado con éxito");
             closeGlobalModal();
         } catch (error) {
             toast.dismiss();
-            toast.error("Error al procesar la cobranza global");
+            toast.error("Error al procesar el abono");
         }
     };
 
@@ -286,14 +268,14 @@ export function ClientsAndPaymentsView({
                     <h2 className="text-4xl font-black italic tracking-tighter uppercase text-slate-900 dark:text-white flex items-center gap-3">
                         <Wallet className="w-10 h-10 text-blue-600 drop-shadow-lg"/> Cobranzas <span className="text-blue-600">Pro</span>
                     </h2>
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Siskoven SMR - Tiempo Real</p>
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Siskoven SMR - Entorno Shared</p>
                 </div>
                 
                 <div className="bg-white/40 dark:bg-white/5 backdrop-blur-xl p-2 rounded-[2rem] border border-white/20 shadow-2xl flex gap-2">
                     <div className="relative">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 opacity-30" />
                         <input
-                            placeholder="Buscar cliente o número..."
+                            placeholder="Buscar cliente..."
                             value={searchTerm}
                             onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                             className="pl-12 pr-6 py-3 w-full md:w-[300px] bg-white dark:bg-slate-900 border-0 rounded-[1.5rem] shadow-inner text-sm font-bold outline-none"
@@ -305,9 +287,9 @@ export function ClientsAndPaymentsView({
             {/* KPI ISLAND */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <motion.div variants={itemVariants} className="md:col-span-1">
-                    <Card className="rounded-[3rem] border-0 bg-gradient-to-br from-rose-500 to-rose-700 text-white shadow-2xl overflow-hidden relative p-8 space-y-4">
+                    <Card className="rounded-[3rem] border-0 bg-gradient-to-br from-rose-500 to-rose-700 text-white shadow-2xl relative p-8 space-y-4">
                         <Activity className="absolute -right-6 -bottom-6 w-32 h-32 opacity-10 rotate-12" />
-                        <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-70">Total Cuentas por Cobrar</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-70">Total por Cobrar</p>
                         <div>
                             <h3 className="text-5xl font-black tracking-tighter">{formatCurrency(totalPendienteGlobal)}</h3>
                             <p className="text-xs font-bold opacity-80 mt-2">≈ {formatBsCurrency(totalPendienteGlobal, bcvRate)}</p>
@@ -323,10 +305,10 @@ export function ClientsAndPaymentsView({
                                 <p className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter">{clientSummaries.length}</p>
                             </div>
                             <div>
-                                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2">Estado de Flujo</p>
+                                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2">Estado Activo</p>
                                 <div className="flex items-center gap-2">
                                     <Sparkles className="w-5 h-5 text-blue-500" />
-                                    <p className="text-3xl font-black text-blue-600 tracking-tighter italic uppercase">Activo</p>
+                                    <p className="text-3xl font-black text-blue-600 tracking-tighter italic uppercase">Flujo OK</p>
                                 </div>
                             </div>
                         </div>
@@ -342,9 +324,9 @@ export function ClientsAndPaymentsView({
                         <h3 className="text-xl font-black tracking-tight uppercase italic">Cartera Pendiente</h3>
                     </div>
                     {totalPages > 1 && (
-                        <div className="flex items-center gap-2 bg-white/50 dark:bg-white/5 p-1 rounded-full border border-black/5 shadow-sm">
+                        <div className="flex items-center gap-2 bg-white/50 dark:bg-white/5 p-1 rounded-full border border-black/5">
                             <Button variant="ghost" size="icon" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}><ChevronLeft className="w-4 h-4"/></Button>
-                            <span className="text-[10px] font-black px-2 uppercase tracking-widest">Página {currentPage} de {totalPages}</span>
+                            <span className="text-[10px] font-black px-2 uppercase tracking-widest">Pág {currentPage} de {totalPages}</span>
                             <Button variant="ghost" size="icon" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}><ChevronRight className="w-4 h-4"/></Button>
                         </div>
                     )}
@@ -357,18 +339,19 @@ export function ClientsAndPaymentsView({
                                 <Card className="rounded-[2.5rem] border-0 bg-white dark:bg-slate-900 shadow-xl overflow-hidden group">
                                     <div className="p-8 flex flex-col md:flex-row justify-between items-center gap-6 bg-slate-50/50 dark:bg-white/5 border-b border-black/5">
                                         <div className="flex items-center gap-6">
-                                            <div className="h-16 w-16 rounded-[1.5rem] bg-blue-600 text-white flex items-center justify-center font-black text-2xl uppercase italic shadow-lg shadow-blue-500/20">{summary.nombre.charAt(0)}</div>
+                                            <div className="h-16 w-16 rounded-[1.5rem] bg-blue-600 text-white flex items-center justify-center font-black text-2xl uppercase italic">{summary.nombre.charAt(0)}</div>
                                             <div>
                                                 <h4 className="text-xl font-black uppercase italic leading-none mb-1">{summary.nombre}</h4>
                                                 <Badge variant="outline" className="rounded-lg border-slate-200 dark:border-white/10 text-[9px] font-black tracking-widest">{summary.rif}</Badge>
                                             </div>
                                         </div>
+                                        
                                         <div className="flex flex-col md:flex-row items-center gap-4">
                                             <div className="text-center md:text-right mr-4">
-                                                <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-1">Saldo Deudor</p>
+                                                <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-1">Saldo Total</p>
                                                 <p className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter">{formatCurrency(summary.totalPendienteUSD)}</p>
                                             </div>
-                                            
+
                                             <div className="flex gap-2">
                                                 <Button 
                                                     onClick={() => handleGenerateGeneralReceipt(summary)}
@@ -393,7 +376,7 @@ export function ClientsAndPaymentsView({
                                         <TableBody>
                                             {summary.ordenesPendientes.map((orden) => (
                                                 <TableRow key={orden.id} className="border-0 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
-                                                    <TableCell className="pl-10 font-black text-slate-400 text-xs italic">ORDEN #{orden.ordenNumero || 'S/N'}</TableCell>
+                                                    <TableCell className="pl-10 font-black text-slate-400 text-xs italic">ORDEN #{orden.ordenNumero}</TableCell>
                                                     <TableCell className="text-right font-black text-rose-600 text-lg tracking-tight">
                                                         {formatCurrency(Number(orden.totalUSD) - (Number(orden.montoPagadoUSD) || 0))}
                                                     </TableCell>
@@ -414,7 +397,7 @@ export function ClientsAndPaymentsView({
                 </div>
             </div>
 
-            {/* HISTORIAL DE FACTURAS LIQUIDADAS */}
+            {/* HISTORIAL DE LIQUIDADAS */}
             <div className="pt-10 space-y-6 pb-20">
                 <div className="flex items-center gap-4 ml-2">
                     <div className="p-2 bg-emerald-100 dark:bg-emerald-500/20 rounded-xl text-emerald-600"><CheckCircle2 className="w-5 h-5" /></div>
@@ -437,7 +420,7 @@ export function ClientsAndPaymentsView({
                                 {pagadasCompletamente.slice(0, 10).map((orden: any) => (
                                     <React.Fragment key={orden.id}>
                                         <TableRow className="border-b border-slate-100 dark:border-white/5 hover:bg-white dark:hover:bg-white/5 transition-all">
-                                            <TableCell className="pl-10 font-black text-slate-900 dark:text-white text-xs">#{orden.ordenNumero || 'NaN'}</TableCell>
+                                            <TableCell className="pl-10 font-black text-slate-900 dark:text-white text-xs">#{orden.ordenNumero}</TableCell>
                                             <TableCell>
                                                 <div className="flex flex-col">
                                                     <span className="font-black text-slate-900 dark:text-white tracking-tight italic uppercase text-xs">{orden.cliente?.nombreRazonSocial || 'S/N'}</span>
@@ -460,7 +443,7 @@ export function ClientsAndPaymentsView({
                                         {expandedOrdenId === orden.id && (
                                             <TableRow className="bg-slate-50/50 dark:bg-white/5">
                                                 <TableCell colSpan={5} className="p-10">
-                                                    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                                                    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
                                                         <PaymentHistoryView historial={orden.registroPagos || []} totalOrdenUSD={Number(orden.totalUSD)} montoPagadoUSD={Number(orden.montoPagadoUSD) || 0} />
                                                     </motion.div>
                                                 </TableCell>
@@ -474,12 +457,12 @@ export function ClientsAndPaymentsView({
                 </Card>
             </div>
 
-            {/* DIALOG DE ABONO GLOBAL */}
+            {/* MODAL ABONO GLOBAL */}
             <Dialog open={isGlobalModalOpen} onOpenChange={(open) => !isGlobalUploading && closeGlobalModal()}>
                 <DialogContent className="max-w-md rounded-[2.5rem] border-0 shadow-2xl p-8 outline-none overflow-hidden bg-white dark:bg-[#1c1c1e]">
                     <DialogHeader className="space-y-4">
                         <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-500/20 rounded-2xl flex items-center justify-center text-emerald-600 mx-auto shadow-inner"><CreditCard className="w-8 h-8" /></div>
-                        <DialogTitle className="text-2xl font-black uppercase italic text-center leading-none text-slate-900 dark:text-white">Abono General</DialogTitle>
+                        <DialogTitle className="text-2xl font-black uppercase italic text-center text-slate-900 dark:text-white leading-none">Abono General</DialogTitle>
                         <DialogDescription className="text-center font-bold text-[10px] uppercase text-slate-400 tracking-widest">Pago compartido para {selectedClientForGlobal?.nombre}</DialogDescription>
                     </DialogHeader>
 
@@ -499,7 +482,7 @@ export function ClientsAndPaymentsView({
                         </div>
 
                          <div className="space-y-2">
-                            <label className="text-[10px] font-black uppercase tracking-widest ml-2 opacity-50 text-slate-900 dark:text-white">Capture del Pago</label>
+                            <label className="text-[10px] font-black uppercase tracking-widest ml-2 opacity-50 text-slate-900 dark:text-white">Capture de Pago</label>
                             <input type="file" ref={globalFileInputRef} onChange={handleGlobalImageUpload} accept="image/*" className="hidden" />
                             
                             {!previewUrl ? (
@@ -518,7 +501,7 @@ export function ClientsAndPaymentsView({
                                     )}
                                 </div>
                             ) : (
-                                <div className="relative h-40 rounded-2xl overflow-hidden border border-black/5 dark:border-white/10 group shadow-lg">
+                                <div className="relative h-40 rounded-2xl overflow-hidden border border-black/5 dark:border-white/10 shadow-lg group">
                                     <img src={previewUrl} alt="Comprobante" className="w-full h-full object-cover" />
                                     <Button
                                         variant="ghost"
@@ -529,7 +512,6 @@ export function ClientsAndPaymentsView({
                                     >
                                         <X className="w-4 h-4" />
                                     </Button>
-                                    <div className="absolute bottom-2 left-2 bg-black/50 text-white text-[8px] font-black uppercase px-3 py-1 rounded-full backdrop-blur-sm">Capture cargado</div>
                                 </div>
                             )}
                         </div>
@@ -540,7 +522,7 @@ export function ClientsAndPaymentsView({
                                 value={globalPaymentData.nota} 
                                 onChange={(e) => setGlobalPaymentData({...globalPaymentData, nota: e.target.value})}
                                 className="w-full h-24 p-5 rounded-2xl border-0 bg-slate-50 dark:bg-black/20 font-bold text-xs resize-none outline-none focus:ring-2 ring-emerald-500/20 text-slate-900 dark:text-white" 
-                                placeholder="Indica banco, referencia, método..."
+                                placeholder="Indica banco, referencia..."
                             />
                         </div>
                     </div>
@@ -564,7 +546,7 @@ export function ClientsAndPaymentsView({
                     isOpen={isPaymentModalOpen}
                     onClose={() => { setIsPaymentModalOpen(false); setSelectedOrdenForPayment(null); }}
                     orden={selectedOrdenForPayment}
-                    onSave={async (a, n, i) => { await onRegisterPayment(selectedOrdenForPayment.id, a, n, i); setIsPaymentModalOpen(false); }} 
+                    onSave={async (a, n, i) => { await onRegisterPayment(selectedOrdenForPayment.id, a, n, i); setIsPaymentModalOpen(false); }}
                     currentUserId={""} 
                 />
             )}
