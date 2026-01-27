@@ -1,46 +1,60 @@
-// ⚠️ AJUSTA ESTAS IMPORTACIONES: 
-// Asegúrate de que './firebase-config' apunte a donde exportas tu instancia 'db' de Firestore.
-import { db } from './firebase-config'; 
+// @/lib/firebase/ordenes.ts
+
+import { db } from './firebase-config'; // Asegúrate de que esta ruta sea correcta
 import { collection, query, orderBy, limit, getDocs } from "firebase/firestore";
 
 /**
- * Consulta la base de datos de Firestore para obtener el número de la última orden guardada.
- * * 🚨 CRUCIAL: Se asume que el campo 'ordenNumero' en Firestore está guardado como un tipo NUMÉRICO.
- * Si lo guardas como string, el ordenamiento (orderBy) será alfabético (Ej: "10" < "2"), lo cual es incorrecto.
- * * @returns El número de orden más alto encontrado (como número), o 0 si no hay órdenes.
+ * Obtiene el número de orden más alto REAL, corrigiendo el error de ordenamiento alfabético.
+ * Estrategia: Obtiene las últimas 10 órdenes creadas (por fecha) y busca el número mayor matemáticamente.
  */
 export async function getLastOrderNumber(): Promise<number> {
     try {
         const ordenesRef = collection(db, "ordenes");
         
-        // 1. Consulta: Busca en la colección 'ordenes'
-        // 2. Ordena: Por 'ordenNumero' de forma descendente (el más alto primero)
-        // 3. Limita: A un solo documento (la última orden)
-        const q = query(ordenesRef, orderBy("ordenNumero", "desc"), limit(1));
+        // 1. CAMBIO CLAVE: Ordenamos por 'updatedAt' (fecha) descendente.
+        // Esto nos garantiza traer las órdenes más recientes (la 100, la 99, etc.),
+        // ignorando si la DB cree que "99" es mayor que "100".
+        const q = query(ordenesRef, orderBy("updatedAt", "desc"), limit(10));
+        
         const snapshot = await getDocs(q);
 
         if (snapshot.empty) {
-            console.log("Colección 'ordenes' vacía. Se asignará el N° 1.");
-            return 0; // Si no hay documentos, el último número es 0.
+            console.log("No hay órdenes previas. Iniciando conteo en 0.");
+            return 0; 
         }
 
-        const lastOrder = snapshot.docs[0].data();
-        
-        // Extrae el valor y lo asegura como número.
-        const lastNumber = typeof lastOrder.ordenNumero === 'number' 
-            ? lastOrder.ordenNumero 
-            : parseInt(lastOrder.ordenNumero, 10);
-        
-        if (isNaN(lastNumber)) {
-             console.error("El campo 'ordenNumero' no es un número válido en la última orden.");
-             return 0; 
-        }
+        // 2. Convertimos los resultados a Números Reales de Javascript
+        const numerosEncontrados = snapshot.docs.map(doc => {
+            const data = doc.data();
+            // Parseamos el string a int (ej: "100" -> 100)
+            const num = parseInt(data.ordenNumero, 10);
+            return isNaN(num) ? 0 : num;
+        });
 
-        return lastNumber;
+        // 3. Usamos Math.max para encontrar el verdadero número mayor
+        // Javascript sí sabe que 100 es mayor que 99.
+        const maxNumber = Math.max(...numerosEncontrados);
+
+        return maxNumber;
 
     } catch (error) {
-        console.error("Error al obtener el último número de orden de Firebase:", error);
-        // Devuelve 0 en caso de fallo para evitar que el formulario se rompa y comenzar en 1.
-        return 0; 
+        console.error("Error al obtener último número:", error);
+        
+        // INTENTO DE RESPALDO (FALLBACK)
+        // Si falla el ordenamiento por fecha (ej. datos viejos sin fecha), 
+        // intentamos el método antiguo pero trayendo MUCHOS documentos para saltar el "99"
+        try {
+            const ordenesRef = collection(db, "ordenes");
+            // Traemos las "supuestas" últimas 50 órdenes alfabéticas para intentar encontrar la 100
+            const qFallback = query(ordenesRef, orderBy("ordenNumero", "desc"), limit(50));
+            const snapFallback = await getDocs(qFallback);
+            
+            if (snapFallback.empty) return 0;
+
+            const nums = snapFallback.docs.map(d => parseInt(d.data().ordenNumero, 10) || 0);
+            return Math.max(...nums);
+        } catch (e) {
+            return 0;
+        }
     }
 }

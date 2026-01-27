@@ -4,25 +4,22 @@
 import type { OrdenServicio } from "@/lib/types/orden";
 import { formatCurrency, formatDate, formatBsCurrency } from "@/lib/utils/order-utils";
 
-// --- HELPER PARA CARGA DINÁMICA DE PDFMAKE (FIX ROBUSTO) ---
+// --- HELPER PARA CARGA DINÁMICA DE PDFMAKE ---
 async function loadPdfDependencies() {
     if (typeof window === 'undefined') {
         return null; 
     }
     
-    // Carga dinámica de las librerías para evitar errores de SSR en Next.js
     const [pdfMakeImport, pdfFontsImport] = await Promise.all([
         import('pdfmake/build/pdfmake'),
         import('pdfmake/build/vfs_fonts'),
     ]);
 
-    // Obtener los objetos principales (verificando .default por compatibilidad de módulos)
     const pdfMake = pdfMakeImport.default || pdfMakeImport;
     const pdfFontsModule = pdfFontsImport.default || pdfFontsImport;
 
     let vfsObject = null;
 
-    // Lógica para encontrar el objeto VFS en diferentes estructuras de empaquetado
     if (pdfFontsModule && pdfFontsModule.pdfMake && pdfFontsModule.pdfMake.vfs) {
         vfsObject = pdfFontsModule.pdfMake.vfs;
     } 
@@ -36,11 +33,10 @@ async function loadPdfDependencies() {
     if (vfsObject) {
         pdfMake.vfs = vfsObject;
     } else {
-        console.error("Error: Estructura de pdfFonts/vfs_fonts no encontrada. No se pudo inicializar pdfmake.vfs.");
+        console.error("Error: Estructura de pdfFonts/vfs_fonts no encontrada.");
         return null;
     }
     
-    // Configuración de fuentes Roboto estándar
     pdfMake.fonts = {
         Roboto: {
             normal: "Roboto-Regular.ttf",
@@ -86,7 +82,6 @@ interface BudgetData {
     fechaCreacion: string;
 }
 
-// Interfaz para el Recibo General consolidado
 export interface ConsolidatedItem {
     parentOrder: string;
     nombre: string;
@@ -104,15 +99,18 @@ export interface GeneralAccountStatusData {
     fechaReporte: string;
 }
 
-// --- LÓGICA DE CÁLCULO TÉCNICO ---
+// --- LÓGICA DE CÁLCULO TÉCNICO CORREGIDA ---
 
 /**
- * 🔹 Calcula el subtotal real de un ítem basado en su unidad (m2, tiempo, und).
- * Implementa la fórmula exacta: (cm/100) * (cm/100) * precio * cantidad para m2.
+ * 🔹 Calcula el subtotal real priorizando el valor guardado en el Wizard.
  */
 const calculateItemSubtotal = (item: any): number => {
-  const { unidad, cantidad, precioUnitario, medidaXCm, medidaYCm, tiempoCorte } = item;
+  // 1. Prioridad absoluta al subtotal ya procesado/ajustado
+  if (item.subtotal !== undefined) {
+    return parseFloat(item.subtotal);
+  }
 
+  const { unidad, cantidad, precioUnitario, medidaXCm, medidaYCm, tiempoCorte } = item;
   const finalCantidad = parseFloat(cantidad) || 0;
   const finalPrecio = parseFloat(precioUnitario) || 0;
 
@@ -122,7 +120,6 @@ const calculateItemSubtotal = (item: any): number => {
     const x = parseFloat(medidaXCm) || 0;
     const y = parseFloat(medidaYCm) || 0;
     if (x > 0 && y > 0) {
-      // Cálculo de metros cuadrados solicitado
       return (x / 100) * (y / 100) * finalPrecio * finalCantidad;
     }
   } else if (unidad === "tiempo") {
@@ -137,19 +134,16 @@ const calculateItemSubtotal = (item: any): number => {
   return finalCantidad * finalPrecio;
 };
 
-// --- DISEÑO DE TABLAS Y BLOQUES ---
+// --- DISEÑO ---
 
 const customTableLayout = {
-    hLineWidth: (i: number, node: any) => 1,
-    vLineWidth: (i: number, node: any) => 1,
+    hLineWidth: (i: number) => 1,
+    vLineWidth: (i: number) => 1,
     hLineColor: () => "black",
     vLineColor: () => "black",
     fillColor: (i: number) => (i === 0 ? "#EEEEEE" : null),
     paddingLeft: () => 8, paddingRight: () => 8, paddingTop: () => 6, paddingBottom: () => 6,
 };
-
-const emptySpacerCell = { text: " ", margin: [0, 8, 0, 8] };
-const emptyRows = [[emptySpacerCell, "", "", ""], [emptySpacerCell, "", "", ""]];
 
 const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: string | undefined) => ([
     {
@@ -190,9 +184,6 @@ const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: 
 
 // --- FUNCIONES EXPORTADAS ---
 
-/**
- * 🔹 Genera el documento PDF de una Orden de Servicio individual.
- */
 export async function generateOrderPDF(orden: OrdenServicio, SMRLogoBase64: string, options: PDFOptions = {}) {
   const pdfMake = await loadPdfDependencies();
   if (!pdfMake) return;
@@ -201,7 +192,7 @@ export async function generateOrderPDF(orden: OrdenServicio, SMRLogoBase64: stri
   const totalUSD = orden.totalUSD;
     
   const itemRows = orden.items.map((item: any) => {
-    const subtotal = calculateItemSubtotal(item);
+    const subtotal = calculateItemSubtotal(item); //
     let med = "N/A";
     if (item.unidad === "m2") med = `${item.medidaXCm}x${item.medidaYCm}cm`;
     else if (item.tiempoCorte) med = item.tiempoCorte;
@@ -266,20 +257,24 @@ export async function generateOrderPDF(orden: OrdenServicio, SMRLogoBase64: stri
   pdfMake.createPdf(docDefinition).open();
 }
 
-/**
- * 🔹 Genera un PDF de presupuesto genérico.
- */
 export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: string, options: PDFOptions = {}) {
     const pdfMake = await loadPdfDependencies();
     if (!pdfMake) return; 
     const { bcvRate = 1, firmaBase64, selloBase64 } = options;
 
-    const itemRows = budgetData.items.map(item => [
-        { text: item.cantidad, style: "itemText" },
-        { text: item.descripcion, style: "itemText" },
-        { text: formatCurrency(item.precioUnitarioUSD), style: "itemText", alignment: "right" },
-        { text: formatCurrency(item.totalUSD), style: "itemTotal", alignment: "right" },
-    ]);
+    const itemRows = budgetData.items.map(item => {
+        // Cálculo de Precio Unitario Real para evitar confusión con ajustes
+        const subtotal = item.totalUSD;
+        const qty = item.cantidad || 1;
+        const unitPrice = subtotal / qty;
+
+        return [
+            { text: item.cantidad, style: "itemText" },
+            { text: item.descripcion, style: "itemText" },
+            { text: formatCurrency(unitPrice), style: "itemText", alignment: "right" },
+            { text: formatCurrency(subtotal), style: "itemTotal", alignment: "right" },
+        ];
+    });
 
     const docDefinition: any = {
         pageSize: "LETTER",
@@ -294,7 +289,6 @@ export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: s
                     body: [
                         [{ text: "Cant.", style: "tableHeader" }, { text: "Descripción", style: "tableHeader" }, { text: "P. Unit", style: "tableHeader", alignment: "right" }, { text: "Total", style: "tableHeader", alignment: "right" }],
                         ...itemRows,
-                        ...emptyRows,
                         [{ text: "TOTAL", colSpan: 3, style: "finalTotalLabelBig", alignment: "right" }, {}, {}, { text: formatCurrency(budgetData.totalUSD), style: "finalTotalValueBig", alignment: "right" }]
                     ]
                 },
@@ -316,23 +310,27 @@ export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: s
     pdfMake.createPdf(docDefinition).open();
 }
 
-/**
- * 🔹 Genera el Estado de Cuenta Consolidado (Recibo General).
- */
 export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatusData, SMRLogoBase64: string, options: PDFOptions = {}) {
     const pdfMake = await loadPdfDependencies();
     if (!pdfMake) return;
 
     const { bcvRate = 1, firmaBase64, selloBase64 } = options;
 
-    const itemRows = data.items.map((item) => ([
-        { text: item.parentOrder, style: "itemText", alignment: "center" },
-        { text: item.cantidad, style: "itemText", alignment: "center" },
-        { text: item.nombre, style: "itemText" },
-        { text: item.medidasTiempo || "N/A", style: "itemText", alignment: "center" },
-        { text: formatCurrency(item.precioUnitario), style: "itemText", alignment: "right" },
-        { text: formatCurrency(item.totalUSD), style: "itemTotal", alignment: "right" },
-    ]));
+    const itemRows = data.items.map((item) => {
+        // Cálculo de Precio Unitario Real para el Estado de Cuenta
+        const subtotal = item.totalUSD;
+        const qty = item.cantidad || 1;
+        const unitPrice = subtotal / qty;
+
+        return [
+            { text: item.parentOrder, style: "itemText", alignment: "center" },
+            { text: item.cantidad, style: "itemText", alignment: "center" },
+            { text: item.nombre, style: "itemText" },
+            { text: item.medidasTiempo || "N/A", style: "itemText", alignment: "center" },
+            { text: formatCurrency(unitPrice), style: "itemText", alignment: "right" },
+            { text: formatCurrency(subtotal), style: "itemTotal", alignment: "right" },
+        ];
+    });
 
     const docDefinition: any = {
         pageSize: "LETTER",

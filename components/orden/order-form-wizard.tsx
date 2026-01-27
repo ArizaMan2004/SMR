@@ -19,7 +19,7 @@ import {
     Users, Loader2, Pencil, Trash2, Save, 
     Palette, Scissors, Printer, Calendar, Box, ShoppingCart, 
     DollarSign, ChevronRight, CheckCircle2, Sparkles,
-    Coins, RotateCcw // Nuevos iconos para el redondeo
+    Coins, RotateCcw
 } from "lucide-react" 
 
 import { ItemFormModal } from "@/components/orden/item-form-modal"
@@ -79,9 +79,7 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
         return () => { unsubDesigners(); unsubColors(); };
     }, [initialData]);
 
-    // Función auxiliar para calcular el subtotal real de un item (incluyendo lógica de m2)
     const getItemSubtotal = useCallback((item: any) => {
-        // Si tiene un monto manual establecido por el botón de redondear, lo usamos
         if (item.totalAjustado !== undefined) return parseFloat(item.totalAjustado);
 
         const x = parseFloat(item.medidaXCm) || 0;
@@ -158,7 +156,6 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
         const item = formData.items[idx];
         const currentSub = getItemSubtotal(item);
         
-        // Si ya está ajustado, ofrecemos resetearlo
         if (item.totalAjustado !== undefined) {
             const next = [...formData.items];
             delete next[idx].totalAjustado;
@@ -188,7 +185,26 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
         setIsLoading(true);
         try {
             const { prefijoTelefono, numeroTelefono, prefijoRif, numeroRif, ...clienteRest } = formData.cliente;
-            const finalPayload = { ...formData, totalUSD: parseFloat(currentTotal.toFixed(2)), userId: currentUserId, updatedAt: new Date().toISOString(), cliente: { ...clienteRest, telefono: `${prefijoTelefono}${numeroTelefono}`, rifCedula: `${prefijoRif}-${numeroRif}` } };
+            
+            // --- CORRECCIÓN: Procesar subtotales de items antes de guardar ---
+            const processedItems = formData.items.map((item: any) => ({
+                ...item,
+                subtotal: parseFloat(getItemSubtotal(item).toFixed(2))
+            }));
+
+            const finalPayload = { 
+                ...formData, 
+                items: processedItems, // Guardamos los items con su subtotal estático
+                totalUSD: parseFloat(currentTotal.toFixed(2)), 
+                userId: currentUserId, 
+                updatedAt: new Date().toISOString(), 
+                cliente: { 
+                    ...clienteRest, 
+                    telefono: `${prefijoTelefono}${numeroTelefono}`, 
+                    rifCedula: `${prefijoRif}-${numeroRif}` 
+                } 
+            };
+
             if (initialData?.id) await onUpdate(initialData.id, finalPayload);
             else await onCreate(finalPayload);
             onClose();
@@ -199,7 +215,6 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
 
     return (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="relative w-full h-full bg-[#f8fafc] dark:bg-black flex flex-col overflow-hidden rounded-[2rem] border dark:border-white/5 shadow-2xl">
-            {/* HEADER COMPACTO */}
             <header className="h-14 shrink-0 bg-white dark:bg-slate-900 border-b flex items-center justify-between px-6 z-20">
                 <div className="flex items-center gap-3">
                     <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><ShoppingCart className="w-4 h-4" /></div>
@@ -212,7 +227,6 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
             </header>
 
             <main className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
-                {/* IZQUIERDA: LISTA DE PRODUCTOS */}
                 <section className="flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-950 border-r">
                     <div className="p-3 px-6 flex justify-between items-center border-b bg-slate-50/50">
                         <h3 className="font-black text-[9px] uppercase text-slate-500 tracking-widest flex items-center gap-2"><Box className="w-3.5 h-3.5" /> Items en Orden</h3>
@@ -241,7 +255,6 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                                                     )}
                                                 </div>
                                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    {/* BOTÓN DE REDONDEO / AJUSTE */}
                                                     <Button 
                                                         variant="ghost" 
                                                         size="icon" 
@@ -251,7 +264,6 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                                                     >
                                                         {item.totalAjustado !== undefined ? <RotateCcw className="w-3 h-3" /> : <Coins className="w-3 h-3" />}
                                                     </Button>
-                                                    
                                                     <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md bg-slate-50" onClick={() => { setEditingItemIndex(idx); setIsItemModalOpen(true); }}><Pencil className="w-3 h-3" /></Button>
                                                     <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md bg-red-50 text-red-500" onClick={() => handleChange('items', formData.items.filter((_:any, i:number)=> i !== idx))}><Trash2 className="w-3 h-3" /></Button>
                                                 </div>
@@ -264,11 +276,9 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                     </ScrollArea>
                 </section>
 
-                {/* DERECHA: CLIENTE Y DATOS */}
                 <aside className="w-full lg:w-[350px] shrink-0 bg-[#f1f5f9] dark:bg-black border-l dark:border-slate-800 flex flex-col min-h-0">
                     <ScrollArea className="flex-1">
                         <div className="p-5 space-y-6">
-                            {/* SECCIÓN CLIENTE */}
                             <section className="space-y-4">
                                 <div className="flex justify-between items-center">
                                     <Label className="text-[9px] font-black uppercase text-slate-400">Datos del Cliente</Label>
@@ -305,25 +315,11 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                                         <div className="space-y-1">
                                             <Label className="text-[8px] font-black text-slate-400 ml-1 uppercase">Teléfono</Label>
                                             <div className="flex gap-1">
-                                                <Select 
-                                                    value={formData.cliente.prefijoTelefono} 
-                                                    onValueChange={v => handleChange('cliente.prefijoTelefono', v)}
-                                                >
-                                                    <SelectTrigger className="w-14 h-9 border-none bg-white dark:bg-slate-900 font-bold text-[10px] px-1">
-                                                        <SelectValue />
-                                                    </SelectTrigger>
-                                                    <SelectContent className="min-w-[5rem]">
-                                                        {PREFIJOS_TELEFONO.map(p => (
-                                                            <SelectItem key={p} value={p} className="text-[10px] font-bold">{p}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
+                                                <Select value={formData.cliente.prefijoTelefono} onValueChange={v => handleChange('cliente.prefijoTelefono', v)}>
+                                                    <SelectTrigger className="w-14 h-9 border-none bg-white dark:bg-slate-900 font-bold text-[10px] px-1"><SelectValue /></SelectTrigger>
+                                                    <SelectContent className="min-w-[5rem]">{PREFIJOS_TELEFONO.map(p => <SelectItem key={p} value={p} className="text-[10px] font-bold">{p}</SelectItem>)}</SelectContent>
                                                 </Select>
-                                                <Input 
-                                                    value={formData.cliente.numeroTelefono} 
-                                                    onChange={e => handleChange('cliente.numeroTelefono', e.target.value.replace(/\D/g, ''))} 
-                                                    className="h-9 border-none bg-white dark:bg-slate-900 font-bold text-[10px] flex-1" 
-                                                    placeholder="7 dígitos" 
-                                                />
+                                                <Input value={formData.cliente.numeroTelefono} onChange={e => handleChange('cliente.numeroTelefono', e.target.value.replace(/\D/g, ''))} className="h-9 border-none bg-white dark:bg-slate-900 font-bold text-[10px] flex-1" placeholder="7 dígitos" />
                                             </div>
                                         </div>
                                     </div>
@@ -340,7 +336,6 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                                 </div>
                             </section>
 
-                            {/* PLANIFICACIÓN */}
                             <section className="space-y-4">
                                 <div className="space-y-1">
                                     <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2"><Calendar className="w-3.5 h-3.5 text-orange-400" /> Entrega Prometida</Label>
@@ -354,7 +349,6 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                         </div>
                     </ScrollArea>
 
-                    {/* FOOTER TOTAL - SIEMPRE VISIBLE */}
                     <div className="p-4 bg-white dark:bg-slate-900 border-t dark:border-slate-800 space-y-3 shrink-0">
                         <div className="flex justify-between items-center px-1">
                             <div><p className="text-[8px] font-black text-slate-400 uppercase leading-none mb-1">Subtotal Neto</p>{formData.cliente.tipoCliente === 'ALIADO' && <Badge className="bg-purple-600 text-[6px] h-3.5 px-1.5 font-black text-white uppercase">Tarifa Aliado</Badge>}</div>
