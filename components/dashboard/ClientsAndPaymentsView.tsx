@@ -4,25 +4,33 @@
 import React, { useMemo, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { type OrdenServicio, EstadoPago } from '@/lib/types/orden'
-import { formatCurrency, formatBsCurrency } from '@/lib/utils/order-utils' 
-import { Card, CardContent } from '@/components/ui/card'
+import { formatCurrency } from '@/lib/utils/order-utils' 
+import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { 
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter 
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { 
-    Wallet, Search, Filter, ArrowUpRight, 
+    Wallet, Search, 
     CheckCircle2, ChevronDown, ChevronUp, DollarSign, 
-    CalendarClock, Activity, AlertCircle, Sparkles,
+    CalendarClock, Activity, Sparkles,
     ChevronLeft, ChevronRight, Layers, CreditCard,
-    UploadCloud, Image as ImageIcon, X, Loader2,
-    Printer, FileText
+    UploadCloud, X, Loader2,
+    Printer, Banknote // Agregamos icono de billete
 } from 'lucide-react'
 
-import { PaymentHistoryView } from '@/components/orden/PaymentHistoryView' 
 import { PaymentEditModal } from '@/components/dashboard/PaymentEditModal'
+import { PaymentHistoryView } from '@/components/orden/PaymentHistoryView' 
 
 // IMPORTACIONES DE SERVICIOS
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
@@ -42,7 +50,11 @@ interface ClientSummary {
 
 interface ClientsAndPaymentsViewProps {
     ordenes: any[];
-    bcvRate: number;
+    rates: {
+        usd: number;
+        eur: number;
+        usdt: number;
+    };
     onRegisterPayment: any;
     pdfLogoBase64?: string;
     firmaBase64?: string;
@@ -65,7 +77,7 @@ const itemVariants = {
 
 export function ClientsAndPaymentsView({ 
     ordenes, 
-    bcvRate, 
+    rates, 
     onRegisterPayment,
     pdfLogoBase64,
     firmaBase64,
@@ -152,27 +164,52 @@ export function ClientsAndPaymentsView({
     const totalPages = Math.ceil(clientSummaries.length / itemsPerPage);
     const paginatedClients = useMemo(() => clientSummaries.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage), [clientSummaries, currentPage]);
 
-    // --- LÓGICA DE REPORTE CON CÁLCULOS TÉCNICOS CORREGIDOS ---
-    const handleGenerateGeneralReceipt = (summary: ClientSummary) => {
+    // --- LÓGICA DE REPORTE CON SELECCIÓN DE TASA ---
+    const handleGenerateGeneralReceipt = (summary: ClientSummary, rateType: 'USD' | 'EUR' | 'USDT' | 'USD_ONLY') => {
         try {
-            toast.loading("Sincronizando cálculos técnicos de taller...");
+            toast.loading(`Generando estado de cuenta (${rateType === 'USD_ONLY' ? 'Solo USD' : rateType})...`);
             
+            // 1. Configurar la moneda seleccionada
+            let selectedCurrency = { rate: rates.usd, label: "Tasa BCV ($)", symbol: "Bs." };
+            if (rateType === 'EUR') selectedCurrency = { rate: rates.eur, label: "Tasa BCV (€)", symbol: "Bs." };
+            if (rateType === 'USDT') selectedCurrency = { rate: rates.usdt, label: "Tasa Monitor", symbol: "Bs." };
+            
+            // OPCIÓN NUEVA: Si es solo USD, pasamos tasa 1 para que el generador oculte la conversión
+            if (rateType === 'USD_ONLY') selectedCurrency = { rate: 1, label: "", symbol: "" };
+
             const consolidatedItems = summary.ordenesPendientes.flatMap(orden => 
                 (orden.items || []).map((item: any) => {
-                    // Extracción de datos para cálculos idénticos al modal
                     const qty = parseFloat(item.cantidad?.toString()) || 0;
-                    const price = parseFloat(item.precioUnitario?.toString()) || 0;
                     const x = parseFloat(item.medidaXCm) || 0;
                     const y = parseFloat(item.medidaYCm) || 0;
                     const tiempo = item.tiempoCorte;
 
-                    let medidasDisplay = "N/A";
-                    let itemSubtotal = qty * price;
+                    let itemSubtotal = 0;
 
-                    // Aplicación de fórmula de taller para m2
+                    // Prioridad 1: Subtotal guardado (respetar redondeos manuales)
+                    if (item.subtotal !== undefined && item.subtotal !== null) {
+                        itemSubtotal = parseFloat(item.subtotal);
+                    }
+                    // Prioridad 2: Compatibilidad con datos viejos
+                    else if (item.totalAjustado !== undefined) {
+                        itemSubtotal = parseFloat(item.totalAjustado);
+                    }
+                    // Prioridad 3: Cálculo matemático
+                    else {
+                        const price = parseFloat(item.precioUnitario?.toString()) || 0;
+                        if (item.unidad === "m2" && x > 0 && y > 0) {
+                            itemSubtotal = (x / 100) * (y / 100) * price * qty;
+                        } else {
+                            itemSubtotal = price * qty;
+                        }
+                    }
+
+                    // Recalcular unitario visual si hubo redondeo
+                    const displayUnitPrice = qty > 0 ? (itemSubtotal / qty) : 0;
+
+                    let medidasDisplay = "N/A";
                     if (item.unidad === "m2" && x > 0 && y > 0) {
                         medidasDisplay = `${x}x${y}cm`;
-                        itemSubtotal = (x / 100) * (y / 100) * price * qty;
                     } else if (tiempo && tiempo !== "N/A") {
                         medidasDisplay = tiempo;
                     }
@@ -181,8 +218,8 @@ export function ClientsAndPaymentsView({
                         parentOrder: `#${orden.ordenNumero || 'S/N'}`,
                         nombre: item.nombre,
                         cantidad: qty,
-                        medidasTiempo: medidasDisplay, // Ahora se muestra en el PDF
-                        precioUnitario: price,
+                        medidasTiempo: medidasDisplay, 
+                        precioUnitario: displayUnitPrice,
                         totalUSD: itemSubtotal 
                     };
                 })
@@ -197,18 +234,23 @@ export function ClientsAndPaymentsView({
                     fechaReporte: new Date().toLocaleDateString('es-VE'),
                 },
                 pdfLogoBase64 || "", 
-                { bcvRate, firmaBase64, selloBase64 }
+                { 
+                    firmaBase64, 
+                    selloBase64,
+                    currency: selectedCurrency // Enviar configuración de moneda
+                }
             );
 
             toast.dismiss();
-            toast.success("Estado de cuenta generado correctamente");
+            toast.success("PDF Generado");
         } catch (error) {
+            console.error(error);
             toast.dismiss();
-            toast.error("Error al procesar los datos de producción");
+            toast.error("Error al generar reporte");
         }
     };
 
-    // --- MANEJADORES DE ABONOS ---
+    // ... (Manejadores de abonos y modal global igual) ...
     const handleGlobalImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -219,10 +261,10 @@ export function ClientsAndPaymentsView({
             const url = await uploadFileToCloudinary(file);
             setGlobalPaymentData(prev => ({ ...prev, imagenUrl: url }));
             toast.dismiss();
-            toast.success("Comprobante cargado correctamente");
+            toast.success("Comprobante cargado");
         } catch (error) {
             toast.dismiss();
-            toast.error("Error al subir la imagen");
+            toast.error("Error al subir imagen");
             setPreviewUrl(null);
         } finally {
             setIsGlobalUploading(false);
@@ -234,7 +276,7 @@ export function ClientsAndPaymentsView({
         if (!selectedClientForGlobal || globalPaymentData.monto <= 0 || isGlobalUploading) return;
         let remaining = globalPaymentData.monto;
         try {
-            toast.loading("Distribuyendo abono entre órdenes...");
+            toast.loading("Distribuyendo abono...");
             for (const orden of selectedClientForGlobal.ordenesPendientes) {
                 if (remaining <= 0.009) break;
                 const saldoOrden = Number(orden.totalUSD) - (Number(orden.montoPagadoUSD) || 0);
@@ -245,11 +287,11 @@ export function ClientsAndPaymentsView({
                 }
             }
             toast.dismiss();
-            toast.success("Abono global aplicado con éxito");
+            toast.success("Abono aplicado");
             closeGlobalModal();
         } catch (error) {
             toast.dismiss();
-            toast.error("Error al procesar el abono");
+            toast.error("Error al procesar pago");
         }
     };
 
@@ -257,6 +299,10 @@ export function ClientsAndPaymentsView({
         setIsGlobalModalOpen(false);
         setPreviewUrl(null);
         setGlobalPaymentData({ monto: 0, nota: '', imagenUrl: '' });
+    };
+
+    const formatBs = (amount: number, rate: number) => {
+        return `Bs. ${(amount * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
 
     return (
@@ -292,7 +338,7 @@ export function ClientsAndPaymentsView({
                         <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-70">Total por Cobrar</p>
                         <div>
                             <h3 className="text-5xl font-black tracking-tighter">{formatCurrency(totalPendienteGlobal)}</h3>
-                            <p className="text-xs font-bold opacity-80 mt-2">≈ {formatBsCurrency(totalPendienteGlobal, bcvRate)}</p>
+                            <p className="text-xs font-bold opacity-80 mt-2">≈ {formatBs(totalPendienteGlobal, rates.usd)} (BCV)</p>
                         </div>
                     </Card>
                 </motion.div>
@@ -353,13 +399,40 @@ export function ClientsAndPaymentsView({
                                             </div>
 
                                             <div className="flex gap-2">
-                                                <Button 
-                                                    onClick={() => handleGenerateGeneralReceipt(summary)}
-                                                    variant="outline"
-                                                    className="rounded-2xl border-slate-200 dark:border-white/10 font-black py-7 px-6 text-xs uppercase italic tracking-widest gap-3 shadow-sm hover:bg-slate-100 dark:hover:bg-white/5"
-                                                >
-                                                    <Printer className="w-5 h-5 text-slate-500"/> Recibo General
-                                                </Button>
+                                                {/* MENÚ DESPLEGABLE PARA ELEGIR TASA Y OPCIÓN SOLO USD */}
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <Button 
+                                                            variant="outline"
+                                                            className="rounded-2xl border-slate-200 dark:border-white/10 font-black py-7 px-6 text-xs uppercase italic tracking-widest gap-3 shadow-sm hover:bg-slate-100 dark:hover:bg-white/5"
+                                                        >
+                                                            <Printer className="w-5 h-5 text-slate-500"/> Recibo General <ChevronDown className="w-3 h-3 opacity-50"/>
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end" className="rounded-2xl min-w-[200px]">
+                                                        <DropdownMenuLabel className="text-[10px] uppercase font-black text-slate-400">Seleccionar Tasa</DropdownMenuLabel>
+                                                        <DropdownMenuSeparator />
+                                                        <DropdownMenuItem onClick={() => handleGenerateGeneralReceipt(summary, 'USD')} className="gap-3 py-3 cursor-pointer">
+                                                            <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-200">BCV $</Badge>
+                                                            <span className="font-bold text-xs">{rates.usd.toFixed(2)}</span>
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => handleGenerateGeneralReceipt(summary, 'EUR')} className="gap-3 py-3 cursor-pointer">
+                                                            <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200">BCV €</Badge>
+                                                            <span className="font-bold text-xs">{rates.eur.toFixed(2)}</span>
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => handleGenerateGeneralReceipt(summary, 'USDT')} className="gap-3 py-3 cursor-pointer">
+                                                            <Badge variant="outline" className="bg-orange-50 text-orange-600 border-orange-200">Monitor</Badge>
+                                                            <span className="font-bold text-xs">{rates.usdt.toFixed(2)}</span>
+                                                        </DropdownMenuItem>
+                                                        
+                                                        <DropdownMenuSeparator />
+                                                        
+                                                        <DropdownMenuItem onClick={() => handleGenerateGeneralReceipt(summary, 'USD_ONLY')} className="gap-3 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10">
+                                                            <Banknote className="w-4 h-4 text-slate-500" />
+                                                            <span className="font-bold text-xs text-slate-600 dark:text-slate-300">Solo Dólares (Sin Bs)</span>
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
 
                                                 {summary.ordenesPendientes.length > 1 && (
                                                     <Button 

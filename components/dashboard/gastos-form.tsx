@@ -16,7 +16,10 @@ import {
   Coins,
   ShoppingCart,
   Loader2,
-  Save
+  Save,
+  LayoutGrid, 
+  Printer, 
+  Scissors
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -36,6 +39,12 @@ const CATEGORIAS = [
   { id: "otros", label: "Otros", icon: MoreHorizontal, color: "text-slate-600", bg: "bg-slate-500/10" },
 ]
 
+const DEPARTAMENTOS = [
+  { id: "GENERAL", label: "General", icon: LayoutGrid },
+  { id: "IMPRESION", label: "Impresión", icon: Printer },
+  { id: "CORTE", label: "Corte Láser", icon: Scissors },
+]
+
 export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: GastosFormProps) {
   const [formData, setFormData] = useState({
     nombre: "",
@@ -43,6 +52,7 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
     montoUSD: "",
     montoBs: "",
     categoria: "insumos",
+    area: "GENERAL", // Valor por defecto
     fecha: new Date().toISOString().split("T")[0],
   })
 
@@ -56,6 +66,7 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
         montoUSD: initialData.monto?.toString() || "",
         montoBs: initialData.montoBs?.toString() || "",
         categoria: initialData.categoria || "insumos",
+        area: initialData.area || "GENERAL", // Cargar área existente o default
         fecha: fechaRaw.toISOString().split("T")[0],
       });
     } else {
@@ -66,6 +77,7 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
         montoUSD: "",
         montoBs: "",
         categoria: "insumos",
+        area: "GENERAL",
         fecha: new Date().toISOString().split("T")[0],
       });
     }
@@ -129,6 +141,32 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
 
       <form onSubmit={handleSubmit} className="p-8 -mt-6 bg-white dark:bg-[#1c1c1e] rounded-t-[3rem] space-y-8">
         
+        {/* --- NUEVO: Selector de Departamento --- */}
+        <div className="space-y-2">
+            <label className="text-[9px] font-black uppercase text-slate-400 ml-4 tracking-widest">Asignar a Departamento</label>
+            <div className="grid grid-cols-3 gap-2 bg-slate-100 dark:bg-black/20 p-1.5 rounded-2xl">
+                {DEPARTAMENTOS.map((dpto) => {
+                    const Icon = dpto.icon;
+                    const isActive = formData.area === dpto.id;
+                    return (
+                        <button
+                            key={dpto.id}
+                            type="button"
+                            onClick={() => setFormData(p => ({ ...p, area: dpto.id }))}
+                            className={cn(
+                                "flex items-center justify-center gap-2 py-3 rounded-xl transition-all duration-300 text-[10px] font-black uppercase tracking-wide",
+                                isActive 
+                                    ? "bg-white dark:bg-white/10 text-blue-600 shadow-md scale-95 ring-1 ring-black/5" 
+                                    : "text-slate-400 hover:bg-white/50"
+                            )}
+                        >
+                            <Icon size={14} /> {dpto.label}
+                        </button>
+                    )
+                })}
+            </div>
+        </div>
+
         {/* Selector de Categoría */}
         <div className="grid grid-cols-4 gap-3">
           {CATEGORIAS.map((cat) => {

@@ -46,7 +46,8 @@ import {
     LayoutDashboard, FileSpreadsheet, Clock, Zap, Hammer, 
     DollarSign, Menu, Building2, Bell, TrendingUp, Euro, 
     Coins, CheckCircle2, MessageSquareText, Trash2, MailOpen, 
-    ChevronRight, ChevronLeft, Filter, ChevronDown, X, Briefcase, BarChart3, Package
+    ChevronRight, ChevronLeft, Filter, ChevronDown, X, Briefcase, BarChart3, Package,
+    Wallet
 } from "lucide-react" 
 
 // Servicios
@@ -63,7 +64,7 @@ import {
     createNotification, 
     deleteNotification, 
     updateNotificationStatus,
-    createGasto // <--- DEBES AGREGAR ESTA LÍNEA AQUÍ
+    createGasto 
 } from "@/lib/services/gastos-service"
 import { subscribeToClients } from "@/lib/services/clientes-service"
 import { syncAllOrdersClientStatus } from "@/lib/services/maintenance-service"
@@ -313,7 +314,6 @@ export default function Dashboard() {
             setAssets({ logo: l || "", firma: f || "", sello: s || "" }); 
         });
 
-        // CORRECCIÓN: SUSCRIPCIONES GLOBALES (Al pasar "" permitimos que el servicio ignore el filtro de usuario si está programado así)
         const unsubOrdenes = subscribeToOrdenes("", (data) => setOrdenes(data));
         const unsubDesigners = subscribeToDesigners((data) => setDesigners(data));
         const unsubGastos = subscribeToGastos((data) => setGastos(data));
@@ -332,7 +332,7 @@ export default function Dashboard() {
             unsubGastosFijos(); unsubEmpleados(); unsubPagos(); 
             unsubNotis(); unsubClientes();
         };
-    }, []); // Eliminado currentUserId para mantener la suscripción global estable
+    }, []);
 
     // --- 6. LÓGICA DE NOTIFICACIONES Y FILTROS ---
     const allNotifications = useMemo(() => {
@@ -377,9 +377,12 @@ export default function Dashboard() {
         });
     }, [ordenes, searchTerm]);
 
-    const stats = useMemo(() => {
-        const unfinished = ordenes.filter(o => o.estado !== "TERMINADO");
-        return { total: unfinished.length, pendientes: unfinished.filter(o => o.estado === "PENDIENTE").length, proceso: unfinished.filter(o => o.estado === "PROCESO").length };
+    // ESTADÍSTICAS DE FACTURACIÓN
+    const billingStats = useMemo(() => {
+        const total = ordenes.length;
+        const pagadas = ordenes.filter(o => (o.montoPagadoUSD || 0) >= (o.totalUSD || 0) && o.totalUSD > 0).length;
+        const pendientes = ordenes.filter(o => (o.montoPagadoUSD || 0) < (o.totalUSD || 0)).length;
+        return { total, pagadas, pendientes };
     }, [ordenes]);
 
     return (
@@ -447,10 +450,11 @@ export default function Dashboard() {
                 {activeView === "orders" && (
                     <div className="max-w-7xl mx-auto space-y-6 md:space-y-8">
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6 w-full">
-                            <StatCard label="Taller" value={stats.total} icon={<Hammer />} color="blue" subtext="Activas" />
-                            <StatCard label="Pendientes" value={stats.pendientes} icon={<Clock />} color="orange" subtext="Por iniciar" />
-                            <StatCard label="En Proceso" value={stats.proceso} icon={<Zap />} color="green" subtext="Ejecución" className="col-span-2 md:col-span-1" />
+                            <StatCard label="Total Órdenes" value={billingStats.total} icon={<FileSpreadsheet />} color="blue" subtext="Histórico" />
+                            <StatCard label="Cuentas por Cobrar" value={billingStats.pendientes} icon={<Wallet />} color="orange" subtext="Saldo pendiente" />
+                            <StatCard label="Pagadas Total" value={billingStats.pagadas} icon={<CheckCircle2 />} color="green" subtext="Liquidadas" className="col-span-2 md:col-span-1" />
                         </div>
+
                         <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between bg-white/40 dark:bg-white/5 p-4 rounded-[2rem] border border-black/5 shadow-sm">
                             <div className="relative w-full sm:max-w-md">
                                 <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 opacity-20" />
@@ -465,12 +469,11 @@ export default function Dashboard() {
                                 onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}} 
                                 onRegisterPayment={handleRegisterOrderPayment}
                                 currentUserId={currentUserId || ""}
-                                rates={{
+                                rates={{ // SE ENVÍAN TODAS LAS TASAS
                                     usd: currentBcvRate,
                                     eur: eurRate,
                                     usdt: parallelRate
                                 }}
-                                bcvRate={currentBcvRate} 
                                 pdfLogoBase64={assets.logo}
                                 firmaBase64={assets.firma}
                                 selloBase64={assets.sello}
@@ -503,12 +506,12 @@ export default function Dashboard() {
                 )}
 
                 {activeView === "employees_mgmt" && (
-    <EmpleadosView 
-        empleados={empleados} 
-        pagos={pagos} 
-        rates={{ usd: currentBcvRate, eur: eurRate }} 
-    />
-)}
+                    <EmpleadosView 
+                        empleados={empleados} 
+                        pagos={pagos} 
+                        rates={{ usd: currentBcvRate, eur: eurRate }} 
+                    />
+                )}
 
                 {activeView === "financial_stats" && (
                     <EstadisticasDashboard 
@@ -531,7 +534,13 @@ export default function Dashboard() {
                 {activeView === "calculator" && (
                     <BudgetEntryView 
                         currentUserId={currentUserId}
-                        currentBcvRate={currentBcvRate} pdfLogoBase64={assets.logo} 
+                        rates={{ // SE ENVÍAN TODAS LAS TASAS
+                            usd: currentBcvRate,
+                            eur: eurRate,
+                            usdt: parallelRate
+                        }}
+                        currentBcvRate={currentBcvRate}
+                        pdfLogoBase64={assets.logo} 
                         handleLogoUpload={(e: any) => handleFileUpload(e, 'logo')} handleClearLogo={() => handleClearAsset('logo')}
                         firmaBase64={assets.firma} handleFirmaUpload={(e: any) => handleFileUpload(e, 'firma')} handleClearFirma={() => handleClearAsset('firma')}
                         selloBase64={assets.sello} handleSelloUpload={(e: any) => handleFileUpload(e, 'sello')} handleClearSello={() => handleClearAsset('sello')}
@@ -542,11 +551,16 @@ export default function Dashboard() {
                 {activeView === "clients" && (
                     <ClientsAndPaymentsView 
                         ordenes={ordenes} 
-                        bcvRate={currentBcvRate} 
+                        rates={{ // SE ENVÍAN TODAS LAS TASAS
+                            usd: currentBcvRate,
+                            eur: eurRate,
+                            usdt: parallelRate
+                        }}
+                        bcvRate={currentBcvRate}
                         onRegisterPayment={handleRegisterOrderPayment} 
                         pdfLogoBase64={assets.logo}
-        firmaBase64={assets.firma}
-        selloBase64={assets.sello}
+                        firmaBase64={assets.firma}
+                        selloBase64={assets.sello}
                     />
                 )}
                 

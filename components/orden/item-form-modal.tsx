@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils"
 
 import { 
     X, Scissors, Hash, DollarSign, Box, Type, 
-    User, Calculator, Layers, Palette, MoveVertical 
+    User, Calculator, Layers, Palette, MoveVertical, AlertCircle 
 } from "lucide-react"
 
 // --- CONSTANTES ---
@@ -61,6 +61,9 @@ export function ItemFormModal({
   const [state, setState] = useState<any>(getInitialState());
   const [minutos, setMinutos] = useState('0');
   const [segundos, setSegundos] = useState('00');
+  
+  // NUEVO ESTADO PARA MANEJAR ERRORES VISUALES
+  const [errors, setErrors] = useState<any>({});
 
   const allColors = useMemo(() => [...COLORES_PREDEFINIDOS, ...customColors], [customColors]);
 
@@ -76,34 +79,69 @@ export function ItemFormModal({
           setState(getInitialState());
           setMinutos('0'); setSegundos('00');
       }
+      setErrors({}); // Limpiar errores al abrir
     }
   }, [isOpen, itemToEdit]);
 
-  // LÓGICA DE CÁLCULO CORREGIDA
+  // LÓGICA DE CÁLCULO
   useEffect(() => {
     let costoBaseUnitario = 0;
     const { cantidad, precioUnitario, unidad, medidaXCm, medidaYCm, suministrarMaterial, costoMaterialExtra, tipoServicio, modoCobroLaser } = state; 
     
-    if (cantidad > 0) {
+    const cantidadCalculo = cantidad > 0 ? cantidad : 0;
+
+    if (cantidadCalculo > 0 || (modoCobroLaser === 'tiempo' && tipoServicio === 'CORTE')) {
         if (tipoServicio === 'CORTE' && modoCobroLaser === 'tiempo') {
             const totalMinutes = (parseFloat(minutos) || 0) + ((parseFloat(segundos) || 0) / 60);
             costoBaseUnitario = totalMinutes * PRECIO_LASER_POR_MINUTO;
         } else if (unidad === 'm2' && medidaXCm > 0 && medidaYCm > 0) {
-            // Fórmula corregida: (cm/100) * (cm/100) * precio_m2
             costoBaseUnitario = (medidaXCm / 100) * (medidaYCm / 100) * precioUnitario;
         } else {
             costoBaseUnitario = precioUnitario;
         }
 
         const totalUnit = costoBaseUnitario + (suministrarMaterial ? costoMaterialExtra : 0);
-        setState((prev: any) => ({ ...prev, subtotal: totalUnit * cantidad }));
+        setState((prev: any) => ({ ...prev, subtotal: totalUnit * cantidadCalculo }));
     }
   }, [state.cantidad, state.precioUnitario, state.unidad, state.medidaXCm, state.medidaYCm, minutos, segundos, state.suministrarMaterial, state.costoMaterialExtra, state.tipoServicio, state.modoCobroLaser]);
 
-  // FUNCIÓN DE GUARDADO CORREGIDA
+  // --- FUNCIÓN DE GUARDADO CON VALIDACIONES VISUALES ---
   const handleSave = async () => {
-    if (!state.nombre.trim()) return;
+    const newErrors: any = {};
+    let hasError = false;
 
+    // 1. VALIDACIÓN: Descripción
+    if (!state.nombre.trim()) {
+        newErrors.nombre = true;
+        hasError = true;
+    }
+
+    // 2. VALIDACIÓN: Dimensiones en m2
+    if (state.unidad === 'm2') {
+        if (state.medidaXCm <= 0) { newErrors.medidaXCm = true; hasError = true; }
+        if (state.medidaYCm <= 0) { newErrors.medidaYCm = true; hasError = true; }
+    }
+
+    // 3. VALIDACIÓN: Tiempo en Corte Láser
+    if (state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo') {
+        const tMin = parseFloat(minutos) || 0;
+        const tSec = parseFloat(segundos) || 0;
+        if (tMin === 0 && tSec === 0) {
+            newErrors.tiempo = true; // Error general de tiempo
+            hasError = true;
+        }
+    }
+
+    // 4. VALIDACIÓN: Cantidad
+    if ((state.cantidad || 0) <= 0) {
+        newErrors.cantidad = true;
+        hasError = true;
+    }
+
+    setErrors(newErrors);
+    if (hasError) return; // FRENAR SI HAY ERRORES
+
+    // --- PROCESO DE GUARDADO ---
     let colorFinal = state.colorAcrilico;
 
     if (state.colorAcrilico === 'NEW' && state.nuevoColorCustom.trim() !== "") {
@@ -113,13 +151,13 @@ export function ItemFormModal({
         }
     }
 
-    // SI ES M2, GUARDAMOS EL PRECIO BASE POR M2 PARA QUE EL WIZARD NO MULTIPLIQUE DOBLE
     const finalUnitPrice = state.unidad === 'm2' 
         ? state.precioUnitario 
-        : (state.subtotal / state.cantidad);
+        : (state.subtotal / (state.cantidad || 1));
 
     onAddItem({ 
         ...state, 
+        cantidad: state.cantidad || 1, 
         colorAcrilico: colorFinal,
         materialDetalleCorte: state.tipoServicio === 'CORTE' 
             ? `${state.materialDeCorte} ${state.materialDeCorte === 'Cartulina' ? 'N/A' : state.grosorMaterial} ${colorFinal}`
@@ -127,7 +165,13 @@ export function ItemFormModal({
         precioUnitario: finalUnitPrice,
         tiempoCorte: state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo' ? `${minutos}:${segundos.padStart(2, '0')}` : "Servicio" 
     });
+    
     onClose();
+  };
+
+  // Función auxiliar para limpiar errores al escribir
+  const clearError = (field: string) => {
+    if (errors[field]) setErrors((prev: any) => ({ ...prev, [field]: false }));
   };
 
   return (
@@ -152,12 +196,18 @@ export function ItemFormModal({
                 
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
                     <div className="md:col-span-8 space-y-1.5">
-                        <Label className="text-[10px] font-black uppercase text-slate-400 ml-1">Descripción</Label>
+                        <Label className={cn("text-[10px] font-black uppercase ml-1 transition-colors", errors.nombre ? "text-red-500" : "text-slate-400")}>
+                            Descripción {errors.nombre && <span className="text-[8px] ml-2 bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">Campo Obligatorio</span>}
+                        </Label>
                         <Input 
                             value={state.nombre} 
-                            onChange={e => setState({...state, nombre: e.target.value})}
-                            className="h-12 rounded-xl border-none bg-slate-100 dark:bg-slate-800 font-bold text-base"
+                            onChange={e => { setState({...state, nombre: e.target.value}); clearError('nombre'); }}
+                            className={cn(
+                                "h-12 rounded-xl border-none font-bold text-base transition-all",
+                                errors.nombre ? "bg-red-50 text-red-900 placeholder:text-red-300 ring-2 ring-red-500/50" : "bg-slate-100 dark:bg-slate-800"
+                            )}
                             placeholder="Ej: Medallas acrílicas grabadas"
+                            autoFocus
                         />
                     </div>
                     <div className="md:col-span-4 space-y-1.5">
@@ -168,6 +218,7 @@ export function ItemFormModal({
                             else if (v === 'CORTE') updates.unidad = 'tiempo';
                             else updates.unidad = 'und';
                             setState({...state, ...updates});
+                            setErrors({}); // Limpiar errores al cambiar tipo
                         }}>
                             <SelectTrigger className="h-12 rounded-xl border-none bg-blue-50 dark:bg-blue-900/30 text-blue-600 font-black uppercase"><SelectValue /></SelectTrigger>
                             <SelectContent className="rounded-2xl border-none shadow-2xl">
@@ -230,11 +281,24 @@ export function ItemFormModal({
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
                                 {state.modoCobroLaser === 'tiempo' ? (
                                     <div className="space-y-1.5">
-                                        <Label className="text-[9px] font-black text-orange-400 uppercase">Tiempo de Ejecución (MM:SS)</Label>
-                                        <div className="flex items-center gap-3 bg-white dark:bg-slate-800 h-14 px-6 rounded-2xl shadow-inner font-black text-xl">
-                                            <input value={minutos} onChange={e => setMinutos(e.target.value)} className="w-full text-center outline-none bg-transparent" placeholder="0" />
+                                        <Label className={cn("text-[9px] font-black uppercase transition-colors", errors.tiempo ? "text-red-500" : "text-orange-400")}>
+                                            Tiempo de Ejecución {errors.tiempo && "(Requerido)"}
+                                        </Label>
+                                        <div className={cn("flex items-center gap-3 bg-white dark:bg-slate-800 h-14 px-6 rounded-2xl shadow-inner font-black text-xl border transition-all", errors.tiempo ? "border-red-500 ring-2 ring-red-500/20" : "border-transparent")}>
+                                            <input 
+                                                value={minutos === '0' ? '' : minutos} 
+                                                onChange={e => { setMinutos(e.target.value); clearError('tiempo'); }} 
+                                                className="w-full text-center outline-none bg-transparent" 
+                                                placeholder="0" 
+                                            />
                                             <span className="opacity-20">:</span>
-                                            <input value={segundos} onChange={e => setSegundos(e.target.value)} className="w-full text-center outline-none bg-transparent" placeholder="00" maxLength={2} />
+                                            <input 
+                                                value={segundos === '00' ? '' : segundos} 
+                                                onChange={e => { setSegundos(e.target.value); clearError('tiempo'); }} 
+                                                className="w-full text-center outline-none bg-transparent" 
+                                                placeholder="00" 
+                                                maxLength={2} 
+                                            />
                                         </div>
                                     </div>
                                 ) : (
@@ -242,13 +306,26 @@ export function ItemFormModal({
                                         <Label className="text-[9px] font-black text-orange-400 uppercase">Precio por Pieza (USD)</Label>
                                         <div className="relative">
                                             <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-orange-400"/>
-                                            <Input type="number" step="0.01" value={state.precioUnitario} onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})} className="h-14 pl-12 border-none bg-white dark:bg-slate-800 font-black text-orange-600 text-xl rounded-2xl shadow-inner" />
+                                            <Input 
+                                                type="number" 
+                                                step="0.01" 
+                                                value={state.precioUnitario === 0 ? '' : state.precioUnitario}
+                                                onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})} 
+                                                className="h-14 pl-12 border-none bg-white dark:bg-slate-800 font-black text-orange-600 text-xl rounded-2xl shadow-inner" 
+                                            />
                                         </div>
                                     </div>
                                 )}
                                 <div className="space-y-1.5">
-                                    <Label className="text-[9px] font-black text-orange-400 uppercase">Cantidad de Piezas</Label>
-                                    <Input type="number" value={state.cantidad} onChange={e => setState({...state, cantidad: parseInt(e.target.value) || 1})} className="h-14 border-none bg-white dark:bg-slate-800 font-black text-center text-xl rounded-2xl shadow-inner" />
+                                    <Label className={cn("text-[9px] font-black uppercase transition-colors", errors.cantidad ? "text-red-500" : "text-orange-400")}>
+                                        Cantidad de Piezas
+                                    </Label>
+                                    <Input 
+                                        type="number" 
+                                        value={state.cantidad === 0 ? '' : state.cantidad}
+                                        onChange={e => { setState({...state, cantidad: parseInt(e.target.value) || 0}); clearError('cantidad'); }}
+                                        className={cn("h-14 border-none font-black text-center text-xl rounded-2xl shadow-inner transition-all", errors.cantidad ? "bg-red-50 text-red-600 ring-2 ring-red-500/50" : "bg-white dark:bg-slate-800")} 
+                                    />
                                 </div>
                             </div>
                         </motion.div>
@@ -261,12 +338,22 @@ export function ItemFormModal({
                             <h4 className="text-[10px] font-black uppercase text-blue-600 flex items-center gap-2 tracking-[0.2em]"><MoveVertical className="w-4 h-4"/> Dimensiones de Impresión</h4>
                             <div className="grid grid-cols-2 gap-5">
                                 <div className="space-y-1.5">
-                                    <Label className="text-[9px] font-black text-blue-400 uppercase">Ancho (cm)</Label>
-                                    <Input type="number" value={state.medidaXCm} onChange={e => setState({...state, medidaXCm: parseFloat(e.target.value) || 0})} className="h-12 text-center border-none bg-white dark:bg-slate-800 font-black text-lg rounded-xl shadow-inner" />
+                                    <Label className={cn("text-[9px] font-black uppercase transition-colors", errors.medidaXCm ? "text-red-500" : "text-blue-400")}>Ancho (cm)</Label>
+                                    <Input 
+                                        type="number" 
+                                        value={state.medidaXCm === 0 ? '' : state.medidaXCm}
+                                        onChange={e => { setState({...state, medidaXCm: parseFloat(e.target.value) || 0}); clearError('medidaXCm'); }}
+                                        className={cn("h-12 text-center border-none font-black text-lg rounded-xl shadow-inner transition-all", errors.medidaXCm ? "bg-red-50 ring-2 ring-red-500/50" : "bg-white dark:bg-slate-800")} 
+                                    />
                                 </div>
                                 <div className="space-y-1.5">
-                                    <Label className="text-[9px] font-black text-blue-400 uppercase">Alto (cm)</Label>
-                                    <Input type="number" value={state.medidaYCm} onChange={e => setState({...state, medidaYCm: parseFloat(e.target.value) || 0})} className="h-12 text-center border-none bg-white dark:bg-slate-800 font-black text-lg rounded-xl shadow-inner" />
+                                    <Label className={cn("text-[9px] font-black uppercase transition-colors", errors.medidaYCm ? "text-red-500" : "text-blue-400")}>Alto (cm)</Label>
+                                    <Input 
+                                        type="number" 
+                                        value={state.medidaYCm === 0 ? '' : state.medidaYCm}
+                                        onChange={e => { setState({...state, medidaYCm: parseFloat(e.target.value) || 0}); clearError('medidaYCm'); }}
+                                        className={cn("h-12 text-center border-none font-black text-lg rounded-xl shadow-inner transition-all", errors.medidaYCm ? "bg-red-50 ring-2 ring-red-500/50" : "bg-white dark:bg-slate-800")} 
+                                    />
                                 </div>
                             </div>
                         </motion.div>
@@ -279,12 +366,23 @@ export function ItemFormModal({
                             <Label className="text-[10px] font-black uppercase text-slate-400 ml-1">Precio Unitario (USD)</Label>
                             <div className="relative">
                                 <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
-                                <Input type="number" step="0.01" value={state.precioUnitario} onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})} className="h-12 pl-12 rounded-2xl border-none bg-slate-100 dark:bg-slate-800 font-black text-emerald-600 text-xl shadow-inner" />
+                                <Input 
+                                    type="number" 
+                                    step="0.01" 
+                                    value={state.precioUnitario === 0 ? '' : state.precioUnitario}
+                                    onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})} 
+                                    className="h-12 pl-12 rounded-2xl border-none bg-slate-100 dark:bg-slate-800 font-black text-emerald-600 text-xl shadow-inner" 
+                                />
                             </div>
                         </div>
                         <div className="space-y-2">
-                            <Label className="text-[10px] font-black uppercase text-slate-400 ml-1">Cantidad</Label>
-                            <Input type="number" value={state.cantidad} onChange={e => setState({...state, cantidad: parseInt(e.target.value) || 1})} className="h-12 rounded-2xl border-none bg-slate-100 dark:bg-slate-800 font-black text-center text-xl shadow-inner" />
+                            <Label className={cn("text-[10px] font-black uppercase ml-1 transition-colors", errors.cantidad ? "text-red-500" : "text-slate-400")}>Cantidad</Label>
+                            <Input 
+                                type="number" 
+                                value={state.cantidad === 0 ? '' : state.cantidad}
+                                onChange={e => { setState({...state, cantidad: parseInt(e.target.value) || 0}); clearError('cantidad'); }}
+                                className={cn("h-12 rounded-2xl border-none font-black text-center text-xl shadow-inner transition-all", errors.cantidad ? "bg-red-50 ring-2 ring-red-500/50" : "bg-slate-100 dark:bg-slate-800")} 
+                            />
                         </div>
                     </div>
                 )}
@@ -323,7 +421,13 @@ export function ItemFormModal({
                         <Label className="text-[9px] font-black text-emerald-600 uppercase ml-1">Costo Adicional Material (USD)</Label>
                         <div className="relative mt-1">
                             <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500"/>
-                            <Input type="number" step="0.01" value={state.costoMaterialExtra} onChange={e => setState({...state, costoMaterialExtra: parseFloat(e.target.value) || 0})} className="h-11 pl-11 border-none bg-white dark:bg-slate-800 font-black text-emerald-600 rounded-xl shadow-inner" />
+                            <Input 
+                                type="number" 
+                                step="0.01" 
+                                value={state.costoMaterialExtra === 0 ? '' : state.costoMaterialExtra}
+                                onChange={e => setState({...state, costoMaterialExtra: parseFloat(e.target.value) || 0})} 
+                                className="h-11 pl-11 border-none bg-white dark:bg-slate-800 font-black text-emerald-600 rounded-xl shadow-inner" 
+                            />
                         </div>
                     </motion.div>
                 )}

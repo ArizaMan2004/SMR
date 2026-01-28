@@ -27,7 +27,7 @@ import { toast } from 'sonner';
 import { 
     Plus, Trash2, FileText, Save, Clock, Download, 
     User, Calculator, TrendingUp, Sparkles, Layers, Zap, Wallet, X,
-    DollarSign, CheckCircle2, Calendar, Pencil, RotateCcw, Check
+    DollarSign, CheckCircle2, Calendar, Pencil, RotateCcw, Check, AlertCircle, AlertTriangle, Hourglass
 } from "lucide-react"; 
 
 import { cn } from "@/lib/utils";
@@ -67,6 +67,7 @@ export default function BudgetEntryView({
     const [history, setHistory] = useState<any[]>([]); 
     const [isLoading, setIsLoading] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
+    const [errors, setErrors] = useState<any>({}); 
     const suggestionRef = useRef<HTMLDivElement>(null);
 
     // --- CÁLCULOS ---
@@ -74,7 +75,7 @@ export default function BudgetEntryView({
         budgetData.items.reduce((sum: number, i: any) => sum + i.totalUSD, 0), 
     [budgetData.items]);
 
-    // --- CARGAR HISTORIAL (DEDUPLICADO POR ID) ---
+    // --- CARGAR HISTORIAL ---
     const fetchHistory = useCallback(async () => {
         try {
             const data = await loadBudgetsFromFirestore();
@@ -82,6 +83,12 @@ export default function BudgetEntryView({
                 const uniqueEntries = Array.from(
                     new Map(data.map((item: any) => [item.id, item])).values()
                 );
+                // Ordenar por fecha, más reciente primero
+                uniqueEntries.sort((a: any, b: any) => {
+                    const dateA = a.dateCreated ? new Date(a.dateCreated).getTime() : 0;
+                    const dateB = b.dateCreated ? new Date(b.dateCreated).getTime() : 0;
+                    return dateB - dateA;
+                });
                 setHistory(uniqueEntries);
             }
         } catch (e) { 
@@ -91,8 +98,27 @@ export default function BudgetEntryView({
 
     useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
+    // --- AUXILIAR: CALCULAR DÍAS TRANSCURRIDOS ---
+    const getDaysElapsed = (dateString: string | null) => {
+        if (!dateString) return 0;
+        const diff = new Date().getTime() - new Date(dateString).getTime();
+        return Math.floor(diff / (1000 * 3600 * 24));
+    };
+
     // --- LÓGICA DE ITEMS ---
     const handleAddOrUpdateItem = () => {
+        const newErrors: any = {};
+        let hasError = false;
+
+        if (!newItem.descripcion.trim()) { newErrors.descripcion = true; hasError = true; }
+        if (newItem.cantidad <= 0) { newErrors.cantidad = true; hasError = true; }
+
+        if (hasError) {
+            setErrors((prev: any) => ({ ...prev, ...newErrors }));
+            toast.error("Complete los datos del ítem");
+            return;
+        }
+
         const desc = newItem.descripcion.trim() || "Concepto General";
         const calculatedTotal = newItem.cantidad * newItem.precioUnitarioUSD;
 
@@ -116,6 +142,7 @@ export default function BudgetEntryView({
 
         setNewItem({ id: null, descripcion: '', cantidad: 1, precioUnitarioUSD: 0 });
         setShowSuggestions(false);
+        setErrors((prev:any) => ({ ...prev, descripcion: false, cantidad: false, precio: false })); 
     };
 
     const handleEditItemRequest = (item: any) => {
@@ -125,11 +152,22 @@ export default function BudgetEntryView({
             cantidad: item.cantidad,
             precioUnitarioUSD: item.precioUnitarioUSD
         });
+        setErrors({});
     };
 
     // --- LÓGICA DE GUARDADO ---
     const handleSaveDraft = async () => {
-        if (!budgetData.clienteNombre) return toast.error("El nombre del cliente es obligatorio");
+        const newErrors: any = {};
+        let hasError = false;
+
+        if (!budgetData.clienteNombre.trim()) { newErrors.clienteNombre = true; hasError = true; }
+        
+        if (hasError) {
+            setErrors((prev: any) => ({ ...prev, ...newErrors }));
+            toast.error("Faltan datos obligatorios (Cliente)");
+            return;
+        }
+
         if (budgetData.items.length === 0) return toast.error("La tabla está vacía");
 
         setIsLoading(true);
@@ -139,7 +177,7 @@ export default function BudgetEntryView({
                 ...rest,
                 totalUSD: totalUSD,
                 dateCreated: budgetData.id ? budgetData.dateCreated : new Date().toISOString(),
-                userId: "" // CORRECCIÓN: Se deja vacío para ambiente compartido
+                userId: "" 
             };
 
             if (id) payload.id = id;
@@ -148,6 +186,7 @@ export default function BudgetEntryView({
             toast.success(id ? "Cambios actualizados" : "Borrador guardado");
             
             setBudgetData(initialBudgetState);
+            setErrors({});
             await fetchHistory();
         } catch (error) {
             toast.error("Error al guardar en la base de datos");
@@ -157,7 +196,6 @@ export default function BudgetEntryView({
         }
     };
 
-    // --- CONVERSIÓN A FACTURA ---
     const handleConvertToOrder = async (targetBudget?: any) => {
         const data = targetBudget || budgetData;
         if (data.items.length === 0) return toast.error("No hay conceptos para facturar");
@@ -192,7 +230,7 @@ export default function BudgetEntryView({
                 totalUSD: data.totalUSD || totalUSD,
                 montoPagadoUSD: 0,
                 estado: 'PENDIENTE',
-                userId: "" // CORRECCIÓN: Se deja vacío para ambiente compartido
+                userId: "" 
             };
 
             await createOrden(orderPayload);
@@ -216,6 +254,7 @@ export default function BudgetEntryView({
             items: entry.items || [],
             dateCreated: entry.dateCreated || null
         });
+        setErrors({});
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
@@ -232,10 +271,13 @@ export default function BudgetEntryView({
         }
     };
 
+    const clearError = (field: string) => {
+        if (errors[field]) setErrors((prev: any) => ({ ...prev, [field]: false }));
+    };
+
     return (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto space-y-8 pb-32 px-4">
             
-            {/* HEADER */}
             <header className="flex flex-col md:flex-row justify-between items-center bg-white/40 dark:bg-white/5 backdrop-blur-3xl p-6 rounded-[2.5rem] border border-white/20 shadow-2xl gap-6">
                 <div className="flex items-center gap-4">
                     <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
@@ -256,7 +298,6 @@ export default function BudgetEntryView({
                 </div>
             </header>
 
-            {/* STATS */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <StatCard label="Total USD" value={`$${totalUSD.toFixed(2)}`} icon={<Wallet />} color="blue" />
                 <StatCard label="Monto BS" value={`Bs. ${(totalUSD * currentBcvRate).toLocaleString()}`} icon={<Calculator />} color="emerald" />
@@ -270,20 +311,25 @@ export default function BudgetEntryView({
                         <div className="p-8 md:p-12 space-y-10">
                             
                             <div className="flex justify-between items-center">
-                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4">Datos del Cliente</Label>
+                                <Label className={cn("text-[10px] font-black uppercase tracking-widest ml-4 flex items-center gap-2", errors.clienteNombre ? "text-red-500" : "text-slate-400")}>
+                                    Datos del Cliente {errors.clienteNombre && <span className="text-[8px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">Requerido</span>}
+                                </Label>
                                 {(budgetData.id || budgetData.items.length > 0) && (
-                                    <Button variant="ghost" size="sm" onClick={() => setBudgetData(initialBudgetState)} className="text-[9px] font-black uppercase text-red-400 gap-1 hover:bg-red-50">
+                                    <Button variant="ghost" size="sm" onClick={() => { setBudgetData(initialBudgetState); setErrors({}); }} className="text-[9px] font-black uppercase text-red-400 gap-1 hover:bg-red-50">
                                         <RotateCcw className="w-3 h-3"/> Resetear Formulario
                                     </Button>
                                 )}
                             </div>
 
                             <div className="relative">
-                                <User className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
+                                <User className={cn("absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 transition-colors", errors.clienteNombre ? "text-red-400" : "text-slate-300")} />
                                 <Input 
                                     value={budgetData.clienteNombre} 
-                                    onChange={(e) => setBudgetData({...budgetData, clienteNombre: e.target.value})} 
-                                    className="h-16 rounded-[1.5rem] bg-slate-50 dark:bg-slate-800/50 border-none font-black text-xl px-16 shadow-inner" 
+                                    onChange={(e) => { setBudgetData({...budgetData, clienteNombre: e.target.value}); clearError('clienteNombre'); }} 
+                                    className={cn(
+                                        "h-16 rounded-[1.5rem] border-none font-black text-xl px-16 shadow-inner transition-all",
+                                        errors.clienteNombre ? "bg-red-50 ring-2 ring-red-500/20 placeholder:text-red-300" : "bg-slate-50 dark:bg-slate-800/50"
+                                    )}
                                     placeholder="NOMBRE DEL CLIENTE..." 
                                 />
                             </div>
@@ -293,19 +339,22 @@ export default function BudgetEntryView({
                                 <h3 className="font-black text-[10px] uppercase tracking-widest text-slate-400 ml-4 flex items-center gap-2">
                                     <Layers className="w-4 h-4 text-blue-500" /> Conceptos {newItem.id && <Badge className="bg-amber-500 ml-2">Editando</Badge>}
                                 </h3>
-                                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-[2rem] border border-black/5 space-y-4">
+                                <div className={cn("p-4 bg-slate-50 dark:bg-slate-800/50 rounded-[2rem] border space-y-4 transition-all", (errors.descripcion || errors.cantidad) ? "border-red-200 bg-red-50/30" : "border-black/5")}>
                                     <div className="relative" ref={suggestionRef}>
                                         <Input 
                                             value={newItem.descripcion} 
-                                            onChange={(e) => { setNewItem({...newItem, descripcion: e.target.value}); setShowSuggestions(true); }} 
-                                            className="h-14 rounded-xl bg-white dark:bg-slate-900 border-none px-6 font-bold text-base shadow-sm" 
-                                            placeholder="Descripción del trabajo..." 
+                                            onChange={(e) => { setNewItem({...newItem, descripcion: e.target.value}); setShowSuggestions(true); clearError('descripcion'); }} 
+                                            className={cn(
+                                                "h-14 rounded-xl border-none px-6 font-bold text-base shadow-sm transition-all",
+                                                errors.descripcion ? "bg-red-50 ring-1 ring-red-300 placeholder:text-red-300" : "bg-white dark:bg-slate-900"
+                                            )}
+                                            placeholder={errors.descripcion ? "⚠️ Escribe una descripción..." : "Descripción del trabajo..."}
                                         />
                                         <AnimatePresence>
                                             {showSuggestions && newItem.descripcion.length > 1 && (
                                                 <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="absolute left-0 right-0 top-full mt-2 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl z-50 border border-slate-100 dark:border-slate-700 overflow-hidden">
                                                     {SMR_CATALOG.filter(s => s.toLowerCase().includes(newItem.descripcion.toLowerCase())).map((s, i) => (
-                                                        <button key={i} onClick={() => { setNewItem({...newItem, descripcion: s}); setShowSuggestions(false); }} className="w-full text-left p-4 hover:bg-blue-50 dark:hover:bg-blue-500/10 font-bold text-xs uppercase border-b last:border-none text-slate-600 dark:text-slate-300">{s}</button>
+                                                        <button key={i} onClick={() => { setNewItem({...newItem, descripcion: s}); setShowSuggestions(false); clearError('descripcion'); }} className="w-full text-left p-4 hover:bg-blue-50 dark:hover:bg-blue-500/10 font-bold text-xs uppercase border-b last:border-none text-slate-600 dark:text-slate-300">{s}</button>
                                                     ))}
                                                 </motion.div>
                                             )}
@@ -313,11 +362,26 @@ export default function BudgetEntryView({
                                     </div>
                                     <div className="grid grid-cols-12 gap-3">
                                         <div className="col-span-3">
-                                            <Input type="number" value={newItem.cantidad} onChange={(e) => setNewItem({...newItem, cantidad: Number(e.target.value) || 0})} className="h-14 rounded-xl bg-white dark:bg-slate-900 border-none text-center font-black" placeholder="Cant." />
+                                            <Input 
+                                                type="number" 
+                                                value={newItem.cantidad === 0 ? '' : newItem.cantidad} 
+                                                onChange={(e) => { setNewItem({...newItem, cantidad: Number(e.target.value) || 0}); clearError('cantidad'); }} 
+                                                className={cn(
+                                                    "h-14 rounded-xl border-none text-center font-black transition-all",
+                                                    errors.cantidad ? "bg-red-50 ring-1 ring-red-300 text-red-600" : "bg-white dark:bg-slate-900"
+                                                )} 
+                                                placeholder="Cant." 
+                                            />
                                         </div>
                                         <div className="col-span-6 relative">
                                             <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
-                                            <Input type="number" value={newItem.precioUnitarioUSD} onChange={(e) => setNewItem({...newItem, precioUnitarioUSD: Number(e.target.value) || 0})} className="h-14 rounded-xl bg-white dark:bg-slate-900 border-none pl-10 font-black text-blue-600" placeholder="Precio Unitario" />
+                                            <Input 
+                                                type="number" 
+                                                value={newItem.precioUnitarioUSD === 0 ? '' : newItem.precioUnitarioUSD} 
+                                                onChange={(e) => { setNewItem({...newItem, precioUnitarioUSD: Number(e.target.value) || 0}); clearError('precio'); }} 
+                                                className="h-14 rounded-xl bg-white dark:bg-slate-900 border-none pl-10 font-black text-blue-600" 
+                                                placeholder="Precio Unitario" 
+                                            />
                                         </div>
                                         <div className="col-span-3">
                                             <Button 
@@ -331,6 +395,11 @@ export default function BudgetEntryView({
                                             </Button>
                                         </div>
                                     </div>
+                                    {(errors.descripcion || errors.cantidad) && (
+                                        <p className="text-[10px] font-bold text-red-500 flex items-center gap-1 pl-2">
+                                            <AlertCircle className="w-3 h-3" /> Faltan datos en el ítem
+                                        </p>
+                                    )}
                                 </div>
                             </div>
 
@@ -372,12 +441,12 @@ export default function BudgetEntryView({
                                 <Button onClick={() => handleConvertToOrder()} disabled={isLoading || budgetData.items.length === 0} className="h-16 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black uppercase text-xs gap-3 shadow-xl active:scale-95 transition-all">
                                     {isLoading ? <Clock className="animate-spin w-5 h-5" /> : <Zap className="w-5 h-5" />} Facturar ahora
                                 </Button>
-                                <Button onClick={handleSaveDraft} disabled={isLoading || budgetData.items.length === 0} className="h-16 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-black uppercase text-xs gap-3 active:scale-95 transition-all">
+                                <Button onClick={handleSaveDraft} disabled={isLoading} className="h-16 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-black uppercase text-xs gap-3 active:scale-95 transition-all">
                                     <Save className="w-5 h-5" /> {budgetData.id ? "Actualizar Registro" : "Guardar Borrador"}
                                 </Button>
                                 <Button 
                                     onClick={() => generateBudgetPDF(
-                                        { ...budgetData, totalUSD }, 
+                                        { ...budgetData, totalUSD, dateCreated: budgetData.dateCreated || new Date().toISOString() }, 
                                         pdfLogoBase64, 
                                         { bcvRate: currentBcvRate, firmaBase64, selloBase64 }
                                     )} 
@@ -391,7 +460,7 @@ export default function BudgetEntryView({
                     </Card>
                 </div>
 
-                {/* HISTORIAL LATERAL */}
+                {/* HISTORIAL LATERAL CON INDICADOR DE ANTIGÜEDAD */}
                 <aside className="lg:col-span-4 space-y-6">
                     <div className="flex items-center justify-between px-4">
                         <h2 className="text-xl font-black italic uppercase flex items-center gap-3 text-slate-900 dark:text-white">
@@ -401,44 +470,58 @@ export default function BudgetEntryView({
                     </div>
 
                     <div className="space-y-3 overflow-y-auto max-h-[700px] pr-2 custom-scrollbar">
-                        {history.map((entry) => (
-                            <motion.div key={entry.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                                <Card className="p-5 rounded-[2.5rem] border-none shadow-lg bg-white dark:bg-slate-900 group relative overflow-hidden transition-all hover:scale-[1.02]">
-                                    <div className="flex justify-between items-start">
-                                        <div className="space-y-1 min-w-0 pr-4">
-                                            <h4 className="font-black text-slate-800 dark:text-slate-100 text-sm truncate uppercase italic tracking-tight">{entry.clienteNombre}</h4>
-                                            <p className="text-[10px] font-bold text-slate-400 flex items-center gap-2">
-                                                <Calendar className="w-3 h-3" /> {entry.dateCreated ? new Date(entry.dateCreated).toLocaleDateString() : 'Sin fecha'}
-                                            </p>
+                        {history.map((entry) => {
+                            const daysOld = getDaysElapsed(entry.dateCreated);
+                            let ageColor = "bg-emerald-100 text-emerald-600";
+                            if (daysOld > 3) ageColor = "bg-amber-100 text-amber-600";
+                            if (daysOld > 7) ageColor = "bg-rose-100 text-rose-600";
+
+                            return (
+                                <motion.div key={entry.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                                    <Card className="p-5 rounded-[2.5rem] border-none shadow-lg bg-white dark:bg-slate-900 group relative overflow-hidden transition-all hover:scale-[1.02]">
+                                        <div className="flex justify-between items-start">
+                                            <div className="space-y-2 min-w-0 pr-4">
+                                                <h4 className="font-black text-slate-800 dark:text-slate-100 text-sm truncate uppercase italic tracking-tight">{entry.clienteNombre}</h4>
+                                                <div className="flex flex-wrap gap-2">
+                                                    <Badge variant="outline" className="border-slate-200 text-slate-400 font-bold text-[9px] h-5 px-1.5 flex gap-1">
+                                                        <Calendar className="w-2.5 h-2.5" /> 
+                                                        {entry.dateCreated ? new Date(entry.dateCreated).toLocaleDateString() : 'Hoy'}
+                                                    </Badge>
+                                                    {daysOld > 0 && (
+                                                        <Badge className={cn("border-none font-black text-[8px] h-5 px-1.5 flex gap-1", ageColor)}>
+                                                            <Hourglass className="w-2.5 h-2.5" /> 
+                                                            Hace {daysOld} días
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <p className="text-lg font-black text-blue-600 tracking-tighter leading-none">${entry.totalUSD?.toFixed(2)}</p>
                                         </div>
-                                        <p className="text-lg font-black text-blue-600 tracking-tighter leading-none">${entry.totalUSD?.toFixed(2)}</p>
-                                    </div>
-                                    
-                                    <div className="mt-4 flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-all">
-                                        <Button size="icon" onClick={() => handleEditBudget(entry)} className="h-10 w-10 rounded-xl bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white transition-colors shadow-sm">
-                                            <Pencil className="w-4 h-4" />
-                                        </Button>
-                                        <Button size="icon" onClick={() => generateBudgetPDF(entry, pdfLogoBase64, { bcvRate: currentBcvRate, firmaBase64, selloBase64 })} className="h-10 w-10 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-colors shadow-sm">
-                                            <Download className="w-4 h-4" />
-                                        </Button>
-                                        <Button size="icon" onClick={() => handleConvertToOrder(entry)} className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors shadow-sm">
-                                            <Zap className="w-4 h-4" />
-                                        </Button>
-                                        <Button size="icon" onClick={() => handleDeleteBudget(entry.id)} className="h-10 w-10 rounded-xl bg-red-50 text-red-400 hover:bg-red-500 hover:text-white transition-colors shadow-sm">
-                                            <Trash2 className="w-4 h-4" />
-                                        </Button>
-                                    </div>
-                                </Card>
-                            </motion.div>
-                        ))}
+                                        
+                                        <div className="mt-4 flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-all">
+                                            <Button size="icon" onClick={() => handleEditBudget(entry)} className="h-10 w-10 rounded-xl bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white transition-colors shadow-sm" title="Editar">
+                                                <Pencil className="w-4 h-4" />
+                                            </Button>
+                                            <Button size="icon" onClick={() => generateBudgetPDF(entry, pdfLogoBase64, { bcvRate: currentBcvRate, firmaBase64, selloBase64 })} className="h-10 w-10 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-colors shadow-sm" title="PDF">
+                                                <Download className="w-4 h-4" />
+                                            </Button>
+                                            <Button size="icon" onClick={() => handleConvertToOrder(entry)} className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors shadow-sm" title="Facturar">
+                                                <Zap className="w-4 h-4" />
+                                            </Button>
+                                            <Button size="icon" onClick={() => handleDeleteBudget(entry.id)} className="h-10 w-10 rounded-xl bg-red-50 text-red-400 hover:bg-red-500 hover:text-white transition-colors shadow-sm" title="Eliminar">
+                                                <Trash2 className="w-4 h-4" />
+                                            </Button>
+                                        </div>
+                                    </Card>
+                                </motion.div>
+                            )
+                        })}
                     </div>
                 </aside>
             </div>
         </motion.div>
     );
 }
-
-// --- SUB-COMPONENTES AUXILIARES ---
 
 function StatCard({ label, value, icon, color, className }: any) {
     const colors: any = { 

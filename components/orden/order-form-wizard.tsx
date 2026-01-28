@@ -19,7 +19,7 @@ import {
     Users, Loader2, Pencil, Trash2, Save, 
     Palette, Scissors, Printer, Calendar, Box, ShoppingCart, 
     DollarSign, ChevronRight, CheckCircle2, Sparkles,
-    Coins, RotateCcw
+    Coins, RotateCcw, Clock // <--- IMPORTANTE: Icono Clock agregado
 } from "lucide-react" 
 
 import { ItemFormModal } from "@/components/orden/item-form-modal"
@@ -31,8 +31,19 @@ import { subscribeToDesigners, type Designer } from "@/lib/services/designers-se
 const PREFIJOS_RIF = ["V", "E", "P", "R", "J", "G"] as const;
 const PREFIJOS_TELEFONO = ["0412", "0422", "0414", "0424", "0416", "0426"] as const;
 
+// Helper para convertir la fecha ISO de Firebase a formato local para el input HTML
+const formatForDateTimeInput = (isoString: string) => {
+    if (!isoString) return "";
+    const date = new Date(isoString);
+    // Ajustar el offset para que el input muestre la hora local correcta
+    const offset = date.getTimezoneOffset() * 60000;
+    return (new Date(date.getTime() - offset)).toISOString().slice(0, 16);
+};
+
 const INITIAL_FORM_DATA = {
     ordenNumero: '', 
+    // INICIALIZACIÓN CLAVE: Fecha exacta actual (ISO)
+    fecha: new Date().toISOString(), 
     fechaEntrega: new Date().toISOString().split('T')[0],
     cliente: { 
         nombreRazonSocial: "", tipoCliente: "REGULAR", rifCedula: "", telefono: "", 
@@ -67,7 +78,14 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
             if (initialData) {
                 const [prefRif, numRif] = (initialData.cliente?.rifCedula || "V-").split('-');
                 const tel = initialData.cliente?.telefono || "";
-                setFormData({ ...initialData, cliente: { ...initialData.cliente, prefijoRif: prefRif || "V", numeroRif: numRif || "", prefijoTelefono: tel.substring(0, 4) || "0414", numeroTelefono: tel.substring(4) || "" } });
+                
+                // CARGA DE DATOS: Aseguramos que 'fecha' se lea de Firebase o se cree una nueva
+                setFormData({ 
+                    ...initialData, 
+                    fecha: initialData.fecha || new Date().toISOString(), // <--- Recupera fecha exacta o usa actual
+                    cliente: { ...initialData.cliente, prefijoRif: prefRif || "V", numeroRif: numRif || "", prefijoTelefono: tel.substring(0, 4) || "0414", numeroTelefono: tel.substring(4) || "" } 
+                });
+                
                 const existing = clients.find(c => c.rifCedulaCompleto === initialData.cliente?.rifCedula);
                 if (existing) { setSelectedClientId(existing.id!); setIsClientEditing(false); }
             } else {
@@ -186,15 +204,16 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
         try {
             const { prefijoTelefono, numeroTelefono, prefijoRif, numeroRif, ...clienteRest } = formData.cliente;
             
-            // --- CORRECCIÓN: Procesar subtotales de items antes de guardar ---
             const processedItems = formData.items.map((item: any) => ({
                 ...item,
                 subtotal: parseFloat(getItemSubtotal(item).toFixed(2))
             }));
 
+            // PERSISTENCIA EN FIREBASE: Aquí se construye el objeto final
             const finalPayload = { 
-                ...formData, 
-                items: processedItems, // Guardamos los items con su subtotal estático
+                ...formData,
+                fecha: formData.fecha, // <--- SE ENVÍA EXPLÍCITAMENTE LA FECHA/HORA EXACTA
+                items: processedItems,
                 totalUSD: parseFloat(currentTotal.toFixed(2)), 
                 userId: currentUserId, 
                 updatedAt: new Date().toISOString(), 
@@ -205,6 +224,7 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                 } 
             };
 
+            // Aquí se llama a la función que escribe en Firebase (onCreate o onUpdate)
             if (initialData?.id) await onUpdate(initialData.id, finalPayload);
             else await onCreate(finalPayload);
             onClose();
@@ -337,6 +357,25 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                             </section>
 
                             <section className="space-y-4">
+                                {/* NUEVO CAMPO: FECHA DE EMISIÓN EXACTA (Se guarda en Firebase) */}
+                                <div className="space-y-1">
+                                    <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+                                        <Clock className="w-3.5 h-3.5 text-blue-500" /> Fecha de Emisión (Exacta)
+                                    </Label>
+                                    <Input 
+                                        type="datetime-local" 
+                                        value={formatForDateTimeInput(formData.fecha)} 
+                                        onChange={e => {
+                                            // Al cambiar, convertimos la fecha local del input a ISO string para Firebase
+                                            const dateValue = new Date(e.target.value);
+                                            if (!isNaN(dateValue.getTime())) {
+                                                handleChange('fecha', dateValue.toISOString());
+                                            }
+                                        }} 
+                                        className="h-9 rounded-lg border-none font-bold text-blue-600 bg-blue-50/50 text-center text-xs" 
+                                    />
+                                </div>
+
                                 <div className="space-y-1">
                                     <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2"><Calendar className="w-3.5 h-3.5 text-orange-400" /> Entrega Prometida</Label>
                                     <Input type="date" value={formData.fechaEntrega} onChange={e => handleChange('fechaEntrega', e.target.value)} className="h-9 rounded-lg border-none font-black text-orange-600 bg-orange-50/50 text-center text-xs" />
