@@ -17,7 +17,7 @@ import {
   UserCheck, ChevronLeft, ChevronRight,
   Target, BarChart3, Activity, Clock, ShieldAlert,
   Percent, Image as ImageIcon, Layers, Ruler,
-  Zap, Timer, FileDown, Loader2
+  Zap, Timer, FileDown, Loader2, Palette
 } from "lucide-react"
 import { toPng } from 'html-to-image'
 import jsPDF from 'jspdf'
@@ -69,6 +69,7 @@ const identificarServicio = (item: any) => {
     const tipo = (item.tipoServicio || '').toUpperCase();
     const nombre = (item.nombre || item.descripcion || '').toLowerCase();
 
+    if (tipo === 'DISENO' || tipo === 'DISEÑO') return 'DISENO'; // Identificación explícita
     if (tipo === 'IMPRESION') return 'IMPRESION';
     if (tipo === 'CORTE' || tipo === 'CORTE_LASER') return 'CORTE';
 
@@ -235,6 +236,8 @@ export function EstadisticasDashboard({
   const metricas = useMemo(() => {
     const calcularRango = (inicio: Date, fin: Date) => {
         let ingresos = 0; let egresosDirectos = 0; let ordenesCount = 0;
+        
+        // INGRESOS (Cobranzas)
         cobranzas?.filter(c => {
             const f = new Date(c.fecha || '');
             return c.estado === 'pagado' && f >= inicio && f <= fin;
@@ -245,6 +248,8 @@ export function EstadisticasDashboard({
             else if (viewMode === 'IMPRESION') ingresos += monto * props.pctImp;
             else if (viewMode === 'CORTE') ingresos += monto * props.pctCorte;
         });
+
+        // CONTEO DE ORDENES
         ordenes.filter(o => {
             const f = new Date(o.fecha);
             return f >= inicio && f <= fin && o.estado !== 'ANULADO';
@@ -254,6 +259,8 @@ export function EstadisticasDashboard({
             else if (viewMode === 'IMPRESION' && (props?.pctImp || 0) > 0.01) ordenesCount++;
             else if (viewMode === 'CORTE' && (props?.pctCorte || 0) > 0.01) ordenesCount++;
         });
+
+        // GASTOS INSUMOS (Directos)
         const keywordsImp = ['tinta', 'vinil', 'lona', 'banner', 'papel', 'impresion', 'microperforado', 'ojales', 'laminacion', 'laminado', 'esmerilado'];
         const keywordsCorte = ['mdf', 'acrilico', 'acr', 'madera', 'laser', 'corte', 'pintura', 'thinner', 'balsa', 'plywood'];
         (gastosInsumos || []).filter(g => {
@@ -274,12 +281,39 @@ export function EstadisticasDashboard({
             }
             if (relevante) egresosDirectos += (Number(g.monto) || 0);
         });
-        return { ingresos, egresosDirectos, ordenesCount };
+
+        // --- CÁLCULO DE NÓMINA DE DISEÑO (NUEVO) ---
+        // Se extrae directamente de las órdenes que tienen items de diseño marcados como pagados
+        let gastosDiseno = 0;
+        if (viewMode === 'GENERAL') { // Solo calculamos diseño en vista General por ahora
+             ordenes.forEach(o => {
+                (o.items || []).forEach((item: any) => {
+                    // Verificamos si es diseño y si está pagado
+                    const tipo = identificarServicio(item);
+                    const isPaid = (item.designPaymentStatus === 'PAGADO' || !!item.paymentReference);
+                    
+                    if (tipo === 'DISENO' && isPaid) {
+                        // Usamos la fecha de pago si existe, sino la de la orden como fallback seguro
+                        const fechaPago = item.paymentDate ? new Date(item.paymentDate) : new Date(o.fecha);
+                        if (fechaPago >= inicio && fechaPago <= fin) {
+                             gastosDiseno += (Number(item.precioUnitario) || 0) * (Number(item.cantidad) || 1);
+                        }
+                    }
+                });
+             });
+        }
+
+        return { ingresos, egresosDirectos, ordenesCount, gastosDiseno };
     };
+
     const actual = calcularRango(fechas.inicio, fechas.fin);
     const anterior = calcularRango(fechas.inicioPrev, fechas.finPrev);
+
+    // GASTOS FIJOS
     const totalFijosRaw = gastosFijos?.reduce((s, g) => s + (Number(g.monto) || 0), 0) || 0;
     const fijosAplicables = viewMode === 'GENERAL' ? totalFijosRaw : 0; 
+
+    // NÓMINA EMPLEADOS (Regular)
     const nominaFiltrada = (pagosEmpleados || []).filter(p => {
         const f = new Date(p.fecha || p.fechaPago || '');
         const enFecha = f >= fechas.inicio && f <= fechas.fin;
@@ -290,11 +324,17 @@ export function EstadisticasDashboard({
         if (viewMode === 'CORTE') return cargo.includes('laser') || cargo.includes('corte');
         return false;
     }).reduce((acc, p) => acc + (Number(p.totalUSD) || 0), 0);
+    
     const nominaAplicable = nominaFiltrada;
-    const egresosOperativos = fijosAplicables + nominaAplicable;
+    
+    // EGRESOS TOTALES: Insumos + Fijos + Nómina Regular + Nómina Diseño
+    const egresosOperativos = fijosAplicables + nominaAplicable + actual.gastosDiseno;
     const egresosTotales = actual.egresosDirectos + egresosOperativos;
+    
     const utilidadNeta = actual.ingresos - egresosTotales;
     const margenGanancia = actual.ingresos > 0 ? (utilidadNeta / actual.ingresos) * 100 : 0;
+    
+    // KPIs varios
     const ticketPromedio = actual.ordenesCount > 0 ? actual.ingresos / actual.ordenesCount : 0;
     const numEmpleados = empleados.filter(e => {
         const cargo = (e.cargo || '').toLowerCase();
@@ -305,6 +345,7 @@ export function EstadisticasDashboard({
     }).length || 1;
     const ingresoPorEmpleado = actual.ingresos / numEmpleados;
     const puntoEquilibrioPct = egresosOperativos > 0 ? Math.min(100, (actual.ingresos / egresosOperativos) * 100) : 100;
+    
     return { actual, anterior, fijosAplicables, nominaAplicable, egresosTotales, utilidadNeta, margenGanancia, ticketPromedio, ingresoPorEmpleado, puntoEquilibrioPct, variacionIngreso: anterior.ingresos > 0 ? ((actual.ingresos - anterior.ingresos) / anterior.ingresos) * 100 : 0 };
   }, [fechaReferencia, viewMode, cobranzas, ordenes, gastosInsumos, gastosFijos, pagosEmpleados, empRoleMap, orderBreakdown, fechas, empleados]);
 
@@ -421,7 +462,30 @@ export function EstadisticasDashboard({
               (viewMode === 'CORTE' && (empRoleMap.get(p.empleadoId)||'').includes('laser'))
           ));
           const fijos = viewMode === 'GENERAL' ? gastosFijos : [];
-          return { insumos, fijos, nomina };
+          
+          // ITEMS DE DISEÑO PARA MODAL
+          const disenoItems: any[] = [];
+          if (viewMode === 'GENERAL') {
+               ordenes.forEach(o => {
+                  (o.items || []).forEach((item: any) => {
+                      const tipo = identificarServicio(item);
+                      const isPaid = (item.designPaymentStatus === 'PAGADO' || !!item.paymentReference);
+                      if (tipo === 'DISENO' && isPaid) {
+                          const fechaPago = item.paymentDate ? new Date(item.paymentDate) : new Date(o.fecha);
+                          if (fechaPago >= fechas.inicio && fechaPago <= fechas.fin) {
+                               disenoItems.push({
+                                   nombre: item.empleadoAsignado || 'Sin Asignar',
+                                   descripcion: `Orden #${o.ordenNumero} - ${item.nombre}`,
+                                   fecha: fechaPago,
+                                   monto: (Number(item.precioUnitario) || 0) * (Number(item.cantidad) || 1)
+                               });
+                          }
+                      }
+                  });
+               });
+          }
+
+          return { insumos, fijos, nomina, disenoItems };
       }
       if (selectedDetail === 'INGRESOS') {
           return cobranzas.filter(c => c.estado === 'pagado' && filtroFecha(c.fecha || '')).map(c => {
@@ -624,7 +688,7 @@ export function EstadisticasDashboard({
             trend={0} 
             icon={<Wallet size={24}/>} 
             color="rose"
-            sub={viewMode === 'GENERAL' ? "Insumos + Fijos + Nómina" : "Solo Insumos + Nómina"}
+            sub={viewMode === 'GENERAL' ? "Insumos + Fijos + Nómina + Diseño" : "Solo Insumos + Nómina"}
             onClick={() => setSelectedDetail('EGRESOS')}
         />
         <StatCard 
@@ -814,14 +878,19 @@ export function EstadisticasDashboard({
                     <div className="p-8 max-h-[60vh] overflow-y-auto custom-scrollbar">
                         {selectedDetail === 'EGRESOS' && (
                             <Tabs defaultValue="insumos" className="w-full">
-                                <TabsList className={`grid w-full mb-6 bg-slate-100 p-1 rounded-[1.5rem] ${viewMode === 'GENERAL' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                                <TabsList className={`grid w-full mb-6 bg-slate-100 p-1 rounded-[1.5rem] ${viewMode === 'GENERAL' ? 'grid-cols-4' : 'grid-cols-2'}`}>
                                     <TabsTrigger value="insumos" className="rounded-2xl font-bold uppercase text-[10px]">
                                         Insumos (${(modalData as any)?.insumos?.reduce((a:any,b:any)=>a+Number(b.monto),0).toFixed(0)})
                                     </TabsTrigger>
                                     {viewMode === 'GENERAL' && (
-                                        <TabsTrigger value="fijos" className="rounded-2xl font-bold uppercase text-[10px]">
-                                            Fijos (${(modalData as any)?.fijos?.reduce((a:any,b:any)=>a+Number(b.monto),0).toFixed(0)})
-                                        </TabsTrigger>
+                                        <>
+                                            <TabsTrigger value="fijos" className="rounded-2xl font-bold uppercase text-[10px]">
+                                                Fijos (${(modalData as any)?.fijos?.reduce((a:any,b:any)=>a+Number(b.monto),0).toFixed(0)})
+                                            </TabsTrigger>
+                                            <TabsTrigger value="diseno" className="rounded-2xl font-bold uppercase text-[10px]">
+                                                Diseño (${(modalData as any)?.disenoItems?.reduce((a:any,b:any)=>a+Number(b.monto),0).toFixed(0)})
+                                            </TabsTrigger>
+                                        </>
                                     )}
                                     <TabsTrigger value="nomina" className="rounded-2xl font-bold uppercase text-[10px]">
                                         Nómina (${(modalData as any)?.nomina?.reduce((a:any,b:any)=>a+Number(b.totalUSD),0).toFixed(0)})
@@ -850,22 +919,44 @@ export function EstadisticasDashboard({
                                 </TabsContent>
                                 
                                 {viewMode === 'GENERAL' && (
-                                    <TabsContent value="fijos" className="space-y-3">
-                                        {(modalData as any)?.fijos?.map((item:any, i:number) => (
-                                            <motion.div 
-                                                key={i}
-                                                initial={{ opacity: 0, x: -10 }}
-                                                animate={{ opacity: 1, x: 0 }}
-                                                className="flex justify-between items-center p-3 bg-orange-50/50 rounded-2xl"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    <Building2 size={16} className="text-orange-500"/>
-                                                    <p className="text-xs font-bold uppercase">{item.nombre}</p>
-                                                </div>
-                                                <span className="font-black text-sm">${item.monto}</span>
-                                            </motion.div>
-                                        ))}
-                                    </TabsContent>
+                                    <>
+                                        <TabsContent value="fijos" className="space-y-3">
+                                            {(modalData as any)?.fijos?.map((item:any, i:number) => (
+                                                <motion.div 
+                                                    key={i}
+                                                    initial={{ opacity: 0, x: -10 }}
+                                                    animate={{ opacity: 1, x: 0 }}
+                                                    className="flex justify-between items-center p-3 bg-orange-50/50 rounded-2xl"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <Building2 size={16} className="text-orange-500"/>
+                                                        <p className="text-xs font-bold uppercase">{item.nombre}</p>
+                                                    </div>
+                                                    <span className="font-black text-sm">${item.monto}</span>
+                                                </motion.div>
+                                            ))}
+                                        </TabsContent>
+                                        <TabsContent value="diseno" className="space-y-3">
+                                            {(modalData as any)?.disenoItems?.map((item:any, i:number) => (
+                                                <motion.div 
+                                                    key={i}
+                                                    initial={{ opacity: 0, x: -10 }}
+                                                    animate={{ opacity: 1, x: 0 }}
+                                                    className="flex justify-between items-center p-3 bg-purple-50/50 rounded-2xl"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <Palette size={16} className="text-purple-500"/>
+                                                        <div>
+                                                            <p className="text-xs font-bold uppercase">{item.nombre}</p>
+                                                            <p className="text-[9px] text-slate-400">{item.descripcion}</p>
+                                                            <p className="text-[9px] text-slate-400">{new Date(item.fecha).toLocaleDateString()}</p>
+                                                        </div>
+                                                    </div>
+                                                    <span className="font-black text-sm">${item.monto.toFixed(2)}</span>
+                                                </motion.div>
+                                            ))}
+                                        </TabsContent>
+                                    </>
                                 )}
 
                                 <TabsContent value="nomina" className="space-y-3">
@@ -958,10 +1049,16 @@ export function EstadisticasDashboard({
                                         <span className="font-black text-indigo-700">- ${metricas.nominaAplicable.toFixed(2)}</span>
                                     </div>
                                     {viewMode === 'GENERAL' && (
-                                        <div className="flex justify-between items-center p-4 bg-orange-50/50 rounded-2xl border border-orange-100">
-                                            <span className="text-xs font-black uppercase text-orange-700">Gastos Fijos</span>
-                                            <span className="font-black text-orange-700">- ${metricas.fijosAplicables.toFixed(2)}</span>
-                                        </div>
+                                        <>
+                                            <div className="flex justify-between items-center p-4 bg-orange-50/50 rounded-2xl border border-orange-100">
+                                                <span className="text-xs font-black uppercase text-orange-700">Gastos Fijos</span>
+                                                <span className="font-black text-orange-700">- ${metricas.fijosAplicables.toFixed(2)}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center p-4 bg-purple-50/50 rounded-2xl border border-purple-100">
+                                                <span className="text-xs font-black uppercase text-purple-700">Nómina Diseño</span>
+                                                <span className="font-black text-purple-700">- ${metricas.actual.gastosDiseno.toFixed(2)}</span>
+                                            </div>
+                                        </>
                                     )}
                                 </div>
                             </div>
