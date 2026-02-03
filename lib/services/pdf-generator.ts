@@ -64,11 +64,10 @@ export interface PDFOptions {
   bcvRate?: number;
   firmaBase64?: string;
   selloBase64?: string;
-  // Configuración de moneda para reportes dinámicos
   currency?: {
       rate: number;
-      label: string; // Ej: "Tasa BCV (EUR)"
-      symbol: string; // Ej: "Bs."
+      label: string; 
+      symbol: string; 
   };
 }
 
@@ -106,9 +105,6 @@ export interface GeneralAccountStatusData {
 }
 
 // --- LÓGICA DE CÁLCULO TÉCNICO ---
-/**
- * Calcula el subtotal real priorizando el valor guardado en el Wizard (redondeos).
- */
 const calculateItemSubtotal = (item: any): number => {
   if (item.subtotal !== undefined && item.subtotal !== null) {
     return parseFloat(item.subtotal);
@@ -193,7 +189,6 @@ export async function generateOrderPDF(orden: OrdenServicio, SMRLogoBase64: stri
   const pdfMake = await loadPdfDependencies();
   if (!pdfMake) return;
 
-  // Configuración de moneda por defecto si no viene
   const { 
       firmaBase64, 
       selloBase64,
@@ -201,6 +196,8 @@ export async function generateOrderPDF(orden: OrdenServicio, SMRLogoBase64: stri
   } = options;
 
   const totalUSD = orden.totalUSD;
+  const abonadoUSD = orden.montoPagadoUSD || 0;
+  const restanteUSD = Math.max(0, totalUSD - abonadoUSD);
     
   const itemRows = orden.items.map((item: any) => {
     const subtotal = calculateItemSubtotal(item);
@@ -226,7 +223,6 @@ export async function generateOrderPDF(orden: OrdenServicio, SMRLogoBase64: stri
       { text: `${orden.cliente.ciudad || "Coro"}, ${formatDate(orden.fecha)}`, alignment: "right", style: "dateInfo" },
       { image: SMRLogoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
       { text: "PRESUPUESTO", style: "title", alignment: "center", margin: [0, 10] },
-      // SOLO NOMBRE (RIF ELIMINADO)
       { text: `Cliente: ${orden.cliente.nombreRazonSocial}`, style: "clientInfo", margin: [0, 10] },
       {
         table: {
@@ -234,7 +230,21 @@ export async function generateOrderPDF(orden: OrdenServicio, SMRLogoBase64: stri
           body: [
             [{ text: "Cant.", style: "tableHeader" }, { text: "Descripción", style: "tableHeader" }, { text: "Medida/Tiempo", style: "tableHeader", alignment: "center" }, { text: "Monto", style: "tableHeader", alignment: "right" }],
             ...itemRows,
-            [{ text: "TOTAL", colSpan: 3, style: "finalTotalLabelBig", alignment: "right" }, {}, {}, { text: formatCurrency(totalUSD), style: "finalTotalValueBig", alignment: "right" }]
+            [
+                { text: "SUBTOTAL", colSpan: 3, style: "finalTotalLabelBig", alignment: "right" }, 
+                {}, {}, 
+                { text: formatCurrency(totalUSD), style: "itemTotal", alignment: "right" }
+            ],
+            [
+                { text: "ABONADO", colSpan: 3, style: "finalTotalLabelBig", alignment: "right", color: "#16a34a" }, 
+                {}, {}, 
+                { text: formatCurrency(abonadoUSD), style: "itemTotal", alignment: "right", color: "#16a34a" }
+            ],
+            [
+                { text: "TOTAL RESTANTE", colSpan: 3, style: "finalTotalLabelBig", alignment: "right", color: restanteUSD > 0.01 ? "#dc2626" : "black" }, 
+                {}, {}, 
+                { text: formatCurrency(restanteUSD), style: "finalTotalValueBig", alignment: "right", color: restanteUSD > 0.01 ? "#dc2626" : "black" }
+            ]
           ]
         },
         layout: customTableLayout,
@@ -242,9 +252,16 @@ export async function generateOrderPDF(orden: OrdenServicio, SMRLogoBase64: stri
       },
       {
         columns: [
-            // SI LA TASA ES > 1, SE MUESTRA. SI ES 1 (SOLO USD), SE OCULTA CON ESPACIO VACÍO
             { width: "50%", text: currency.rate > 1 ? `${currency.label}: ${currency.rate.toFixed(2)}` : " ", style: "bcvRate" },
-            { width: "50%", text: currency.rate > 1 ? `Total en ${currency.symbol}: ${formatBsCurrency(totalUSD, currency.rate)}` : " ", alignment: "right", style: "totalVesRef" }
+            { 
+                width: "50%", 
+                text: currency.rate > 1 
+                    ? `Restante en ${currency.symbol}: ${formatBsCurrency(restanteUSD, currency.rate)}` 
+                    : " ", 
+                alignment: "right", 
+                style: "totalVesRef",
+                color: restanteUSD > 0.01 ? "#dc2626" : "#666666"
+            }
         ],
         margin: [0, 0, 0, 15]
       },
@@ -301,7 +318,6 @@ export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: s
             { text: budgetData.fechaCreacion, alignment: "right", style: "dateInfo" },
             { image: SMRLogoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
             { text: "PRESUPUESTO", style: "title", alignment: "center", margin: [0, 10] },
-            // SOLO NOMBRE (RIF ELIMINADO)
             { text: `Cliente: ${budgetData.clienteNombre}`, style: "clientInfo", margin: [0, 10] },
             {
                 table: {
@@ -315,7 +331,6 @@ export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: s
                 layout: customTableLayout,
                 margin: [0, 5, 0, 15]
             },
-            // SECCIÓN DE CONVERSIÓN AGREGADA
             {
                 columns: [
                     { width: "50%", text: currency.rate > 1 ? `${currency.label}: ${currency.rate.toFixed(2)}` : " ", style: "dateInfo" },
@@ -342,7 +357,7 @@ export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: s
     pdfMake.createPdf(docDefinition).open();
 }
 
-// --- 3. RECIBO GENERAL (Estado de Cuenta) ---
+// --- 3. RECIBO GENERAL (Estado de Cuenta Modificado) ---
 export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatusData, SMRLogoBase64: string, options: PDFOptions = {}) {
     const pdfMake = await loadPdfDependencies();
     if (!pdfMake) return;
@@ -353,10 +368,16 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
         currency = { rate: options.bcvRate || 1, label: "Tasa BCV", symbol: "Bs." } 
     } = options;
 
+    // --- CÁLCULOS GLOBALES ---
+    // 1. Calculamos el Total Global sumando los totales individuales de los items (que son las órdenes)
+    const totalGlobalUSD = data.items.reduce((sum, item) => sum + item.totalUSD, 0);
+    // 2. El total pendiente viene directo de la data
+    const totalPendienteUSD = data.totalPendienteUSD;
+    // 3. Calculamos lo abonado como la diferencia
+    const totalAbonadoUSD = Math.max(0, totalGlobalUSD - totalPendienteUSD);
+
     const itemRows = data.items.map((item) => {
         const subtotal = item.totalUSD;
-        // SIN PRECIO UNITARIO VISUALIZADO
-
         return [
             { text: item.parentOrder, style: "itemText", alignment: "center" },
             { text: item.cantidad, style: "itemText", alignment: "center" },
@@ -374,7 +395,6 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
             { text: "ESTADO DE CUENTA CONSOLIDADO", style: "title", alignment: "center", margin: [0, 5, 0, 15] },
             {
                 stack: [
-                    // SOLO NOMBRE, SIN RIF
                     { text: `CLIENTE: ${data.clienteNombre.toUpperCase()}`, style: "clientInfo" },
                 ],
                 margin: [0, 0, 0, 20],
@@ -383,7 +403,6 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
                 style: "itemsTable",
                 table: {
                     headerRows: 1,
-                    // ANCHOS AJUSTADOS (Sin columna P.Unit)
                     widths: [55, 35, "*", 90, 80],
                     body: [
                         [
@@ -391,14 +410,27 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
                             { text: "Cant.", style: "tableHeader", alignment: "center" }, 
                             { text: "Descripción", style: "tableHeader" }, 
                             { text: "Medida/Tiempo", style: "tableHeader", alignment: "center" }, 
-                            { text: "Subtotal", style: "tableHeader", alignment: "right" }
+                            { text: "Total", style: "tableHeader", alignment: "right" }
                         ],
                         ...itemRows,
+                        // --- PIE DE TABLA DESGLOSADO ---
+                        // 1. TOTAL GENERAL (Suma de todas las facturas)
                         [
-                            // COLSPAN AJUSTADO A 4
-                            { text: "SALDO TOTAL PENDIENTE", style: "finalTotalLabelBig", colSpan: 4, alignment: "right" },
+                            { text: "TOTAL GENERAL", style: "finalTotalLabelBig", colSpan: 4, alignment: "right" },
                             {}, {}, {}, 
-                            { text: formatCurrency(data.totalPendienteUSD), style: "finalTotalValueBig", alignment: "right" },
+                            { text: formatCurrency(totalGlobalUSD), style: "itemTotal", alignment: "right" },
+                        ],
+                        // 2. TOTAL ABONADO (Suma de lo pagado) - Verde
+                        [
+                            { text: "TOTAL ABONADO", style: "finalTotalLabelBig", colSpan: 4, alignment: "right", color: "#16a34a" },
+                            {}, {}, {}, 
+                            { text: formatCurrency(totalAbonadoUSD), style: "itemTotal", alignment: "right", color: "#16a34a" },
+                        ],
+                        // 3. SALDO PENDIENTE (Deuda Real) - Rojo
+                        [
+                            { text: "SALDO PENDIENTE", style: "finalTotalLabelBig", colSpan: 4, alignment: "right", color: "#dc2626" },
+                            {}, {}, {}, 
+                            { text: formatCurrency(totalPendienteUSD), style: "finalTotalValueBig", alignment: "right", color: "#dc2626" },
                         ],
                     ],
                 },
@@ -408,7 +440,15 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
             {
                 columns: [
                     { width: "50%", text: currency.rate > 1 ? `${currency.label}: ${currency.rate.toFixed(2)}` : " ", style: "dateInfo" },
-                    { width: "50%", text: currency.rate > 1 ? `Total en ${currency.symbol}: ${formatBsCurrency(data.totalPendienteUSD, currency.rate)}` : " ", alignment: "right", style: "totalVesRef" }
+                    { 
+                        width: "50%", 
+                        text: currency.rate > 1 
+                            ? `Saldo Pendiente en ${currency.symbol}: ${formatBsCurrency(totalPendienteUSD, currency.rate)}` 
+                            : " ", 
+                        alignment: "right", 
+                        style: "totalVesRef",
+                        color: "#dc2626" // Rojo siempre para deuda
+                    }
                 ],
                 margin: [0, 0, 0, 20]
             },

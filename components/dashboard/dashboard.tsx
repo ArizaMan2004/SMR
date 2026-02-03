@@ -32,6 +32,9 @@ import TasksView from "@/components/dashboard/tasks-view"
 import BudgetEntryView from "@/components/dashboard/BudgetEntryView" 
 import CalculatorView from "@/components/dashboard/CalculatorView" 
 import { CurrencyToast } from "@/components/dashboard/CurrencyToast" 
+import { WalletsView } from "@/components/dashboard/WalletsView"
+import { PaymentEditModal } from "@/components/dashboard/PaymentEditModal"
+import { PaymentAuditView } from "@/components/dashboard/PaymentAuditView"
 
 // Componentes Administrativos
 import { GastosFijosView } from "@/components/dashboard/gastos-fijos-view"
@@ -42,17 +45,14 @@ import { NotificationCenterExpenses, type NotificationGasto } from "@/components
 
 // Iconos
 import { 
-    Plus, Users, CheckCircle, Calculator, Palette, Search, 
-    LayoutDashboard, FileSpreadsheet, Clock, Zap, Hammer, 
-    DollarSign, Menu, Building2, Bell, TrendingUp, Euro, 
-    Coins, CheckCircle2, MessageSquareText, Trash2, MailOpen, 
-    ChevronRight, ChevronLeft, Filter, ChevronDown, X, Briefcase, BarChart3, Package,
-    Wallet
+    Plus, CheckCircle, Calculator, LayoutDashboard, FileSpreadsheet, Clock, 
+    Building2, Bell, CheckCircle2, ChevronLeft, Menu, DollarSign, Euro, Coins, 
+    Wallet, Package, Search 
 } from "lucide-react" 
 
 // Servicios
 import { type OrdenServicio } from "@/lib/types/orden"
-import { subscribeToOrdenes, deleteOrden, updateOrdenStatus, createOrden, actualizarOrden } from "@/lib/services/ordenes-service"
+import { subscribeToOrdenes, deleteOrden, createOrden, actualizarOrden } from "@/lib/services/ordenes-service"
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
 import { 
     subscribeToPagos, 
@@ -92,13 +92,13 @@ export default function Dashboard() {
     const [activeView, setActiveView] = useState<ActiveView>("orders") 
     const [isSidebarOpen, setIsSidebarOpen] = useState(true) 
     const [searchTerm, setSearchTerm] = useState("") 
-    const [notiSearch, setNotiSearch] = useState("") 
-    const [notiFilter, setNotiFilter] = useState<"all" | "info" | "success" | "warning">("all")
-    const [currentPage, setCurrentPage] = useState(1)
-    const itemsPerPage = 10
     const [isWizardOpen, setIsWizardOpen] = useState(false)
     const [editingOrder, setEditingOrder] = useState<OrdenServicio | null>(null)
     
+    // ESTADOS PARA EL MODAL DE PAGO (CENTRALIZADO)
+    const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
+    const [selectedOrdenForPayment, setSelectedOrdenForPayment] = useState<OrdenServicio | null>(null)
+
     // NOTIFICACIONES Y PANELES
     const [isNotiOpen, setIsNotiOpen] = useState(false)
     const [isExpenseNotiOpen, setIsExpenseNotiOpen] = useState(false)
@@ -144,6 +144,8 @@ export default function Dashboard() {
             label: 'Administración',
             icon: <Building2 className="w-4 h-4" />,
             children: [
+                { id: 'wallets', label: 'Billeteras & Caja' },
+                { id: 'payment_audit', label: 'Auditoría de Pagos' },
                 { id: 'financial_stats', label: 'Balance y Estadísticas' },
                 { id: 'clients', label: 'Cobranza' },
                 { id: 'design_production', label: 'Pago Diseños' },
@@ -165,6 +167,13 @@ export default function Dashboard() {
     ], []);
 
     // --- 4. MANEJADORES ---
+    
+    // ✅ NUEVO: Función auxiliar para abrir el modal de forma segura desde cualquier vista
+    const handleOpenPaymentModal = useCallback((orden: OrdenServicio) => {
+        setSelectedOrdenForPayment(orden);
+        setIsPaymentModalOpen(true);
+    }, []);
+
     const handleSendCalcToOrder = (calc: any, type: 'area' | 'laser') => {
         const mappedItems = type === 'area' 
             ? calc.mediciones.map((m: any) => ({
@@ -264,35 +273,74 @@ export default function Dashboard() {
         } catch (error) { console.error(error); }
     }, [currentUserId]);
 
-    const handleRegisterOrderPayment = async (ordenId: string, monto: number, nota?: string, imagenUrl?: string) => {
+    // --- FUNCIÓN PRINCIPAL DE REGISTRO DE PAGOS (FIREBASE) ---
+    const handleRegisterOrderPayment = async (
+        ordenId: string, 
+        monto: number, 
+        nota?: string, 
+        imagenUrl?: string,
+        metodo?: string,
+        descuento?: number 
+    ) => {
         try {
             const ordenActual = ordenes.find(o => o.id === ordenId);
             if (!ordenActual) return;
+            
             const ordenRef = doc(db, "ordenes", ordenId);
             const montoPagadoAnterior = Number(ordenActual.montoPagadoUSD) || 0;
-            const nuevoMontoTotalPagado = montoPagadoAnterior + monto;
+            
+            // 1. Calcular totales incluyendo el posible descuento
+            const descuentoAplicado = descuento || 0;
+            const nuevoMontoTotalPagado = montoPagadoAnterior + monto + descuentoAplicado;
             const saldoRestante = ordenActual.totalUSD - nuevoMontoTotalPagado;
+            // Tolerancia de $0.01 para errores de redondeo
             const nuevoEstadoPago = saldoRestante <= 0.01 ? "PAGADO" : "ABONADO";
+
+            // 2. Crear recibo del dinero REAL (va a la billetera seleccionada)
             const nuevoRecibo = {
                 montoUSD: monto,
                 fecha: new Date().toISOString(),
                 nota: nota || "",
                 imagenUrl: imagenUrl || "",
-                tasaBCV: currentBcvRate
+                tasaBCV: currentBcvRate,
+                metodo: metodo || "Efectivo USD" 
             };
+
+            const pagosAGuardar = [nuevoRecibo];
+
+            // 3. Si hubo descuento, crear recibo de AJUSTE (no afecta caja real, solo saldo)
+            if (descuentoAplicado > 0) {
+                pagosAGuardar.push({
+                    montoUSD: descuentoAplicado,
+                    fecha: new Date().toISOString(),
+                    nota: "Ajuste/Descuento por cierre de orden",
+                    imagenUrl: "",
+                    tasaBCV: 0,
+                    metodo: "DESCUENTO" 
+                });
+            }
+
             await updateDoc(ordenRef, {
                 montoPagadoUSD: nuevoMontoTotalPagado,
                 estadoPago: nuevoEstadoPago,
-                registroPagos: arrayUnion(nuevoRecibo)
+                registroPagos: arrayUnion(...pagosAGuardar)
             });
+            
+            let descNoti = `Ingreso de $${monto} (${metodo || "Caja"}) - Orden #${ordenActual.ordenNumero}`;
+            if(descuentoAplicado > 0) descNoti += ` + Ajuste de $${descuentoAplicado.toFixed(2)}`;
+
             await createNotification({
                 title: "Pago Registrado",
-                description: `Se recibió un pago de $${monto} para la Orden #${ordenActual.ordenNumero}`,
+                description: descNoti,
                 type: 'success',
                 category: 'system'
             });
+            
+            toast.success("Pago registrado correctamente");
+            setIsPaymentModalOpen(false); // ✅ Cierre exitoso controlado aquí
         } catch (error) {
             console.error("❌ Error al registrar pago:", error);
+            toast.error("Error al registrar el pago");
         }
     };
 
@@ -377,7 +425,6 @@ export default function Dashboard() {
         });
     }, [ordenes, searchTerm]);
 
-    // ESTADÍSTICAS DE FACTURACIÓN
     const billingStats = useMemo(() => {
         const total = ordenes.length;
         const pagadas = ordenes.filter(o => (o.montoPagadoUSD || 0) >= (o.totalUSD || 0) && o.totalUSD > 0).length;
@@ -467,13 +514,13 @@ export default function Dashboard() {
                                 ordenes={filteredOrdenes} 
                                 onDelete={deleteOrden} 
                                 onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}} 
-                                onRegisterPayment={handleRegisterOrderPayment}
+                                // ✅ Corrección 1: Pasar la función que solo ABRE el modal
+                                onRegisterPayment={(id) => { 
+                                    const ord = ordenes.find(o => o.id === id); 
+                                    if(ord) handleOpenPaymentModal(ord); 
+                                }} 
                                 currentUserId={currentUserId || ""}
-                                rates={{ // SE ENVÍAN TODAS LAS TASAS
-                                    usd: currentBcvRate,
-                                    eur: eurRate,
-                                    usdt: parallelRate
-                                }}
+                                rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
                                 pdfLogoBase64={assets.logo}
                                 firmaBase64={assets.firma}
                                 selloBase64={assets.sello}
@@ -500,6 +547,7 @@ export default function Dashboard() {
                     <InsumosView 
                         gastos={gastos} 
                         currentBcvRate={currentBcvRate} 
+                        currentUserId={currentUserId || ""}
                         onCreateGasto={createGasto} 
                         onDeleteGasto={deleteGastoInsumo} 
                     />
@@ -511,6 +559,20 @@ export default function Dashboard() {
                         pagos={pagos} 
                         rates={{ usd: currentBcvRate, eur: eurRate }} 
                     />
+                )}
+
+                {activeView === "wallets" && (
+                    <WalletsView 
+                        ordenes={ordenes}
+                        gastos={gastos}
+                        gastosFijos={gastosFijos}
+                        pagosEmpleados={pagos}
+                        rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
+                    />
+                )}
+
+                {activeView === "payment_audit" && (
+                    <PaymentAuditView ordenes={ordenes} />
                 )}
 
                 {activeView === "financial_stats" && (
@@ -528,17 +590,14 @@ export default function Dashboard() {
                         })) as any}
                         ordenes={ordenes}
                         clientes={clientes}
+                        rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
                     />
                 )}
 
                 {activeView === "calculator" && (
                     <BudgetEntryView 
                         currentUserId={currentUserId}
-                        rates={{ // SE ENVÍAN TODAS LAS TASAS
-                            usd: currentBcvRate,
-                            eur: eurRate,
-                            usdt: parallelRate
-                        }}
+                        rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
                         currentBcvRate={currentBcvRate}
                         pdfLogoBase64={assets.logo} 
                         handleLogoUpload={(e: any) => handleFileUpload(e, 'logo')} handleClearLogo={() => handleClearAsset('logo')}
@@ -548,16 +607,13 @@ export default function Dashboard() {
                 )}
                 {activeView.startsWith("tasks_") && <TasksView ordenes={ordenes} currentUserId={currentUserId || ""} areaPriorizada={activeView.replace("tasks_", "")} />}
                 {activeView === "design_production" && <DesignerPayrollView designers={designers} ordenes={ordenes} bcvRate={currentBcvRate} />}
+                
                 {activeView === "clients" && (
                     <ClientsAndPaymentsView 
                         ordenes={ordenes} 
-                        rates={{ // SE ENVÍAN TODAS LAS TASAS
-                            usd: currentBcvRate,
-                            eur: eurRate,
-                            usdt: parallelRate
-                        }}
-                        bcvRate={currentBcvRate}
-                        onRegisterPayment={handleRegisterOrderPayment} 
+                        rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
+                        // ✅ Corrección 2: Pasar el manejador de apertura, no el de Firebase
+                        onRegisterPayment={handleOpenPaymentModal} 
                         pdfLogoBase64={assets.logo}
                         firmaBase64={assets.firma}
                         selloBase64={assets.sello}
@@ -614,10 +670,32 @@ export default function Dashboard() {
             />
           </DialogContent>
         </Dialog>
+
+        {/* MODAL DE PAGO UNIFICADO Y CORREGIDO */}
+        {selectedOrdenForPayment && (
+            <PaymentEditModal
+                // ✅ Corrección 3: Key única para reiniciar estados al cambiar orden
+                key={selectedOrdenForPayment.id}
+                isOpen={isPaymentModalOpen}
+                // ✅ Corrección 4: Timeout para evitar parpadeo visual al cerrar
+                onClose={() => { 
+                    setIsPaymentModalOpen(false); 
+                    setTimeout(() => setSelectedOrdenForPayment(null), 300);
+                }}
+                orden={selectedOrdenForPayment}
+                rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
+                onSave={async (amount, note, img, method, discount) => {
+                    await handleRegisterOrderPayment(selectedOrdenForPayment.id, amount, note, img, method, discount); 
+                    // El cierre del modal ocurre dentro de handleRegisterOrderPayment tras el éxito
+                }}
+                currentUserId={currentUserId || ""}
+            />
+        )}
       </div>
     )
 }
 
+// Sub-componentes visuales
 function TasaHeaderBadge({ label, value, icon, color, onClick }: any) {
     const colors: any = { emerald: "bg-emerald-500/10 text-emerald-600", orange: "bg-orange-500/10 text-orange-600", blue: "bg-blue-500/10 text-blue-600" }
     return (

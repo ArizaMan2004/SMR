@@ -5,7 +5,7 @@ import React, { useState, useMemo } from 'react'
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
 
 // UI Components - Shadcn
-import { Card, CardContent } from "@/components/ui/card"
+import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -15,20 +15,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Separator } from "@/components/ui/separator"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
-// Iconos - Lucide (CORREGIDO: de "lucide-center" a "lucide-react")
+// Iconos - Lucide
 import { 
-    DollarSign, ChevronDown, Wallet, Search, Landmark, Trash2, AlertCircle,
-    Plus, Zap, Layers, Palette, CreditCard, Loader2, Eye, ImageIcon, 
-    TrendingUp, Settings, User, Ruler, Box, Upload, Euro, Download, X, Calendar,
-    CheckCircle2, Receipt
+    Wallet, Search, Landmark,
+    Plus, Layers, Palette, CreditCard, Loader2, Eye, ImageIcon, 
+    User, Upload, X, CheckCircle2, Receipt, ChevronDown, Download,
+    DollarSign
 } from "lucide-react"
 
 // Tipos y Servicios
 import { type OrdenServicio, type ItemOrden, EstadoOrden, EstadoPago } from "@/lib/types/orden"
 import { type Designer } from "@/lib/services/designers-service"
-import { updateOrdenItemField, updateOrdenDesign, createOrden } from "@/lib/services/ordenes-service"
+// CORRECCIÓN AQUÍ: Cambiado 'updateOrden' por 'actualizarOrden'
+import { updateOrdenItemField, createOrden, actualizarOrden } from "@/lib/services/ordenes-service"
 import { addDesigner, deleteDesigner } from "@/lib/services/designers-service"
 import { getLastOrderNumber } from "@/lib/firebase/ordenes"
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
@@ -89,6 +90,7 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
     })
 
     // --- ACCIONES ---
+
     const handleDownloadImage = async (url: string) => {
         try {
             const response = await fetch(url);
@@ -109,6 +111,55 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
         } catch (e) {
             console.error("Error al reasignar:", e);
             alert("Error al reasignar responsable.");
+        }
+    };
+
+    // --- FUNCIÓN CRÍTICA: Convertir entre Facturable e Interno (Y RECALCULAR TOTAL) ---
+    const handleToggleBillable = async (task: any) => {
+        if (!confirm("¿Cambiar el estado de facturación?\n\nSi marcas como 'Interno', el precio al cliente será $0 (la deuda desaparecerá del Dashboard), pero mantendrás el costo de nómina.")) return;
+        
+        try {
+            // 1. Buscamos la orden completa para tener los datos más recientes
+            const parentOrder = ordenes.find(o => o.id === task.orderId);
+            if (!parentOrder) return;
+
+            // 2. Determinamos valores
+            // Si tiene precio > 0 es facturable. Vamos a volverlo 0.
+            const isCurrentlyBillable = (task.precioUnitario || 0) > 0;
+            const baseValue = (task as any).costoInterno || task.precioUnitario || 0;
+
+            // 3. Copiamos y modificamos el array de items
+            const updatedItems = [...(parentOrder.items || [])];
+            
+            // Modificamos solo el ítem específico
+            updatedItems[task.itemIndex] = {
+                ...updatedItems[task.itemIndex],
+                precioUnitario: isCurrentlyBillable ? 0 : baseValue, // Si era facturable, ahora es 0. Si era 0, vuelve al precio.
+                // @ts-ignore
+                costoInterno: baseValue // Aseguramos que el costo interno siempre se guarde
+            };
+
+            // 4. IMPORTANTE: Recalculamos el Total de la Orden
+            const newTotalUSD = updatedItems.reduce((acc, item) => {
+                return acc + ((item.precioUnitario || 0) * (item.cantidad || 1));
+            }, 0);
+
+            // 5. Actualizamos el estado de pago de la orden
+            // Si el nuevo total es 0 (o menor/igual a lo pagado), la orden está "PAGADO" para el cliente.
+            const montoPagado = parentOrder.montoPagadoUSD || 0;
+            const newStatus = (montoPagado >= newTotalUSD - 0.01) ? "PAGADO" : (parentOrder.estadoPago === "PAGADO" ? "PENDIENTE" : parentOrder.estadoPago);
+
+            // 6. Guardamos todo en la base de datos (Items + Total + Estado)
+            // CORRECCIÓN: Usamos 'actualizarOrden' en vez de 'updateOrden'
+            await actualizarOrden(task.orderId, {
+                items: updatedItems,
+                totalUSD: newTotalUSD,
+                estadoPago: newStatus as any
+            });
+
+        } catch (e) {
+            console.error(e);
+            alert("Error al actualizar el estado del diseño");
         }
     };
 
@@ -159,6 +210,10 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                 const matchedDesigner = designers.find(d => d.name === designerName);
                 const designerId = matchedDesigner?.id || (designerName === "Sin Asignar" || designerName === "N/A" ? "sin_asignar" : "desconocido");
 
+                // Prioridad: costoInterno -> precioUnitario -> 0
+                const rawPrice = (item as any).costoInterno !== undefined ? (item as any).costoInterno : (item.precioUnitario || 0);
+                const totalTaskUSD = rawPrice * (item.cantidad || 1);
+
                 return {
                     ...item,
                     orderId: orden.id,
@@ -169,7 +224,8 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                     designerName,
                     isPaid,
                     fullOrder: orden,
-                    totalTaskUSD: (item.precioUnitario || 0) * (item.cantidad || 1)
+                    totalTaskUSD,
+                    isBillable: (item.precioUnitario || 0) > 0 // Flag visual
                 }
             })
         ).filter(item => {
@@ -205,6 +261,7 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
     const totalHistoryCount = historyList.length;
 
     return (
+        <TooltipProvider>
         <motion.div initial="hidden" animate="visible" variants={containerVariants} className="space-y-4 lg:space-y-6 pb-10">
             
             <motion.header variants={itemVariants} className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white dark:bg-slate-900 p-4 lg:p-6 rounded-3xl lg:rounded-[2rem] border shadow-sm">
@@ -256,6 +313,7 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                                         onToggle={() => setExpandedDesigner(expandedDesigner === group.id ? null : group.id)}
                                         onPay={(task: any) => { setPayingItem({ orderId: task.orderId, itemIndex: task.itemIndex, amount: task.totalTaskUSD, designerName: group.name }); setIsPaymentModalOpen(true); }}
                                         onView={(task: any) => { setSelectedOrder(task.fullOrder); setIsDetailModalOpen(true); }}
+                                        onToggleBillable={handleToggleBillable}
                                         designersList={designers} onReassign={handleReassign}
                                     />
                                 ))
@@ -274,17 +332,80 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                                         <TableHead className="font-black text-[9px] lg:text-[10px] uppercase tracking-widest">Orden</TableHead>
                                         <TableHead className="hidden md:table-cell font-black text-[9px] lg:text-[10px] uppercase tracking-widest">Diseñador</TableHead>
                                         <TableHead className="text-right font-black text-[9px] lg:text-[10px] uppercase tracking-widest">Monto</TableHead>
-                                        <TableHead className="text-center font-black text-[9px] lg:text-[10px] uppercase tracking-widest">Voucher</TableHead>
+                                        <TableHead className="text-center font-black text-[9px] lg:text-[10px] uppercase tracking-widest">Acciones</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {historyList.map((item, idx) => (
                                         <TableRow key={idx} className="h-16 lg:h-20 border-slate-50 hover:bg-slate-50/50 transition-colors">
-                                            <TableCell className="px-4 lg:px-8 font-bold text-slate-500 text-[10px] lg:text-xs">{item.paymentDate ? new Date(item.paymentDate).toLocaleDateString() : '---'}</TableCell>
-                                            <TableCell><div className="font-black text-blue-600 text-xs lg:text-sm">#{item.orderNum}</div><div className="text-[9px] font-bold text-slate-400 uppercase truncate max-w-[80px] lg:max-w-none">{item.clientName}</div></TableCell>
-                                            <TableCell className="hidden md:table-cell"><Badge className="bg-slate-100 text-slate-900 border-none rounded-lg px-3 font-black text-[10px] uppercase">{item.designerName}</Badge></TableCell>
-                                            <TableCell className="text-right"><div className="font-black text-emerald-600 text-sm lg:text-xl">${item.totalTaskUSD.toFixed(2)}</div></TableCell>
-                                            <TableCell className="text-center">{(item as any).paymentScreenshotUrl && <Button variant="ghost" size="icon" onClick={() => setPreviewImageUrl((item as any).paymentScreenshotUrl)} className="text-blue-500 h-8 w-8"><ImageIcon className="w-5 h-5" /></Button>}</TableCell>
+                                            {/* Fecha */}
+                                            <TableCell className="px-4 lg:px-8 font-bold text-slate-500 text-[10px] lg:text-xs">
+                                                {item.paymentDate ? new Date(item.paymentDate).toLocaleDateString() : '---'}
+                                            </TableCell>
+                                            
+                                            {/* Orden */}
+                                            <TableCell>
+                                                <div className="font-black text-blue-600 text-xs lg:text-sm">#{item.orderNum}</div>
+                                                <div className="text-[9px] font-bold text-slate-400 uppercase truncate max-w-[80px] lg:max-w-none">{item.clientName}</div>
+                                            </TableCell>
+                                            
+                                            {/* Diseñador */}
+                                            <TableCell className="hidden md:table-cell">
+                                                <Badge className="bg-slate-100 text-slate-900 border-none rounded-lg px-3 font-black text-[10px] uppercase">
+                                                    {item.designerName}
+                                                </Badge>
+                                            </TableCell>
+                                            
+                                            {/* Monto */}
+                                            <TableCell className="text-right">
+                                                <div className="font-black text-emerald-600 text-sm lg:text-xl">
+                                                    ${item.totalTaskUSD.toFixed(2)}
+                                                </div>
+                                                {/* Indicador Interno */}
+                                                {!item.isBillable && (
+                                                    <div className="text-[7px] font-bold text-orange-500 uppercase tracking-widest bg-orange-50 inline-block px-1 rounded">
+                                                        Interno
+                                                    </div>
+                                                )}
+                                            </TableCell>
+                                            
+                                            {/* Acciones */}
+                                            <TableCell className="text-center">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    {/* BOTÓN REPARADOR DE ORDENES */}
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Button 
+                                                                variant="ghost" 
+                                                                size="icon" 
+                                                                onClick={() => handleToggleBillable(item)}
+                                                                className={cn(
+                                                                    "h-8 w-8 transition-colors rounded-lg",
+                                                                    item.isBillable 
+                                                                        ? "text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50" 
+                                                                        : "text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-orange-50/50"
+                                                                )}
+                                                            >
+                                                                <DollarSign className="w-4 h-4" />
+                                                            </Button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>
+                                                            <p>{item.isBillable ? "Convertir a Interno (No cobrar)" : "Convertir a Facturable"}</p>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+
+                                                    {(item as any).paymentScreenshotUrl && (
+                                                        <Button 
+                                                            variant="ghost" 
+                                                            size="icon" 
+                                                            onClick={() => setPreviewImageUrl((item as any).paymentScreenshotUrl)} 
+                                                            className="text-blue-500 h-8 w-8 hover:bg-blue-50 rounded-lg"
+                                                        >
+                                                            <ImageIcon className="w-5 h-5" />
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            </TableCell>
                                         </TableRow>
                                     ))}
                                 </TableBody>
@@ -308,22 +429,58 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                     setIsProcessing(true);
                     try {
                         const lastNum = await getLastOrderNumber();
+                        
+                        // Lógica inicial: Precio cliente vs Costo interno
+                        const precioReal = parseFloat(data.precioDiseno || "0");
+                        const precioCliente = data.facturarDiseno ? precioReal : 0;
+
                         const items: ItemOrden[] = [{
-                            nombre: `Diseño: ${data.detalles}`, tipoServicio: "DISENO", cantidad: 1, unidad: "und", 
-                            precioUnitario: parseFloat(data.precioDiseno || "0"), 
+                            nombre: `Diseño: ${data.detalles}`, 
+                            tipoServicio: "DISENO", 
+                            cantidad: 1, 
+                            unidad: "und", 
+                            precioUnitario: precioCliente,
                             empleadoAsignado: designers.find(d => d.id === data.designerId)?.name || "Sin Asignar",
                             // @ts-ignore
-                            designPaymentStatus: 'PENDIENTE'
+                            designPaymentStatus: 'PENDIENTE',
+                            costoInterno: precioReal // Guardamos el valor real para nómina
                         }];
+
                         if (data.incluirMaterial) {
                             const materialPrice = (parseFloat(data.ancho || "0") * parseFloat(data.alto || "0") * parseFloat(data.precioM2 || "10")) / 10000;
-                            items.push({ nombre: `Producción: ${data.material} (${data.ancho}x${data.alto}cm)`, tipoServicio: "IMPRESION", cantidad: 1, unidad: "und", precioUnitario: materialPrice, materialDeImpresion: data.material });
+                            items.push({ 
+                                nombre: `Producción: ${data.material} (${data.ancho}x${data.alto}cm)`, 
+                                tipoServicio: "IMPRESION", 
+                                cantidad: 1, 
+                                unidad: "und", 
+                                precioUnitario: materialPrice, 
+                                materialDeImpresion: data.material 
+                            });
                         }
+
+                        // Calcular Total inicial
+                        const totalUSD = items.reduce((s, i) => s + i.precioUnitario, 0);
+
                         await createOrden({ 
-                            ordenNumero: String(lastNum + 1), fecha: new Date().toISOString(), 
-                            cliente: { nombreRazonSocial: data.cliente, rifCedula: "V-EXPRESS", telefono: "N/A", correo: "N/A", domicilioFiscal: "N/A", personaContacto: "N/A" }, 
-                            items, serviciosSolicitados: { impresionDigital: false, impresionGranFormato: data.incluirMaterial, corteLaser: false, laminacion: false, avisoCorporeo: false, rotulacion: false, instalacion: false, senaletica: false }, 
-                            descripcionDetallada: data.detalles || "Express", totalUSD: items.reduce((s, i) => s + i.precioUnitario, 0), montoPagadoUSD: 0, estadoPago: EstadoPago.PENDIENTE, estado: EstadoOrden.PENDIENTE, designerId: data.designerId 
+                            ordenNumero: String(lastNum + 1), 
+                            fecha: new Date().toISOString(), 
+                            cliente: { 
+                                nombreRazonSocial: data.cliente, 
+                                rifCedula: "V-EXPRESS", 
+                                telefono: "N/A", 
+                                correo: "N/A", 
+                                domicilioFiscal: "N/A", 
+                                personaContacto: "N/A" 
+                            }, 
+                            items, 
+                            serviciosSolicitados: { impresionDigital: false, impresionGranFormato: data.incluirMaterial, corteLaser: false, laminacion: false, avisoCorporeo: false, rotulacion: false, instalacion: false, senaletica: false }, 
+                            descripcionDetallada: data.detalles || "Express", 
+                            totalUSD, 
+                            montoPagadoUSD: 0, 
+                            // Si el total es 0, nace PAGADA
+                            estadoPago: totalUSD === 0 ? EstadoPago.PAGADO : EstadoPago.PENDIENTE, 
+                            estado: EstadoOrden.PENDIENTE, 
+                            designerId: data.designerId 
                         });
                         setIsAssignModalOpen(false);
                     } catch (e) { alert("Error al crear tarea") } finally { setIsProcessing(false) }
@@ -333,12 +490,13 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
             <OrderDetailModal open={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} orden={selectedOrder} bcvRate={bcvRate} />
             <ImagePreviewModal imageUrl={previewImageUrl} onClose={() => setPreviewImageUrl(null)} onDownload={() => previewImageUrl && handleDownloadImage(previewImageUrl)} />
         </motion.div>
+        </TooltipProvider>
     )
 }
 
 // --- SUB-COMPONENTES INTERNOS ---
 
-function DesignerCollapse({ group, isExpanded, onToggle, onPay, onView, designersList, onReassign }: any) {
+function DesignerCollapse({ group, isExpanded, onToggle, onPay, onView, designersList, onReassign, onToggleBillable }: any) {
     return (
         <Card className="border-none shadow-sm overflow-hidden bg-white dark:bg-slate-900 rounded-2xl lg:rounded-[2rem]">
             <button onClick={onToggle} className="w-full flex items-center justify-between p-4 lg:p-6 hover:bg-slate-50/50 transition-colors">
@@ -363,8 +521,30 @@ function DesignerCollapse({ group, isExpanded, onToggle, onPay, onView, designer
                                 <div className="text-[9px] lg:text-[10px] font-bold text-slate-400 mt-0.5 lg:mt-1 uppercase"><User className="inline w-3 h-3 mr-1" /> {task.clientName}</div>
                             </div>
                             <div className="flex items-center gap-2 lg:gap-3 w-full md:w-auto justify-between md:justify-end">
-                                <div className="font-black text-lg lg:text-xl text-slate-900 dark:text-white">${task.totalTaskUSD.toFixed(2)}</div>
+                                <div className="text-right mr-2">
+                                    <div className="font-black text-lg lg:text-xl text-slate-900 dark:text-white">${task.totalTaskUSD.toFixed(2)}</div>
+                                    {!task.isBillable && (
+                                        <div className="text-[8px] font-bold text-orange-500 uppercase tracking-widest bg-orange-50 px-1.5 rounded">Interno</div>
+                                    )}
+                                </div>
                                 <div className="flex gap-1.5 lg:gap-2">
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button 
+                                                variant="outline" 
+                                                size="icon" 
+                                                onClick={() => onToggleBillable(task)}
+                                                className={cn(
+                                                    "rounded-lg lg:rounded-xl h-8 w-8 lg:h-10 lg:w-10 transition-colors",
+                                                    task.isBillable ? "text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50" : "text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-orange-50/50"
+                                                )}
+                                            >
+                                                <DollarSign className="w-4 h-4" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent><p>{task.isBillable ? "Convertir a Interno (No cobrar)" : "Convertir a Facturable"}</p></TooltipContent>
+                                    </Tooltip>
+
                                     <Button variant="outline" size="icon" className="rounded-lg lg:rounded-xl h-8 w-8 lg:h-10 lg:w-10" onClick={() => onView(task)}><Eye className="w-4 h-4" /></Button>
                                     <Select value={task.designerId} onValueChange={(v) => onReassign(task.orderId, task.itemIndex, designersList.find((dl:any) => dl.id === v)?.name || "Sin Asignar")}>
                                         <SelectTrigger className="w-24 lg:w-32 h-8 lg:h-10 rounded-lg lg:rounded-xl bg-white dark:bg-slate-900 text-[9px] lg:text-[10px] font-bold"><SelectValue /></SelectTrigger>
@@ -454,7 +634,19 @@ function ImagePreviewModal({ imageUrl, onClose, onDownload }: any) {
 }
 
 function AssignmentModal({ isOpen, onClose, designers, onConfirm, loading }: any) {
-    const [localForm, setLocalForm] = useState({ cliente: "", detalles: "", designerId: "sin_asignar", precioDiseno: "", ancho: "", alto: "", material: "Vinil", precioM2: "10", incluirMaterial: true })
+    const [localForm, setLocalForm] = useState({ 
+        cliente: "", 
+        detalles: "", 
+        designerId: "sin_asignar", 
+        precioDiseno: "", 
+        facturarDiseno: true, 
+        ancho: "", 
+        alto: "", 
+        material: "Vinil", 
+        precioM2: "10", 
+        incluirMaterial: true 
+    })
+
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="max-w-2xl rounded-[2rem] lg:rounded-[2.5rem] p-6 lg:p-10 bg-white dark:bg-slate-950 border-none shadow-2xl overflow-y-auto max-h-[90vh] w-[95vw] lg:w-full">
@@ -466,7 +658,17 @@ function AssignmentModal({ isOpen, onClose, designers, onConfirm, loading }: any
                         <Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Diseñador</Label>
                         <Select value={localForm.designerId} onValueChange={v => setLocalForm({...localForm, designerId: v})}><SelectTrigger className="rounded-xl lg:rounded-2xl bg-slate-100 dark:bg-slate-800 border-none h-11 lg:h-14 font-bold text-xs"><SelectValue placeholder="Seleccionar..." /></SelectTrigger><SelectContent className="z-[150]"><SelectItem value="sin_asignar">Sin asignar</SelectItem>{designers.map((d: any) => (<SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>))}</SelectContent></Select>
                     </div>
-                    <div className="space-y-1"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Precio Diseño</Label><Input type="number" value={localForm.precioDiseno} onChange={e => setLocalForm({...localForm, precioDiseno: e.target.value})} className="rounded-xl lg:rounded-2xl bg-slate-100 dark:bg-slate-800 border-none h-11 lg:h-14 font-black text-blue-600 text-xl lg:text-2xl" /></div>
+                    <div className="space-y-1"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Comisión Diseñador ($)</Label><Input type="number" value={localForm.precioDiseno} onChange={e => setLocalForm({...localForm, precioDiseno: e.target.value})} className="rounded-xl lg:rounded-2xl bg-slate-100 dark:bg-slate-800 border-none h-11 lg:h-14 font-black text-blue-600 text-xl lg:text-2xl" /></div>
+                    
+                    {/* NUEVO CONTROL DE FACTURACIÓN */}
+                    <div className="col-span-2 bg-blue-50 dark:bg-blue-900/10 rounded-2xl lg:rounded-[2rem] p-4 lg:p-6 border border-blue-100 dark:border-blue-900/20 flex items-center justify-between">
+                        <div className="space-y-1">
+                            <Label className="text-[10px] lg:text-xs font-black uppercase text-blue-600 dark:text-blue-400 flex items-center gap-2"><CreditCard className="w-4 h-4" /> ¿Facturar al Cliente?</Label>
+                            <p className="text-[9px] font-bold text-slate-500 max-w-[200px] leading-tight">Si se desactiva, el cliente verá $0 pero la nómina registrará el gasto.</p>
+                        </div>
+                        <Checkbox className="w-6 h-6 rounded-md data-[state=checked]:bg-blue-600 border-blue-200" checked={localForm.facturarDiseno} onCheckedChange={v => setLocalForm({...localForm, facturarDiseno: v as boolean})} />
+                    </div>
+
                     <div className="col-span-2 bg-slate-50 dark:bg-slate-900 rounded-2xl lg:rounded-[2rem] p-4 lg:p-6 border border-slate-100 dark:border-slate-800 space-y-3 lg:space-y-4 shadow-inner">
                         <div className="flex justify-between items-center"><span className="font-black text-slate-600 dark:text-slate-400 flex items-center gap-2 text-[10px] lg:text-sm uppercase tracking-widest"><Layers className="w-4 h-4 lg:w-5 h-5"/> ¿Producción?</span><Checkbox checked={localForm.incluirMaterial} onCheckedChange={v => setLocalForm({...localForm, incluirMaterial: v as boolean})} /></div>
                         {localForm.incluirMaterial && (

@@ -28,11 +28,11 @@ import { toast } from "sonner"
 import { 
     Trash2, Eye, Pencil, ChevronLeft, ChevronRight, 
     ChevronDown, CheckCircle2, Wallet, Landmark,
-    History, X, Clock, Download, RefreshCw, Loader2, Sparkles, Banknote
+    History, X, Clock, Download, RefreshCw, Loader2, Sparkles, Banknote,
+    ArrowUpDown, ArrowUp, ArrowDown // ✅ Iconos para ordenar
 } from "lucide-react"
 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
-import { PaymentEditModal } from "@/components/dashboard/PaymentEditModal"
 import { PaymentHistoryView } from "@/components/orden/PaymentHistoryView" 
 import { cn } from "@/lib/utils"
 
@@ -40,7 +40,7 @@ interface OrdersTableProps {
   ordenes: OrdenServicio[]
   onDelete: (ordenId: string) => void
   onEdit: (orden: OrdenServicio) => void
-  onRegisterPayment: (ordenId: string, abono: number, nota?: string, img?: string) => Promise<void>
+  onRegisterPayment: (ordenId: string) => void
   currentUserId: string
   rates: {
     usd: number;
@@ -68,8 +68,7 @@ export function OrdersTable({
   
   const [selectedOrden, setSelectedOrden] = useState<OrdenServicio | null>(null)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
-  const [ordenForPayment, setOrdenForPayment] = useState<OrdenServicio | null>(null)
+  
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
   const [orderForHistory, setOrderForHistory] = useState<OrdenServicio | null>(null)
   const [isSyncing, setIsSyncing] = useState(false)
@@ -80,9 +79,10 @@ export function OrdersTable({
   const { unpaidOrders, paidOrders } = useMemo(() => {
     const unpaid: OrdenServicio[] = [];
     const paid: OrdenServicio[] = [];
-    // Ordenar por fecha exacta (timestamp) para mantener el orden cronológico preciso
-    const sorted = [...ordenes].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
-    sorted.forEach(o => {
+    
+    // Dejamos el ordenamiento inicial aquí solo como backup, 
+    // pero el componente hijo manejará el ordenamiento visual.
+    ordenes.forEach(o => {
         const total = o.totalUSD || 0;
         const abonado = o.montoPagadoUSD || 0;
         if (abonado >= total && total > 0) paid.push(o); else unpaid.push(o);
@@ -90,20 +90,17 @@ export function OrdersTable({
     return { unpaidOrders: unpaid, paidOrders: paid };
   }, [ordenes]);
 
-  // --- FUNCIÓN DE DESCARGA CON SELECCIÓN DE TASA ---
   const handleDownloadPDF = async (o: OrdenServicio, rateType: 'USD' | 'EUR' | 'USDT' | 'USD_ONLY') => {
     if (!pdfLogoBase64) return alert("Por favor, cargue un logo en Presupuestos.");
-    
-    // Configurar moneda según selección
     let selectedCurrency = { rate: rates.usd, label: "Tasa BCV ($)", symbol: "Bs." };
     if (rateType === 'EUR') selectedCurrency = { rate: rates.eur, label: "Tasa BCV (€)", symbol: "Bs." };
     if (rateType === 'USDT') selectedCurrency = { rate: rates.usdt, label: "Tasa Monitor", symbol: "Bs." };
-    if (rateType === 'USD_ONLY') selectedCurrency = { rate: 1, label: "", symbol: "" }; // Tasa 1 oculta la conversión en el PDF
+    if (rateType === 'USD_ONLY') selectedCurrency = { rate: 1, label: "", symbol: "" };
 
     await generateOrderPDF(o, pdfLogoBase64, { 
         firmaBase64, 
         selloBase64,
-        currency: selectedCurrency // Pasamos la configuración al generador
+        currency: selectedCurrency 
     });
   };
 
@@ -126,20 +123,8 @@ export function OrdersTable({
       <div className="flex justify-end px-6 -mb-6">
           <AlertDialog>
               <AlertDialogTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    disabled={isSyncing}
-                    className={cn(
-                        "h-8 px-3 rounded-xl font-bold text-[9px] uppercase tracking-tight transition-all gap-2",
-                        "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-white/5",
-                        isSyncing && "opacity-50"
-                    )}
-                  >
-                    {isSyncing ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                        <RefreshCw className="w-3 h-3 opacity-50" />
-                    )}
+                  <Button variant="ghost" disabled={isSyncing} className={cn("h-8 px-3 rounded-xl font-bold text-[9px] uppercase tracking-tight transition-all gap-2", "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-white/5", isSyncing && "opacity-50")}>
+                    {isSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3 opacity-50" />}
                     {isSyncing ? "Sincronizando..." : "Sincronizar Estatus"}
                   </Button>
               </AlertDialogTrigger>
@@ -152,12 +137,7 @@ export function OrdersTable({
                   </AlertDialogHeader>
                   <AlertDialogFooter className="gap-2">
                       <AlertDialogCancel className="rounded-xl font-bold uppercase text-[9px] h-9">Cancelar</AlertDialogCancel>
-                      <AlertDialogAction 
-                        onClick={handleSync} 
-                        className="bg-slate-900 dark:bg-blue-600 hover:bg-black rounded-xl font-black uppercase text-[9px] h-9"
-                      >
-                        Confirmar
-                      </AlertDialogAction>
+                      <AlertDialogAction onClick={handleSync} className="bg-slate-900 dark:bg-blue-600 hover:bg-black rounded-xl font-black uppercase text-[9px] h-9">Confirmar</AlertDialogAction>
                   </AlertDialogFooter>
               </AlertDialogContent>
           </AlertDialog>
@@ -176,7 +156,21 @@ export function OrdersTable({
             </div>
             <ChevronDown className={cn("w-6 h-6 text-slate-300 dark:text-slate-600 transition-transform duration-500", showUnpaid && 'rotate-180')} />
         </button>
-        <AnimatePresence>{showUnpaid && (<motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><Card className="rounded-[2.5rem] border-none shadow-xl bg-white dark:bg-zinc-900 overflow-hidden"><CardContent className="p-0"><OrdersSubTable data={unpaidOrders} actions={{ onDelete, onEdit, handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, handleOpenPayment: (o:any)=>{setOrdenForPayment(o); setIsPaymentModalOpen(true); }, handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, handleDownloadPDF }} rates={rates} /></CardContent></Card></motion.div>)}</AnimatePresence>
+        <AnimatePresence>
+            {showUnpaid && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                    <Card className="rounded-[2.5rem] border-none shadow-xl bg-white dark:bg-zinc-900 overflow-hidden">
+                        <CardContent className="p-0">
+                            <OrdersSubTable 
+                                data={unpaidOrders} 
+                                actions={{ onDelete, onEdit, handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, handleOpenPayment: (o:any)=>{ onRegisterPayment(o.id); }, handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, handleDownloadPDF }} 
+                                rates={rates} 
+                            />
+                        </CardContent>
+                    </Card>
+                </motion.div>
+            )}
+        </AnimatePresence>
       </section>
 
       {/* SECCIÓN 2: HISTORIAL PAGADO */}
@@ -192,20 +186,27 @@ export function OrdersTable({
             </div>
             <ChevronDown className={cn("w-6 h-6 text-slate-300 dark:text-slate-600 transition-transform duration-500", showPaid && 'rotate-180')} />
         </button>
-        <AnimatePresence>{showPaid && (<motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden"><Card className="rounded-[2.5rem] border-none shadow-lg bg-white/80 dark:bg-zinc-900/80 overflow-hidden opacity-90"><CardContent className="p-0"><OrdersSubTable data={paidOrders} actions={{ onDelete, onEdit, handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, handleOpenPayment: (o:any)=>{setOrdenForPayment(o); setIsPaymentModalOpen(true); }, handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, handleDownloadPDF }} rates={rates} /></CardContent></Card></motion.div>)}</AnimatePresence>
+        <AnimatePresence>
+            {showPaid && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                    <Card className="rounded-[2.5rem] border-none shadow-lg bg-white/80 dark:bg-zinc-900/80 overflow-hidden opacity-90">
+                        <CardContent className="p-0">
+                            <OrdersSubTable 
+                                data={paidOrders} 
+                                actions={{ onDelete, onEdit, handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, handleOpenPayment: (o:any)=>{ onRegisterPayment(o.id); }, handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, handleDownloadPDF }} 
+                                rates={rates} 
+                            />
+                        </CardContent>
+                    </Card>
+                </motion.div>
+            )}
+        </AnimatePresence>
       </section>
 
-      {/* MODALES */}
+      {/* MODALES LOCALES */}
       {selectedOrden && (
-        <OrderDetailModal 
-          orden={selectedOrden} 
-          open={isDetailModalOpen} 
-          onClose={() => setIsDetailModalOpen(false)} 
-          rates={rates} 
-        />
+        <OrderDetailModal orden={selectedOrden} open={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} rates={rates} />
       )}
-      
-      {ordenForPayment && (<PaymentEditModal isOpen={isPaymentModalOpen} orden={ordenForPayment} onClose={() => { setIsPaymentModalOpen(false); setOrdenForPayment(null); }} onSave={async (monto, nota, img) => { await onRegisterPayment(ordenForPayment.id, monto, nota, img); setIsPaymentModalOpen(false); }} currentUserId={currentUserId} />)}
 
       <Dialog open={isHistoryModalOpen} onOpenChange={setIsHistoryModalOpen}>
           <DialogContent className="max-w-4xl p-0 border-none bg-white dark:bg-zinc-950 rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden">
@@ -228,11 +229,54 @@ export function OrdersTable({
   )
 }
 
+// --- SUB-TABLA CON ORDENAMIENTO (SORTING) ---
 function OrdersSubTable({ data, actions, rates }: any) {
     const [page, setPage] = useState(1);
     const pageSize = 10;
-    const totalPages = Math.ceil(data.length / pageSize);
-    const paginated = data.slice((page - 1) * pageSize, page * pageSize);
+    
+    // ✅ Estado para el ordenamiento (Por defecto: Número de orden descendente, osea las nuevas primero)
+    const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'ordenNumero', direction: 'desc' });
+
+    // ✅ Lógica de Ordenamiento
+    const sortedData = useMemo(() => {
+        let sortableItems = [...data];
+        if (sortConfig.key) {
+            sortableItems.sort((a, b) => {
+                let aVal = a[sortConfig.key];
+                let bVal = b[sortConfig.key];
+
+                // Casos especiales (Anidados)
+                if (sortConfig.key === 'cliente') {
+                    aVal = a.cliente?.nombreRazonSocial || '';
+                    bVal = b.cliente?.nombreRazonSocial || '';
+                }
+                
+                // Comparación
+                if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+                if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+        return sortableItems;
+    }, [data, sortConfig]);
+
+    const totalPages = Math.ceil(sortedData.length / pageSize);
+    const paginated = sortedData.slice((page - 1) * pageSize, page * pageSize);
+
+    // Función para cambiar el orden al hacer clic en header
+    const requestSort = (key: string) => {
+        let direction: 'asc' | 'desc' = 'asc';
+        if (sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    // Icono dinámico según estado
+    const getSortIcon = (columnKey: string) => {
+        if (sortConfig.key !== columnKey) return <ArrowUpDown className="w-3 h-3 ml-1 opacity-30" />;
+        return sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3 ml-1 text-blue-500" /> : <ArrowDown className="w-3 h-3 ml-1 text-blue-500" />;
+    };
 
     if (data.length === 0) return <div className="p-20 text-center text-slate-300 dark:text-slate-700 font-bold uppercase text-[10px] tracking-widest italic bg-slate-50/30 dark:bg-black/20">No hay registros financieros</div>
 
@@ -242,10 +286,30 @@ function OrdersSubTable({ data, actions, rates }: any) {
                 <Table>
                     <TableHeader className="bg-slate-50/50 dark:bg-zinc-800/50">
                         <TableRow className="border-b border-slate-100 dark:border-white/5">
-                            <TableHead className="py-6 px-8 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 w-[180px]">N° Orden / Fecha</TableHead>
-                            <TableHead className="py-6 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Cliente</TableHead>
-                            <TableHead className="py-6 text-right text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Total Factura</TableHead>
-                            <TableHead className="py-6 text-center text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Estatus Pago</TableHead>
+                            <TableHead 
+                                className="py-6 px-8 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 w-[180px] cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors select-none"
+                                onClick={() => requestSort('ordenNumero')}
+                            >
+                                <div className="flex items-center">N° Orden / Fecha {getSortIcon('ordenNumero')}</div>
+                            </TableHead>
+                            <TableHead 
+                                className="py-6 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors select-none"
+                                onClick={() => requestSort('cliente')}
+                            >
+                                <div className="flex items-center">Cliente {getSortIcon('cliente')}</div>
+                            </TableHead>
+                            <TableHead 
+                                className="py-6 text-right text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors select-none"
+                                onClick={() => requestSort('totalUSD')}
+                            >
+                                <div className="flex items-center justify-end">Total Factura {getSortIcon('totalUSD')}</div>
+                            </TableHead>
+                            <TableHead 
+                                className="py-6 text-center text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors select-none"
+                                onClick={() => requestSort('estadoPago')}
+                            >
+                                <div className="flex items-center justify-center">Estatus Pago {getSortIcon('estadoPago')}</div>
+                            </TableHead>
                             <TableHead className="py-6 pr-8 text-center text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Acciones</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -290,7 +354,6 @@ function OrdersSubTable({ data, actions, rates }: any) {
                                     <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <ActionButton icon={<Eye />} color="blue" onClick={() => actions.handleOpenDetail(o)} label="Ver Factura" />
                                         
-                                        {/* DROPDOWN DE DESCARGA DE PDF MULTI-TASA */}
                                         <DropdownMenu>
                                             <DropdownMenuTrigger asChild>
                                                 <button className="w-10 h-10 rounded-xl flex items-center justify-center transition-all border active:scale-95 shadow-sm text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-600 hover:text-white dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:hover:bg-emerald-500">
