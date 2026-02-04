@@ -19,10 +19,12 @@ import {
   Save,
   LayoutGrid, 
   Printer, 
-  Scissors
+  Scissors,
+  CreditCard // Icono para el método de pago
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 
 interface GastosFormProps {
@@ -45,6 +47,15 @@ const DEPARTAMENTOS = [
   { id: "CORTE", label: "Corte Láser", icon: Scissors },
 ]
 
+// LISTA DE MÉTODOS DE PAGO (Sincronizada con Billeteras)
+const PAYMENT_METHODS = [
+    { value: "Efectivo USD", label: "Caja Chica ($)" },
+    { value: "Pago Móvil (Bs)", label: "Banco Nacional (Bs)" },
+    { value: "Zelle", label: "Zelle" },
+    { value: "Binance USDT", label: "Binance" },
+    { value: "Efectivo Bs", label: "Caja Chica (Bs)" }
+];
+
 export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: GastosFormProps) {
   const [formData, setFormData] = useState({
     nombre: "",
@@ -52,7 +63,8 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
     montoUSD: "",
     montoBs: "",
     categoria: "insumos",
-    area: "GENERAL", // Valor por defecto
+    area: "GENERAL",
+    metodoPago: "Efectivo USD", // Valor por defecto
     fecha: new Date().toISOString().split("T")[0],
   })
 
@@ -66,7 +78,8 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
         montoUSD: initialData.monto?.toString() || "",
         montoBs: initialData.montoBs?.toString() || "",
         categoria: initialData.categoria || "insumos",
-        area: initialData.area || "GENERAL", // Cargar área existente o default
+        area: initialData.area || "GENERAL",
+        metodoPago: initialData.metodoPago || "Efectivo USD", // Cargar método existente
         fecha: fechaRaw.toISOString().split("T")[0],
       });
     } else {
@@ -78,6 +91,7 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
         montoBs: "",
         categoria: "insumos",
         area: "GENERAL",
+        metodoPago: "Efectivo USD",
         fecha: new Date().toISOString().split("T")[0],
       });
     }
@@ -117,7 +131,14 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
     
     // Solo reseteamos si no es edición
     if (!initialData) {
-        setFormData(prev => ({ ...prev, nombre: "", descripcion: "", montoUSD: "", montoBs: "" }))
+        setFormData(prev => ({ 
+            ...prev, 
+            nombre: "", 
+            descripcion: "", 
+            montoUSD: "", 
+            montoBs: "", 
+            metodoPago: "Efectivo USD" 
+        }))
     }
   }
 
@@ -141,7 +162,7 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
 
       <form onSubmit={handleSubmit} className="p-8 -mt-6 bg-white dark:bg-[#1c1c1e] rounded-t-[3rem] space-y-8">
         
-        {/* --- NUEVO: Selector de Departamento --- */}
+        {/* Selector de Departamento */}
         <div className="space-y-2">
             <label className="text-[9px] font-black uppercase text-slate-400 ml-4 tracking-widest">Asignar a Departamento</label>
             <div className="grid grid-cols-3 gap-2 bg-slate-100 dark:bg-black/20 p-1.5 rounded-2xl">
@@ -257,8 +278,29 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
           </div>
         </div>
 
-        {/* Fecha y Botón de Acción */}
+        {/* MÉTODO DE PAGO Y FECHA */}
         <div className="flex flex-col sm:flex-row gap-4">
+          {/* Selector de Método de Pago */}
+          <div className="flex-1 space-y-1.5">
+            <label className="text-[9px] font-black uppercase text-slate-400 ml-4 tracking-widest">Cuenta de Salida</label>
+            <Select 
+                value={formData.metodoPago} 
+                onValueChange={(v) => setFormData(p => ({ ...p, metodoPago: v }))}
+            >
+                <SelectTrigger className="w-full h-[56px] rounded-2xl bg-slate-50 dark:bg-white/5 border-none font-bold text-xs">
+                    <div className="flex items-center gap-2">
+                        <CreditCard className="w-4 h-4 text-slate-400"/>
+                        <SelectValue placeholder="Seleccione método" />
+                    </div>
+                </SelectTrigger>
+                <SelectContent>
+                    {PAYMENT_METHODS.map(m => (
+                        <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+          </div>
+
           <div className="flex-1 space-y-1.5">
             <label className="text-[9px] font-black uppercase text-slate-400 ml-4 tracking-widest">Fecha de Registro</label>
             <div className="relative">
@@ -271,25 +313,25 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
               />
             </div>
           </div>
+        </div>
           
-          <Button
+        <Button
             type="submit"
             disabled={isLoading}
             className={cn(
-                "h-[56px] px-10 rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest gap-3 shadow-xl active:scale-95 transition-all w-full sm:w-auto",
+                "h-[56px] px-10 rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest gap-3 shadow-xl active:scale-95 transition-all w-full",
                 initialData ? "bg-indigo-600 hover:bg-indigo-700 text-white" : "bg-blue-600 hover:bg-blue-700 text-white"
             )}
-          >
+        >
             {isLoading ? (
                 <Loader2 className="animate-spin w-5 h-5" />
             ) : (
                 <>
                     {initialData ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                    {initialData ? "Actualizar" : "Registrar"}
+                    {initialData ? "Actualizar Registro" : "Registrar Compra"}
                 </>
             )}
-          </Button>
-        </div>
+        </Button>
       </form>
     </Card>
   )

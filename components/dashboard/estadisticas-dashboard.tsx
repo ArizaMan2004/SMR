@@ -32,7 +32,7 @@ import { cn } from "@/lib/utils"
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
 
 // --- CONSTANTES DE DETECCIÓN (INTELIGENCIA DE MATERIALES) ---
-const MATERIALES_CORTE_KEYS = {
+const MATERIALES_CORTE_KEYS: any = {
     'Acrilico': ['acrilico', 'acr', 'acrylic', 'plastico'],
     'MDF': ['mdf', 'm.d.f', 'madera', 'fibro', 'mdf crudo'],
     'Melamina': ['melamina', 'mdf melamina', 'chapilla'],
@@ -40,7 +40,7 @@ const MATERIALES_CORTE_KEYS = {
     'Otro': []
 };
 
-const COLORES_KEYS = {
+const COLORES_KEYS: any = {
     'Transparente': ['transparente', 'cristal', 'clear'],
     'Blanco': ['blanco', 'white', 'leche'],
     'Negro': ['negro', 'black'],
@@ -345,9 +345,11 @@ export function EstadisticasDashboard({
       return { actual, anterior, variacionM2, variacionMinutos };
   }, [ordenes, fechas]);
 
+  // --- CÁLCULO DE MÉTRICAS (CORREGIDO: LECTURA DE MONTOUSD) ---
   const metricas = useMemo(() => {
     const calcularRango = (inicio: Date, fin: Date) => {
         let ingresos = 0; let egresosDirectos = 0; let ordenesCount = 0;
+        let gastosFijosPagados = 0; 
         
         cobranzas?.filter(c => {
             const f = new Date(c.fecha || '');
@@ -376,9 +378,24 @@ export function EstadisticasDashboard({
         }).forEach(g => {
             const areaExplicita = (g as any).area; 
             const texto = ((g as any).nombre || g.descripcion || (g as any).concepto || "" + ' ' + (g.categoria || '')).toLowerCase();
+            const cat = (g.categoria || "").toLowerCase();
+            
+            // CORRECCIÓN PRINCIPAL: Leer montoUSD si monto es 0 o undefined
+            const monto = Number(g.monto) || Number(g.montoUSD) || 0;
+
+            // DETECCIÓN DE GASTO FIJO REAL
+            if (cat === 'gasto fijo' || cat === 'servicios' || cat === 'alquiler') {
+                if (viewMode === 'GENERAL') {
+                    gastosFijosPagados += monto;
+                }
+                return; 
+            }
+
+            // DETECCIÓN DE INSUMO OPERATIVO
             let relevante = false;
             const keywordsImp = ['tinta', 'vinil', 'lona', 'banner', 'papel', 'impresion', 'microperforado', 'ojales', 'laminacion', 'laminado', 'esmerilado'];
             const keywordsCorte = ['mdf', 'acrilico', 'acr', 'madera', 'laser', 'corte', 'pintura', 'thinner', 'balsa', 'plywood'];
+            
             if (viewMode === 'GENERAL') relevante = true;
             else if (viewMode === 'IMPRESION') {
                 if (areaExplicita) relevante = areaExplicita === 'IMPRESION';
@@ -388,7 +405,7 @@ export function EstadisticasDashboard({
                 if (areaExplicita) relevante = areaExplicita === 'CORTE';
                 else relevante = keywordsCorte.some(k => texto.includes(k));
             }
-            if (relevante) egresosDirectos += (Number(g.monto) || 0);
+            if (relevante) egresosDirectos += monto;
         });
 
         let gastosDiseno = 0;
@@ -410,14 +427,13 @@ export function EstadisticasDashboard({
              });
         }
 
-        return { ingresos, egresosDirectos, ordenesCount, gastosDiseno };
+        return { ingresos, egresosDirectos, ordenesCount, gastosDiseno, gastosFijosPagados };
     };
 
     const actual = calcularRango(fechas.inicio, fechas.fin);
     const anterior = calcularRango(fechas.inicioPrev, fechas.finPrev);
 
-    const totalFijosRaw = gastosFijos?.reduce((s, g) => s + (Number(g.monto) || 0), 0) || 0;
-    const fijosAplicables = viewMode === 'GENERAL' ? totalFijosRaw : 0; 
+    const fijosAplicables = actual.gastosFijosPagados; 
 
     const nominaFiltrada = (pagosEmpleados || []).filter(p => {
         const f = new Date(p.fecha || p.fechaPago || '');
@@ -449,7 +465,19 @@ export function EstadisticasDashboard({
     const ingresoPorEmpleado = actual.ingresos / numEmpleados;
     const puntoEquilibrioPct = egresosOperativos > 0 ? Math.min(100, (actual.ingresos / egresosOperativos) * 100) : 100;
     
-    return { actual, anterior, fijosAplicables, nominaAplicable, egresosTotales, utilidadNeta, margenGanancia, ticketPromedio, ingresoPorEmpleado, puntoEquilibrioPct, variacionIngreso: anterior.ingresos > 0 ? ((actual.ingresos - anterior.ingresos) / anterior.ingresos) * 100 : 0 };
+    return { 
+        actual: { ...actual, egresosDirectos: actual.egresosDirectos }, 
+        anterior, 
+        fijosAplicables, 
+        nominaAplicable, 
+        egresosTotales, 
+        utilidadNeta, 
+        margenGanancia, 
+        ticketPromedio, 
+        ingresoPorEmpleado, 
+        puntoEquilibrioPct, 
+        variacionIngreso: anterior.ingresos > 0 ? ((actual.ingresos - anterior.ingresos) / anterior.ingresos) * 100 : 0 
+    };
   }, [fechaReferencia, viewMode, cobranzas, ordenes, gastosInsumos, gastosFijos, pagosEmpleados, empRoleMap, orderBreakdown, fechas, empleados]);
 
   // --- 6. ANÁLISIS DE DEUDA ---
@@ -573,7 +601,10 @@ export function EstadisticasDashboard({
                 else relevante = keywordsCorte.some(k => texto.includes(k));
             }
 
-            if (relevante) map.get(dia).gastos += (Number(g.monto) || 0);
+            if (relevante) {
+                // CORRECCIÓN: Leer montoUSD también
+                map.get(dia).gastos += (Number(g.monto) || Number(g.montoUSD) || 0);
+            }
         }
     });
 
@@ -676,7 +707,8 @@ export function EstadisticasDashboard({
                     egresosDelDia.push({
                         id: g.id,
                         descripcion: g.descripcion || (g as any).nombre || "Insumo Vario",
-                        monto: Number(g.monto) || 0,
+                        // CORRECCIÓN: Leer montoUSD
+                        monto: Number(g.monto) || Number(g.montoUSD) || 0,
                         tipo: "Insumo"
                     });
                 }
@@ -712,8 +744,8 @@ export function EstadisticasDashboard({
                     const fechaPago = item.paymentDate ? new Date(item.paymentDate) : new Date(o.fecha);
                     if (fechaPago.getDate() === day && fechaPago.getMonth() === fechaReferencia.getMonth() && fechaPago.getFullYear() === fechaReferencia.getFullYear()) {
                          const costoReal = (item.costoInterno !== undefined && item.costoInterno !== null) 
-                                            ? Number(item.costoInterno) 
-                                            : Number(item.precioUnitario);
+                                                ? Number(item.costoInterno) 
+                                                : Number(item.precioUnitario);
                          
                          egresosDelDia.push({
                              id: item.id || Math.random(),
@@ -744,8 +776,12 @@ export function EstadisticasDashboard({
       if (selectedDetail === 'EGRESOS') {
           const keywordsImp = ['tinta', 'vinil', 'lona', 'banner', 'papel', 'impresion', 'microperforado', 'ojales', 'laminacion', 'laminado', 'esmerilado'];
           const keywordsCorte = ['mdf', 'acrilico', 'acr', 'madera', 'laser', 'corte', 'pintura', 'thinner', 'balsa', 'plywood'];
+          
           const insumos = (gastosInsumos || []).filter(g => {
               if(!filtroFecha(g.fecha)) return false;
+              const cat = (g.categoria || "").toLowerCase();
+              if (cat === 'gasto fijo' || cat === 'servicios' || cat === 'alquiler') return false; // Excluir fijos
+
               const areaExplicita = (g as any).area;
               const texto = ((g as any).nombre || g.descripcion || "").toLowerCase();
               if (viewMode === 'GENERAL') return true;
@@ -753,12 +789,23 @@ export function EstadisticasDashboard({
               if (viewMode === 'CORTE') return areaExplicita === 'CORTE' || keywordsCorte.some(k => texto.includes(k));
               return false;
           });
+
+          // CORRECCIÓN: Filtramos y mapeamos asegurando leer montoUSD
+          const fijos = (gastosInsumos || []).filter(g => {
+             if(!filtroFecha(g.fecha)) return false;
+             const cat = (g.categoria || "").toLowerCase();
+             return (cat === 'gasto fijo' || cat === 'servicios' || cat === 'alquiler');
+          }).map(g => ({
+              nombre: g.nombre || g.descripcion,
+              // AQUÍ ESTABA EL ERROR: Ahora lee montoUSD si monto es 0/undefined
+              monto: Number(g.monto) || Number(g.montoUSD) || 0 
+          }));
+
           const nomina = (pagosEmpleados || []).filter(p => filtroFecha(p.fecha || p.fechaPago || '') && (
               viewMode === 'GENERAL' ||
               (viewMode === 'IMPRESION' && (empRoleMap.get(p.empleadoId)||'').includes('empleado')) ||
               (viewMode === 'CORTE' && (empRoleMap.get(p.empleadoId)||'').includes('laser'))
           ));
-          const fijos = viewMode === 'GENERAL' ? gastosFijos : [];
           
           const disenoItems: any[] = [];
           if (viewMode === 'GENERAL') {
@@ -1322,6 +1369,9 @@ export function EstadisticasDashboard({
                                                     <span className="text-base font-black text-slate-900 dark:text-white">${item.monto}</span>
                                                 </motion.div>
                                             ))}
+                                            {(modalData as any)?.fijos?.length === 0 && (
+                                                <div className="text-center text-slate-400 font-bold uppercase text-xs py-10">No hay gastos fijos pagados este mes</div>
+                                            )}
                                         </TabsContent>
                                         <TabsContent value="diseno" className="space-y-3">
                                             {(modalData as any)?.disenoItems?.map((item:any, i:number) => (

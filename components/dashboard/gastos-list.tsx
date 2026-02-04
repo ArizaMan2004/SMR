@@ -16,10 +16,11 @@ import {
   Printer,
   Scissors,
   AlertCircle,
-  CheckCircle2
+  CreditCard // Icono para el método de pago
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 
 // 1. MAPEADO DE CATEGORÍAS
 const CATEGORY_MAP: Record<string, { color: string, icon: any, label: string, bg: string }> = {
@@ -49,7 +50,7 @@ interface GastosListProps {
 export function GastosList({ gastos, onDelete, onEdit, onQuickCategory }: GastosListProps) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
-  // Filtrar duplicados por si acaso (seguridad)
+  // Filtrar duplicados por seguridad
   const uniqueGastos = useMemo(() => {
     return (gastos || []).filter((gasto, index, self) =>
       index === self.findIndex((t) => t.id === gasto.id)
@@ -78,6 +79,14 @@ export function GastosList({ gastos, onDelete, onEdit, onQuickCategory }: Gastos
             // Detectar si falta el área (Gasto Antiguo)
             const needsClassification = !gasto.area;
             const AreaIcon = gasto.area ? AREA_ICONS[gasto.area] : null;
+
+            // Lógica robusta para el monto (Evitar el $0)
+            const montoReal = Number(gasto.monto) || Number(gasto.montoUSD) || 0;
+            const montoBsReal = Number(gasto.montoBs) || 0;
+
+            // Detectar método de pago para el badge
+            const metodo = gasto.metodoPago || "Efectivo USD";
+            const isBs = metodo.toLowerCase().includes("bs") || metodo.toLowerCase().includes("movil");
 
             return (
               <motion.div 
@@ -108,7 +117,7 @@ export function GastosList({ gastos, onDelete, onEdit, onQuickCategory }: Gastos
                         <h4 className="font-black text-sm uppercase tracking-tight text-slate-900 dark:text-white truncate max-w-[180px] sm:max-w-[250px]">
                             {gasto.nombre}
                         </h4>
-                        <div className="flex items-center gap-2 mt-0.5">
+                        <div className="flex flex-wrap items-center gap-2 mt-0.5">
                             <p className="text-[9px] font-black text-slate-400 uppercase italic">
                                 {style.label} • {new Date(gasto.fecha?.toDate?.() || gasto.fecha || Date.now()).toLocaleDateString('es-VE')}
                             </p>
@@ -155,17 +164,31 @@ export function GastosList({ gastos, onDelete, onEdit, onQuickCategory }: Gastos
                             </Button>
                         </div>
                     ) : (
-                        // CASO 2: YA CLASIFICADO (MOSTRAR PRECIO)
+                        // CASO 2: YA CLASIFICADO (MOSTRAR PRECIO Y MÉTODO)
                         <div className="text-right min-w-[80px]">
                             <div className="flex items-center gap-1 justify-end">
                                 <span className="text-[10px] font-black text-slate-300">$</span>
                                 <p className="font-black text-lg tracking-tighter text-slate-900 dark:text-white leading-none">
-                                {(Number(gasto.monto) || 0).toFixed(2)}
+                                    {montoReal.toFixed(2)}
                                 </p>
                             </div>
-                            <p className="text-[10px] font-bold text-blue-600 italic mt-1">
-                                {(Number(gasto.montoBs) || 0).toLocaleString('es-VE')} Bs.
-                            </p>
+                            {montoBsReal > 0 && (
+                                <p className="text-[10px] font-bold text-blue-600 italic mt-0.5">
+                                    {montoBsReal.toLocaleString('es-VE')} Bs.
+                                </p>
+                            )}
+                            
+                            {/* BADGE DEL MÉTODO DE PAGO */}
+                            <div className="flex justify-end mt-1.5">
+                                <Badge variant="outline" className={cn(
+                                    "text-[8px] font-black uppercase h-4 px-1.5 border gap-1",
+                                    isBs 
+                                        ? "text-blue-600 border-blue-200 bg-blue-50 dark:bg-blue-900/20" 
+                                        : "text-emerald-600 border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20"
+                                )}>
+                                    <CreditCard size={8} /> {metodo}
+                                </Badge>
+                            </div>
                         </div>
                     )}
 

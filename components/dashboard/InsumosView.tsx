@@ -34,28 +34,46 @@ export function InsumosView({
   const [isSaving, setIsSaving] = useState(false)
   const [editingInsumo, setEditingInsumo] = useState<any>(null)
 
-  // KPI rápido
+  // --- 1. FILTRO MAESTRO: SOLO INSUMOS ---
+  // Esto elimina de la vista cualquier registro que sea pago de servicios, nómina o fijo.
+  const gastosFiltrados = useMemo(() => {
+    return gastos.filter(g => {
+        const cat = (g.categoria || "").toLowerCase();
+        const tipo = (g.tipo || "").toUpperCase();
+        const nombre = (g.nombre || "").toUpperCase();
+
+        // Si es explícitamente un gasto fijo, servicio o nómina -> LO IGNORAMOS
+        if (cat === 'gasto fijo' || cat === 'servicios' || cat === 'serviciospublicos') return false;
+        if (tipo === 'FIJO' || tipo === 'NOMINA') return false;
+        if (nombre.startsWith('[PAGO SERVICIO]')) return false;
+
+        return true; // Solo pasan Insumos, Materiales, Otros, etc.
+    });
+  }, [gastos]);
+
+  // --- 2. KPI CALCULADOS SOBRE LOS FILTRADOS ---
   const stats = useMemo(() => {
-    const totalUSD = gastos.reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+    const totalUSD = gastosFiltrados.reduce((acc, g) => acc + (Number(g.monto) || Number(g.montoUSD) || 0), 0);
     const totalBs = totalUSD * currentBcvRate;
-    // Contamos cuántos gastos no tienen el campo "area" definido
-    const sinClasificar = gastos.filter(g => !g.area).length; 
+    const sinClasificar = gastosFiltrados.filter(g => !g.area).length; 
     
     return {
-      count: gastos.length,
+      count: gastosFiltrados.length,
       usd: totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }),
       bs: totalBs.toLocaleString('es-VE', { minimumFractionDigits: 2 }),
       pending: sinClasificar
     };
-  }, [gastos, currentBcvRate]);
+  }, [gastosFiltrados, currentBcvRate]);
 
   const handleSubmit = async (data: any) => {
     setIsSaving(true)
     try {
       const { id, ...camposDeContenido } = data;
+      // Aseguramos que los nuevos registros tengan categoría válida por defecto si no se elige
       const gastoFinal: any = {
         ...camposDeContenido,
         empresa_id: currentUserId,
+        categoria: camposDeContenido.categoria || "insumos", // Default seguro
         fecha: camposDeContenido.fecha ? new Date(camposDeContenido.fecha) : new Date(),
         updatedAt: new Date()
       };
@@ -73,23 +91,17 @@ export function InsumosView({
     }
   }
 
-  // --- FUNCIÓN DE CLASIFICACIÓN RÁPIDA ---
-  // Esta función se ejecuta al dar clic en los botones pequeños de la lista
   const handleQuickCategorize = async (id: string, area: string) => {
-      // 1. Encontrar el gasto original en memoria
       const gastoOriginal = gastos.find(g => g.id === id);
       if (!gastoOriginal) return;
 
-      // 2. Crear objeto actualizado (Solo cambiamos el área)
       const gastoActualizado = {
           ...gastoOriginal,
-          area: area, // Asignar la nueva área (GENERAL, IMPRESION, CORTE)
+          area: area,
           updatedAt: new Date()
       };
 
-      // 3. Guardar en BD usando la función existente
       try {
-          // onCreateGasto maneja tanto creación como actualización si lleva ID
           await onCreateGasto(gastoActualizado);
       } catch (error) {
           console.error("Error al clasificar rápido:", error);
@@ -133,14 +145,13 @@ export function InsumosView({
           </div>
         </div>
 
-        {/* Pendientes de Clasificar (KPI Nuevo) */}
+        {/* Pendientes de Clasificar */}
         <div className="bg-white dark:bg-[#1c1c1e] p-8 rounded-[2.5rem] border border-black/5 dark:border-white/5 flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <div className="w-10 h-10 bg-slate-100 dark:bg-white/5 rounded-xl flex items-center justify-center">
               <ShoppingBag className="w-5 h-5 text-slate-600 dark:text-slate-400" />
             </div>
             
-            {/* Indicador de Tareas Pendientes */}
             {stats.pending > 0 && (
                 <div className="bg-amber-500/10 text-amber-600 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter flex items-center gap-1 animate-pulse border border-amber-500/20">
                     <AlertCircle size={10} />
@@ -186,7 +197,7 @@ export function InsumosView({
           />
         </div>
 
-        {/* PANEL DERECHO: Listado */}
+        {/* PANEL DERECHO: Listado (SOLO FILTRADOS) */}
         <div className="lg:col-span-7 space-y-6">
           <div className="flex items-center justify-between px-4">
             <h3 className="font-black text-[10px] uppercase tracking-[0.4em] text-slate-400 italic">
@@ -198,13 +209,13 @@ export function InsumosView({
           
           <div className="bg-white/20 dark:bg-black/10 rounded-[3rem] p-2 backdrop-blur-sm">
             <GastosList 
-              gastos={gastos} 
+              gastos={gastosFiltrados} // AQUI PASAMOS SOLO LOS FILTRADOS
               onDelete={handleDelete}
               onEdit={(g: any) => {
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 setEditingInsumo(g);
               }}
-              onQuickCategory={handleQuickCategorize} // Conectamos la función aquí
+              onQuickCategory={handleQuickCategorize}
             />
           </div>
         </div>

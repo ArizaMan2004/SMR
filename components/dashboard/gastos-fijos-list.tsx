@@ -10,9 +10,11 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  CreditCard 
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge" 
 import type { GastoFijo } from "@/lib/types/gastos"
 
 interface GastosFijosListProps {
@@ -51,10 +53,9 @@ export function GastosFijosList({
     <div className="grid gap-4 px-2">
       {gastos.map((gasto) => {
         
-        // --- 2. MANEJO DE FECHAS ROBUSTO ---
+        // --- 2. MANEJO DE FECHAS ---
         const formatFecha = (fecha: any) => {
           if (!fecha) return "Pendiente";
-          // Maneja Date, Firestore Timestamp o String ISO
           const d = fecha instanceof Date 
             ? fecha 
             : fecha?.toDate ? fecha.toDate() : new Date(fecha);
@@ -71,12 +72,16 @@ export function GastosFijosList({
           ? formatFecha(gasto.ultimoPago) 
           : formatFecha(gasto.proximoPago);
 
-        // --- 3. LÓGICA DE MONTO (Sincronizada con Global) ---
+        // --- 3. DATOS ---
         const montoPrincipal = isPaidMode 
           ? (Number(gasto.ultimoMontoPagadoUSD) || Number(gasto.monto)) 
           : Number(gasto.monto);
 
-        // Definimos si es variable (Impuestos o monto 0) para cambiar el texto del botón
+        // Recuperamos el método guardado (o default si es antiguo)
+        const metodoPago = (gasto as any).ultimoMetodoPago || "Efectivo USD";
+        const isBs = metodoPago.toLowerCase().includes("bs") || metodoPago.toLowerCase().includes("movil");
+
+        // Definimos si es variable (Impuestos o monto 0)
         const isVariable = gasto.categoria?.toLowerCase().includes("impuesto") || montoPrincipal === 0;
 
         return (
@@ -135,14 +140,26 @@ export function GastosFijosList({
             {/* SECCIÓN DERECHA: IMPORTES Y ACCIONES */}
             <div className="flex items-center justify-between w-full sm:w-auto gap-8 border-t sm:border-t-0 pt-4 sm:pt-0 border-black/5">
               <div className="text-right">
-                <div className="flex flex-col">
+                <div className="flex flex-col items-end">
                     <span className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter italic">
                         ${montoPrincipal.toFixed(2)}
                     </span>
                     {isPaidMode && gasto.ultimoMontoPagadoBs && (
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">
                         {gasto.ultimoMontoPagadoBs.toLocaleString('es-VE')} Bs.
                       </span>
+                    )}
+                    
+                    {/* BADGE DE BILLETERA (SOLO EN MODO PAGADO) */}
+                    {isPaidMode && (
+                        <Badge variant="outline" className={cn(
+                            "mt-1.5 text-[8px] font-black uppercase h-5 px-2 border gap-1",
+                            isBs 
+                                ? "text-blue-600 border-blue-200 bg-blue-50 dark:bg-blue-900/20" 
+                                : "text-emerald-600 border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20"
+                        )}>
+                            <CreditCard size={10} /> {metodoPago}
+                        </Badge>
                     )}
                 </div>
                 
@@ -179,6 +196,7 @@ export function GastosFijosList({
                     title="Eliminar de la lista global"
                     className="p-3 text-slate-400 hover:text-red-500 hover:bg-white dark:hover:bg-slate-800 rounded-xl transition-all shadow-sm disabled:opacity-30"
                   >
+                    {/* AQUÍ ESTABA EL ERROR DE COMILLAS ESCAPADAS */}
                     {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
                   </button>
                 </div>

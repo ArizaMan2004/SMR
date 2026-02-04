@@ -6,11 +6,15 @@ import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import { 
   Users, CheckCircle2, Clock, TrendingUp, Plus, DollarSign, 
   Calendar, ArrowRightLeft, Trash2, Edit3, X, Briefcase, 
-  Wallet, ReceiptText, Search, Filter, AlertCircle, ChevronRight
+  Wallet, ReceiptText, Search, Filter, AlertCircle, ChevronRight,
+  CreditCard, Banknote, Repeat // Icono para frecuencia
 } from 'lucide-react';
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { db } from "@/lib/firebase"; 
 import { 
   collection, addDoc, updateDoc, 
@@ -28,7 +32,32 @@ const calcularDiasRestantes = (diaPago: number) => {
   return dias === 0 ? "Hoy" : dias;
 };
 
-// --- PROPS ACTUALIZADAS ---
+// --- CONSTANTES ---
+const PAYMENT_METHODS = [
+    { value: "Efectivo USD", label: "Caja Chica ($)" },
+    { value: "Pago Móvil (Bs)", label: "Banco Nacional (Bs)" },
+    { value: "Zelle", label: "Zelle" },
+    { value: "Binance USDT", label: "Binance" },
+    { value: "Efectivo Bs", label: "Caja Chica (Bs)" }
+];
+
+const PERIOD_OPTIONS = [
+    "1ra Quincena",
+    "2da Quincena",
+    "Mes Completo",
+    "Semana",
+    "Adelanto",
+    "Liquidación Final",
+    "Bono Especial"
+];
+
+const FREQUENCY_OPTIONS = [
+    { value: "Mensual", label: "Mensual" },
+    { value: "Quincenal", label: "Quincenal" },
+    { value: "Semanal", label: "Semanal" },
+    { value: "Por Proyecto", label: "Por Proyecto" }
+];
+
 interface EmpleadosViewProps {
   empleados: any[];
   pagos: any[];
@@ -40,63 +69,105 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
   const [editTarget, setEditTarget] = useState<any>(null);
   const [filtroHistorial, setFiltroHistorial] = useState("todos");
 
-  // Formulario Registro
-  const [form, setForm] = useState({ nombre: "", cargo: "", sueldo: "", dia: "15" });
+  // Estados para el Modal de Pago
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState<any>(null);
+  const [paymentConfig, setPaymentConfig] = useState({
+      metodo: "Efectivo USD",
+      intervalo: "1ra Quincena",
+      nota: ""
+  });
 
-  // --- 1. ACCIONES (COLECCIONES GLOBALES) ---
+  // Formulario Registro (AHORA CON FRECUENCIA)
+  const [form, setForm] = useState({ 
+      nombre: "", 
+      cargo: "", 
+      sueldo: "", 
+      dia: "15", 
+      frecuencia: "Mensual" // Valor por defecto
+  });
+
+  // --- 1. ACCIONES ---
   const handleRegistrar = async () => {
     if (!form.nombre || !form.sueldo) return alert("Nombre y sueldo son obligatorios");
     
     try {
-      // Colección global "empleados"
       await addDoc(collection(db, "empleados"), {
         nombre: form.nombre,
         cargo: form.cargo || "Empleado",
         montoSueldo: parseFloat(form.sueldo),
         diaPago: parseInt(form.dia),
+        frecuenciaPago: form.frecuencia, // Guardamos la frecuencia
         comisiones: [],
         ultimoPagoMes: "",
         fechaRegistro: serverTimestamp()
       });
-      setForm({ nombre: "", cargo: "", sueldo: "", dia: "15" });
+      // Reset form
+      setForm({ nombre: "", cargo: "", sueldo: "", dia: "15", frecuencia: "Mensual" });
       setView('control');
     } catch (error) {
       console.error("Error al registrar:", error);
     }
   };
 
-  const handlePagar = async (emp: any) => {
-    if (!rates?.usd) return alert("Sincronizando tasa BCV...");
+  // Prepara el pago abriendo el modal
+  const preparePayment = (emp: any) => {
+      setSelectedEmployee(emp);
+      // Intentar pre-seleccionar el intervalo lógico según la frecuencia del empleado
+      let defaultInterval = "Mes Completo";
+      if (emp.frecuenciaPago === "Quincenal") defaultInterval = "1ra Quincena";
+      if (emp.frecuenciaPago === "Semanal") defaultInterval = "Semana";
+
+      setPaymentConfig({
+          metodo: "Efectivo USD",
+          intervalo: defaultInterval,
+          nota: ""
+      });
+      setPaymentModalOpen(true);
+  };
+
+  // Ejecuta el pago final
+  const confirmPayment = async () => {
+    if (!selectedEmployee || !rates?.usd) return;
     
+    const emp = selectedEmployee;
     const mesActual = new Date().toISOString().slice(0, 7);
     const tCom = emp.comisiones?.reduce((a: number, c: any) => a + c.monto, 0) || 0;
     const sueldo = emp.ultimoPagoMes === mesActual ? 0 : emp.montoSueldo;
     const totalUSD = sueldo + tCom;
 
-    if (totalUSD <= 0) return alert("No hay montos pendientes para este empleado.");
+    if (totalUSD <= 0) {
+        alert("No hay montos pendientes.");
+        return;
+    }
 
     try {
-      // Colección global "pagos"
       await addDoc(collection(db, "pagos"), {
         empleadoId: emp.id,
         nombre: emp.nombre,
         conceptos: [
-          ...(sueldo > 0 ? [{ tipo: 'Sueldo Fijo', monto: sueldo, motivo: `Nómina ${mesActual}` }] : []),
+          ...(sueldo > 0 ? [{ tipo: 'Sueldo', monto: sueldo, motivo: paymentConfig.intervalo }] : []),
           ...(emp.comisiones?.map((c: any) => ({ tipo: 'Comisión', monto: c.monto, motivo: c.desc })) || [])
         ],
         totalUSD,
         totalVES: totalUSD * rates.usd,
         tasaBCV: rates.usd,
+        metodoPago: paymentConfig.metodo,
+        notaAdicional: paymentConfig.nota,
         fecha: new Date().toISOString(),
         mesRelativo: mesActual
       });
 
       await updateDoc(doc(db, "empleados", emp.id), {
-        ultimoPagoMes: mesActual,
+        ...(sueldo > 0 ? { ultimoPagoMes: mesActual } : {}),
         comisiones: []
       });
+
+      setPaymentModalOpen(false);
+      setSelectedEmployee(null);
     } catch (error) {
       console.error("Error en el pago:", error);
+      alert("Error al procesar pago");
     }
   };
 
@@ -159,7 +230,7 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
                     key={emp.id} 
                     emp={emp} 
                     rates={rates} 
-                    onPagar={() => handlePagar(emp)} 
+                    onPagar={() => preparePayment(emp)} 
                     onEdit={() => setEditTarget(emp)}
                     onDelete={async () => { if(confirm("¿Eliminar empleado permanentemente?")) await deleteDoc(doc(db, "empleados", emp.id)) }}
                     onAddCom={async (m:any, d:any) => {
@@ -186,6 +257,22 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
               <div className="space-y-5">
                 <Field label="Nombre Completo" value={form.nombre} onChange={(v: string) => setForm({...form, nombre: v})} placeholder="Ej. Juan Pérez" />
                 <Field label="Cargo u Oficio" value={form.cargo} onChange={(v: string) => setForm({...form, cargo: v})} placeholder="Ej. Administrador" />
+                
+                {/* SELECTOR DE FRECUENCIA EN REGISTRO */}
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase ml-6 tracking-widest">Frecuencia de Pago</label>
+                    <Select value={form.frecuencia} onValueChange={(v) => setForm({...form, frecuencia: v})}>
+                        <SelectTrigger className="rounded-[1.8rem] h-16 bg-gray-50 border-none px-8 font-black text-lg shadow-inner">
+                            <SelectValue placeholder="Seleccione frecuencia" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {FREQUENCY_OPTIONS.map(opt => (
+                                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Sueldo Base ($)" value={form.sueldo} onChange={(v: string) => setForm({...form, sueldo: v})} type="number" />
                   <Field label="Día de Cobro" value={form.dia} onChange={(v: string) => setForm({...form, dia: v})} type="number" />
@@ -215,7 +302,101 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
         </AnimatePresence>
       </main>
 
-      {/* MODAL EDICIÓN */}
+      {/* --- MODAL DE LIQUIDACIÓN DE PAGO --- */}
+      <Dialog open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
+        <DialogContent className="max-w-md rounded-[2.5rem] p-8 border-none bg-white dark:bg-slate-950 shadow-2xl">
+            <DialogHeader>
+                <DialogTitle className="text-2xl font-black uppercase italic tracking-tighter flex items-center gap-3">
+                    <Wallet className="text-blue-600" /> Liquidar Nómina
+                </DialogTitle>
+            </DialogHeader>
+            
+            {selectedEmployee && (() => {
+                const mesActual = new Date().toISOString().slice(0, 7);
+                const comisiones = selectedEmployee.comisiones?.reduce((a:number,c:any)=>a+c.monto,0) || 0;
+                const sueldoBase = selectedEmployee.ultimoPagoMes === mesActual ? 0 : selectedEmployee.montoSueldo;
+                const total = sueldoBase + comisiones;
+                const totalBs = total * (rates?.usd || 0);
+
+                return (
+                    <div className="space-y-6">
+                        <div className="bg-slate-50 dark:bg-white/5 p-6 rounded-[2rem] text-center border border-slate-100">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monto a Transferir</p>
+                            <h2 className="text-5xl font-black text-slate-900 dark:text-white tracking-tighter">${total}</h2>
+                            <p className="text-sm font-bold text-blue-600 mt-1">Bs. {totalBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}</p>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="p-3 bg-white border border-slate-100 rounded-2xl shadow-sm">
+                                    <span className="text-[9px] font-black uppercase text-slate-400 block mb-1">Sueldo Base</span>
+                                    <span className="text-lg font-black text-slate-800">${sueldoBase}</span>
+                                </div>
+                                <div className="p-3 bg-white border border-slate-100 rounded-2xl shadow-sm">
+                                    <span className="text-[9px] font-black uppercase text-slate-400 block mb-1">Comisiones</span>
+                                    <span className="text-lg font-black text-emerald-600">${comisiones}</span>
+                                </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Cuenta de Salida</Label>
+                                <Select value={paymentConfig.metodo} onValueChange={(v) => setPaymentConfig({...paymentConfig, metodo: v})}>
+                                    <SelectTrigger className="h-12 rounded-2xl bg-slate-100 border-none font-bold text-xs">
+                                        <div className="flex items-center gap-2">
+                                            <CreditCard size={14} className="text-slate-500"/>
+                                            <SelectValue />
+                                        </div>
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {PAYMENT_METHODS.map(m => (
+                                            <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            {sueldoBase > 0 && (
+                                <div className="space-y-1.5">
+                                    <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Concepto / Intervalo</Label>
+                                    <Select value={paymentConfig.intervalo} onValueChange={(v) => setPaymentConfig({...paymentConfig, intervalo: v})}>
+                                        <SelectTrigger className="h-12 rounded-2xl bg-slate-100 border-none font-bold text-xs">
+                                            <div className="flex items-center gap-2">
+                                                <Calendar size={14} className="text-slate-500"/>
+                                                <SelectValue />
+                                            </div>
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {PERIOD_OPTIONS.map(p => (
+                                                <SelectItem key={p} value={p}>{p}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
+
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Nota Adicional</Label>
+                                <Input 
+                                    value={paymentConfig.nota}
+                                    onChange={(e) => setPaymentConfig({...paymentConfig, nota: e.target.value})}
+                                    placeholder="Detalles extra..."
+                                    className="h-12 rounded-2xl bg-slate-100 border-none font-bold text-xs placeholder:font-normal"
+                                />
+                            </div>
+                        </div>
+
+                        <DialogFooter>
+                            <Button onClick={confirmPayment} className="w-full h-14 rounded-2xl bg-slate-900 text-white font-black uppercase tracking-widest shadow-xl hover:bg-black">
+                                Confirmar Egreso
+                            </Button>
+                        </DialogFooter>
+                    </div>
+                )
+            })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL EDICIÓN PERFIL (CON FRECUENCIA) */}
       <AnimatePresence>
         {editTarget && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xl z-50 flex items-center justify-center p-4">
@@ -225,6 +406,22 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
               <div className="space-y-5">
                 <Field label="Nombre" value={editTarget.nombre} onChange={(v: string) => setEditTarget({...editTarget, nombre: v})} />
                 <Field label="Cargo" value={editTarget.cargo} onChange={(v: string) => setEditTarget({...editTarget, cargo: v})} />
+                
+                {/* SELECTOR EN EDICIÓN */}
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase ml-6 tracking-widest">Frecuencia</label>
+                    <Select value={editTarget.frecuenciaPago || "Mensual"} onValueChange={(v) => setEditTarget({...editTarget, frecuenciaPago: v})}>
+                        <SelectTrigger className="rounded-[1.8rem] h-16 bg-gray-50 border-none px-8 font-black text-lg shadow-inner">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {FREQUENCY_OPTIONS.map(opt => (
+                                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Sueldo" value={editTarget.montoSueldo} onChange={(v: string) => setEditTarget({...editTarget, montoSueldo: v})} type="number" />
                   <Field label="Día" value={editTarget.diaPago} onChange={(v: string) => setEditTarget({...editTarget, diaPago: v})} type="number" />
@@ -235,7 +432,8 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
                     await updateDoc(doc(db, "empleados", id), {
                       ...cleanData, 
                       montoSueldo: parseFloat(editTarget.montoSueldo),
-                      diaPago: parseInt(editTarget.diaPago)
+                      diaPago: parseInt(editTarget.diaPago),
+                      frecuenciaPago: editTarget.frecuenciaPago || "Mensual"
                     });
                     setEditTarget(null);
                   }} 
@@ -282,6 +480,9 @@ function EmpleadoCard({ emp, rates, onPagar, onEdit, onDelete, onAddCom }: any) 
             <div className="flex flex-wrap gap-3 mt-3">
               <span className="bg-gray-100 text-gray-500 text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest flex items-center gap-2 shadow-sm italic">
                 <Briefcase size={12}/> {emp.cargo}
+              </span>
+              <span className="bg-indigo-50 text-indigo-600 text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest flex items-center gap-2 shadow-sm italic">
+                <Repeat size={12}/> {emp.frecuenciaPago || "Mensual"}
               </span>
               <span className={`text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest shadow-sm flex items-center gap-2 italic ${dias === 'Hoy' ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-50 text-blue-600'}`}>
                 <Calendar size={12}/> {dias === 'Hoy' ? "Toca Pagar" : `Cobro en ${dias} días`}
@@ -361,6 +562,10 @@ function Recibo({ pago, rates }: any) {
           </div>
        </div>
        <div className="bg-gray-50/50 rounded-[2.5rem] px-10 py-6 flex-1 w-full space-y-3 border border-gray-100 shadow-inner">
+          <div className="flex justify-between items-center border-b border-gray-200 pb-2 mb-2">
+             <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest">Método: {pago.metodoPago || "Efectivo"}</span>
+             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{pago.notaAdicional}</span>
+          </div>
           {pago.conceptos?.map((c:any, i:number) => (
              <div key={i} className="flex justify-between items-center">
                 <span className="font-black text-[10px] text-gray-400 uppercase tracking-tighter italic">{c.tipo}: <span className="text-slate-600 ml-2">{c.motivo}</span></span>

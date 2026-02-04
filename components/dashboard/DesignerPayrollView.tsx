@@ -28,7 +28,6 @@ import {
 // Tipos y Servicios
 import { type OrdenServicio, type ItemOrden, EstadoOrden, EstadoPago } from "@/lib/types/orden"
 import { type Designer } from "@/lib/services/designers-service"
-// CORRECCIÓN AQUÍ: Cambiado 'updateOrden' por 'actualizarOrden'
 import { updateOrdenItemField, createOrden, actualizarOrden } from "@/lib/services/ordenes-service"
 import { addDesigner, deleteDesigner } from "@/lib/services/designers-service"
 import { getLastOrderNumber } from "@/lib/firebase/ordenes"
@@ -38,6 +37,15 @@ import { cn } from "@/lib/utils"
 // Componentes adicionales
 import { TeamManagement } from "./TeamManagement"
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
+
+// --- CONSTANTES ---
+const PAYMENT_METHODS = [
+    { value: "Efectivo USD", label: "Caja Chica ($)" },
+    { value: "Pago Móvil (Bs)", label: "Banco Nacional (Bs)" },
+    { value: "Zelle", label: "Zelle" },
+    { value: "Binance USDT", label: "Binance" },
+    { value: "Efectivo Bs", label: "Caja Chica (Bs)" }
+];
 
 // --- VARIANTES DE ANIMACIÓN ---
 const containerVariants = {
@@ -82,7 +90,7 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
     const [payingItem, setPayingItem] = useState<{orderId: string, itemIndex: number, amount: number, designerName: string} | null>(null)
     const [paymentForm, setPaymentForm] = useState({
         referencia: "", 
-        metodo: "Pago Móvil", 
+        metodo: "Efectivo USD", // Default actualizado
         monedaTasa: "BCV" as "BCV" | "EUR" | "MANUAL", 
         customRate: "", 
         comprobanteFile: null as File | null, 
@@ -114,43 +122,32 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
         }
     };
 
-    // --- FUNCIÓN CRÍTICA: Convertir entre Facturable e Interno (Y RECALCULAR TOTAL) ---
     const handleToggleBillable = async (task: any) => {
         if (!confirm("¿Cambiar el estado de facturación?\n\nSi marcas como 'Interno', el precio al cliente será $0 (la deuda desaparecerá del Dashboard), pero mantendrás el costo de nómina.")) return;
         
         try {
-            // 1. Buscamos la orden completa para tener los datos más recientes
             const parentOrder = ordenes.find(o => o.id === task.orderId);
             if (!parentOrder) return;
 
-            // 2. Determinamos valores
-            // Si tiene precio > 0 es facturable. Vamos a volverlo 0.
             const isCurrentlyBillable = (task.precioUnitario || 0) > 0;
             const baseValue = (task as any).costoInterno || task.precioUnitario || 0;
 
-            // 3. Copiamos y modificamos el array de items
             const updatedItems = [...(parentOrder.items || [])];
             
-            // Modificamos solo el ítem específico
             updatedItems[task.itemIndex] = {
                 ...updatedItems[task.itemIndex],
-                precioUnitario: isCurrentlyBillable ? 0 : baseValue, // Si era facturable, ahora es 0. Si era 0, vuelve al precio.
+                precioUnitario: isCurrentlyBillable ? 0 : baseValue,
                 // @ts-ignore
-                costoInterno: baseValue // Aseguramos que el costo interno siempre se guarde
+                costoInterno: baseValue
             };
 
-            // 4. IMPORTANTE: Recalculamos el Total de la Orden
             const newTotalUSD = updatedItems.reduce((acc, item) => {
                 return acc + ((item.precioUnitario || 0) * (item.cantidad || 1));
             }, 0);
 
-            // 5. Actualizamos el estado de pago de la orden
-            // Si el nuevo total es 0 (o menor/igual a lo pagado), la orden está "PAGADO" para el cliente.
             const montoPagado = parentOrder.montoPagadoUSD || 0;
             const newStatus = (montoPagado >= newTotalUSD - 0.01) ? "PAGADO" : (parentOrder.estadoPago === "PAGADO" ? "PENDIENTE" : parentOrder.estadoPago);
 
-            // 6. Guardamos todo en la base de datos (Items + Total + Estado)
-            // CORRECCIÓN: Usamos 'actualizarOrden' en vez de 'updateOrden'
             await actualizarOrden(task.orderId, {
                 items: updatedItems,
                 totalUSD: newTotalUSD,
@@ -175,7 +172,7 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
     }
 
     const confirmFinalPayment = async () => {
-        if (!payingItem || !paymentForm.referencia) return
+        if (!payingItem) return
         setIsProcessing(true)
         try {
             let screenshotUrl = ""
@@ -189,14 +186,14 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
 
             await updateOrdenItemField(payingItem.orderId, payingItem.itemIndex, { 
                 designPaymentStatus: 'PAGADO', 
-                paymentReference: paymentForm.referencia,
+                paymentReference: paymentForm.referencia || "Efectivo",
                 paymentMethod: paymentForm.metodo, 
                 paymentScreenshotUrl: screenshotUrl,
                 paymentDate: new Date().toISOString(), 
                 paymentRateUsed: rateUsed
             })
             setIsPaymentModalOpen(false)
-            setPaymentForm({ referencia: "", metodo: "Pago Móvil", monedaTasa: "BCV", customRate: "", comprobanteFile: null, previewUrl: "" })
+            setPaymentForm({ referencia: "", metodo: "Efectivo USD", monedaTasa: "BCV", customRate: "", comprobanteFile: null, previewUrl: "" })
         } catch (e) { alert("Error al procesar el pago") } finally { setIsProcessing(false) }
     }
 
@@ -210,7 +207,6 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                 const matchedDesigner = designers.find(d => d.name === designerName);
                 const designerId = matchedDesigner?.id || (designerName === "Sin Asignar" || designerName === "N/A" ? "sin_asignar" : "desconocido");
 
-                // Prioridad: costoInterno -> precioUnitario -> 0
                 const rawPrice = (item as any).costoInterno !== undefined ? (item as any).costoInterno : (item.precioUnitario || 0);
                 const totalTaskUSD = rawPrice * (item.cantidad || 1);
 
@@ -225,7 +221,7 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                     isPaid,
                     fullOrder: orden,
                     totalTaskUSD,
-                    isBillable: (item.precioUnitario || 0) > 0 // Flag visual
+                    isBillable: (item.precioUnitario || 0) > 0
                 }
             })
         ).filter(item => {
@@ -338,41 +334,30 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                                 <TableBody>
                                     {historyList.map((item, idx) => (
                                         <TableRow key={idx} className="h-16 lg:h-20 border-slate-50 hover:bg-slate-50/50 transition-colors">
-                                            {/* Fecha */}
                                             <TableCell className="px-4 lg:px-8 font-bold text-slate-500 text-[10px] lg:text-xs">
                                                 {item.paymentDate ? new Date(item.paymentDate).toLocaleDateString() : '---'}
                                             </TableCell>
-                                            
-                                            {/* Orden */}
                                             <TableCell>
                                                 <div className="font-black text-blue-600 text-xs lg:text-sm">#{item.orderNum}</div>
                                                 <div className="text-[9px] font-bold text-slate-400 uppercase truncate max-w-[80px] lg:max-w-none">{item.clientName}</div>
                                             </TableCell>
-                                            
-                                            {/* Diseñador */}
                                             <TableCell className="hidden md:table-cell">
                                                 <Badge className="bg-slate-100 text-slate-900 border-none rounded-lg px-3 font-black text-[10px] uppercase">
                                                     {item.designerName}
                                                 </Badge>
                                             </TableCell>
-                                            
-                                            {/* Monto */}
                                             <TableCell className="text-right">
                                                 <div className="font-black text-emerald-600 text-sm lg:text-xl">
                                                     ${item.totalTaskUSD.toFixed(2)}
                                                 </div>
-                                                {/* Indicador Interno */}
                                                 {!item.isBillable && (
                                                     <div className="text-[7px] font-bold text-orange-500 uppercase tracking-widest bg-orange-50 inline-block px-1 rounded">
                                                         Interno
                                                     </div>
                                                 )}
                                             </TableCell>
-                                            
-                                            {/* Acciones */}
                                             <TableCell className="text-center">
                                                 <div className="flex items-center justify-center gap-2">
-                                                    {/* BOTÓN REPARADOR DE ORDENES */}
                                                     <Tooltip>
                                                         <TooltipTrigger asChild>
                                                             <Button 
@@ -430,7 +415,6 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                     try {
                         const lastNum = await getLastOrderNumber();
                         
-                        // Lógica inicial: Precio cliente vs Costo interno
                         const precioReal = parseFloat(data.precioDiseno || "0");
                         const precioCliente = data.facturarDiseno ? precioReal : 0;
 
@@ -443,7 +427,7 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                             empleadoAsignado: designers.find(d => d.id === data.designerId)?.name || "Sin Asignar",
                             // @ts-ignore
                             designPaymentStatus: 'PENDIENTE',
-                            costoInterno: precioReal // Guardamos el valor real para nómina
+                            costoInterno: precioReal
                         }];
 
                         if (data.incluirMaterial) {
@@ -458,7 +442,6 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                             });
                         }
 
-                        // Calcular Total inicial
                         const totalUSD = items.reduce((s, i) => s + i.precioUnitario, 0);
 
                         await createOrden({ 
@@ -477,7 +460,6 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                             descripcionDetallada: data.detalles || "Express", 
                             totalUSD, 
                             montoPagadoUSD: 0, 
-                            // Si el total es 0, nace PAGADA
                             estadoPago: totalUSD === 0 ? EstadoPago.PAGADO : EstadoPago.PENDIENTE, 
                             estado: EstadoOrden.PENDIENTE, 
                             designerId: data.designerId 
@@ -589,10 +571,25 @@ function PaymentModal({ isOpen, onClose, item, form, setForm, rates, onConfirm, 
                         <h2 className="text-3xl lg:text-5xl font-black text-emerald-600 tracking-tighter">${item?.amount.toFixed(2)}</h2>
                         <p className="text-sm lg:text-xl font-black mt-1 text-slate-700 dark:text-slate-300 tracking-tighter">Bs. {((item?.amount || 0) * effectiveRate).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                     </div>
+                    
+                    {/* SELECCIÓN DE MÉTODO DE PAGO */}
                     <div className="grid grid-cols-2 gap-3 lg:gap-4">
-                        <div className="space-y-1"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Vía</Label><Select value={form.metodo} onValueChange={v => setForm({...form, metodo: v})}><SelectTrigger className="rounded-xl h-10 lg:h-12 bg-slate-100 dark:bg-slate-800 border-none font-bold text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Pago Móvil">Pago Móvil</SelectItem><SelectItem value="Zelle">Zelle</SelectItem><SelectItem value="Efectivo">Efectivo</SelectItem></SelectContent></Select></div>
+                        <div className="space-y-1">
+                            <Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Cuenta de Salida</Label>
+                            <Select value={form.metodo} onValueChange={v => setForm({...form, metodo: v})}>
+                                <SelectTrigger className="rounded-xl h-10 lg:h-12 bg-slate-100 dark:bg-slate-800 border-none font-bold text-xs">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {PAYMENT_METHODS.map(m => (
+                                        <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
                         <div className="space-y-1"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Ref.</Label><Input value={form.referencia} onChange={e => setForm({...form, referencia: e.target.value})} className="rounded-xl h-10 lg:h-12 bg-slate-100 dark:bg-slate-800 border-none font-black text-xs" /></div>
                     </div>
+
                     <div className="grid grid-cols-2 gap-3 lg:gap-4">
                         <div className="space-y-1"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Tasa</Label><Select value={form.monedaTasa} onValueChange={v => setForm({...form, monedaTasa: v})}><SelectTrigger className="rounded-xl h-10 lg:h-12 bg-slate-100 dark:bg-slate-800 border-none font-bold text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="BCV">Dólar BCV</SelectItem><SelectItem value="EUR">Euro BCV</SelectItem><SelectItem value="MANUAL">Manual</SelectItem></SelectContent></Select></div>
                         <div className="space-y-1">

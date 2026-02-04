@@ -168,7 +168,6 @@ export default function Dashboard() {
 
     // --- 4. MANEJADORES ---
     
-    // ✅ NUEVO: Función auxiliar para abrir el modal de forma segura desde cualquier vista
     const handleOpenPaymentModal = useCallback((orden: OrdenServicio) => {
         setSelectedOrdenForPayment(orden);
         setIsPaymentModalOpen(true);
@@ -289,14 +288,11 @@ export default function Dashboard() {
             const ordenRef = doc(db, "ordenes", ordenId);
             const montoPagadoAnterior = Number(ordenActual.montoPagadoUSD) || 0;
             
-            // 1. Calcular totales incluyendo el posible descuento
             const descuentoAplicado = descuento || 0;
             const nuevoMontoTotalPagado = montoPagadoAnterior + monto + descuentoAplicado;
             const saldoRestante = ordenActual.totalUSD - nuevoMontoTotalPagado;
-            // Tolerancia de $0.01 para errores de redondeo
             const nuevoEstadoPago = saldoRestante <= 0.01 ? "PAGADO" : "ABONADO";
 
-            // 2. Crear recibo del dinero REAL (va a la billetera seleccionada)
             const nuevoRecibo = {
                 montoUSD: monto,
                 fecha: new Date().toISOString(),
@@ -308,7 +304,6 @@ export default function Dashboard() {
 
             const pagosAGuardar = [nuevoRecibo];
 
-            // 3. Si hubo descuento, crear recibo de AJUSTE (no afecta caja real, solo saldo)
             if (descuentoAplicado > 0) {
                 pagosAGuardar.push({
                     montoUSD: descuentoAplicado,
@@ -337,7 +332,7 @@ export default function Dashboard() {
             });
             
             toast.success("Pago registrado correctamente");
-            setIsPaymentModalOpen(false); // ✅ Cierre exitoso controlado aquí
+            setIsPaymentModalOpen(false); 
         } catch (error) {
             console.error("❌ Error al registrar pago:", error);
             toast.error("Error al registrar el pago");
@@ -514,7 +509,6 @@ export default function Dashboard() {
                                 ordenes={filteredOrdenes} 
                                 onDelete={deleteOrden} 
                                 onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}} 
-                                // ✅ Corrección 1: Pasar la función que solo ABRE el modal
                                 onRegisterPayment={(id) => { 
                                     const ord = ordenes.find(o => o.id === id); 
                                     if(ord) handleOpenPaymentModal(ord); 
@@ -572,7 +566,12 @@ export default function Dashboard() {
                 )}
 
                 {activeView === "payment_audit" && (
-                    <PaymentAuditView ordenes={ordenes} />
+                    <PaymentAuditView 
+                        ordenes={ordenes} 
+                        // --- AQUÍ ESTÁ LA SOLUCIÓN DEL CERO ---
+                        gastos={[...gastos, ...gastosFijos]} 
+                        pagosEmpleados={pagos} 
+                    />
                 )}
 
                 {activeView === "financial_stats" && (
@@ -612,7 +611,6 @@ export default function Dashboard() {
                     <ClientsAndPaymentsView 
                         ordenes={ordenes} 
                         rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
-                        // ✅ Corrección 2: Pasar el manejador de apertura, no el de Firebase
                         onRegisterPayment={handleOpenPaymentModal} 
                         pdfLogoBase64={assets.logo}
                         firmaBase64={assets.firma}
@@ -671,13 +669,10 @@ export default function Dashboard() {
           </DialogContent>
         </Dialog>
 
-        {/* MODAL DE PAGO UNIFICADO Y CORREGIDO */}
         {selectedOrdenForPayment && (
             <PaymentEditModal
-                // ✅ Corrección 3: Key única para reiniciar estados al cambiar orden
                 key={selectedOrdenForPayment.id}
                 isOpen={isPaymentModalOpen}
-                // ✅ Corrección 4: Timeout para evitar parpadeo visual al cerrar
                 onClose={() => { 
                     setIsPaymentModalOpen(false); 
                     setTimeout(() => setSelectedOrdenForPayment(null), 300);
@@ -686,7 +681,6 @@ export default function Dashboard() {
                 rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
                 onSave={async (amount, note, img, method, discount) => {
                     await handleRegisterOrderPayment(selectedOrdenForPayment.id, amount, note, img, method, discount); 
-                    // El cierre del modal ocurre dentro de handleRegisterOrderPayment tras el éxito
                 }}
                 currentUserId={currentUserId || ""}
             />
@@ -714,7 +708,7 @@ function StatCard({ label, value, icon, subtext, color, className }: any) {
     return (
         <Card className={cn("border shadow-sm rounded-3xl overflow-hidden bg-white dark:bg-[#1c1c1e] transition-all w-full", className)}>
             <CardContent className="p-4 sm:p-6 flex items-center gap-5">
-                <div className={cn("p-4 rounded-[1.8rem] shadow-inner shrink-0", theme[color])}>{icon && React.cloneElement(icon as any, { className: "w-8 h-8" })}</div>
+                <div className="p-4 rounded-[1.8rem] shadow-inner shrink-0" className={cn(theme[color])}>{icon && React.cloneElement(icon as any, { className: "w-8 h-8" })}</div>
                 <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase text-black/30 dark:text-white/30 truncate">{label}</p>
                     <p className="text-3xl font-bold tracking-tighter truncate">{value}</p>
