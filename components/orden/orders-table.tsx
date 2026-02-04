@@ -29,7 +29,7 @@ import {
     Trash2, Eye, Pencil, ChevronLeft, ChevronRight, 
     ChevronDown, CheckCircle2, Wallet, Landmark,
     History, X, Clock, Download, RefreshCw, Loader2, Sparkles, Banknote,
-    ArrowUpDown, ArrowUp, ArrowDown // ✅ Iconos para ordenar
+    ArrowUpDown, ArrowUp, ArrowDown
 } from "lucide-react"
 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
@@ -80,8 +80,6 @@ export function OrdersTable({
     const unpaid: OrdenServicio[] = [];
     const paid: OrdenServicio[] = [];
     
-    // Dejamos el ordenamiento inicial aquí solo como backup, 
-    // pero el componente hijo manejará el ordenamiento visual.
     ordenes.forEach(o => {
         const total = o.totalUSD || 0;
         const abonado = o.montoPagadoUSD || 0;
@@ -229,15 +227,15 @@ export function OrdersTable({
   )
 }
 
-// --- SUB-TABLA CON ORDENAMIENTO (SORTING) ---
+// --- SUB-TABLA CON ORDENAMIENTO (SORTING) CORREGIDO ---
 function OrdersSubTable({ data, actions, rates }: any) {
     const [page, setPage] = useState(1);
     const pageSize = 10;
     
-    // ✅ Estado para el ordenamiento (Por defecto: Número de orden descendente, osea las nuevas primero)
+    // Por defecto ordenamos por número de forma descendente (nuevas primero)
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'ordenNumero', direction: 'desc' });
 
-    // ✅ Lógica de Ordenamiento
+    // Lógica de Ordenamiento CORREGIDA PARA NÚMEROS
     const sortedData = useMemo(() => {
         let sortableItems = [...data];
         if (sortConfig.key) {
@@ -245,13 +243,23 @@ function OrdersSubTable({ data, actions, rates }: any) {
                 let aVal = a[sortConfig.key];
                 let bVal = b[sortConfig.key];
 
-                // Casos especiales (Anidados)
+                // 1. CORRECCIÓN: Si ordenamos por número de orden, convertimos a Number para comparar matemáticamente.
+                // Esto arregla el bug donde "99" > "100" (alfabéticamente).
+                if (sortConfig.key === 'ordenNumero') {
+                    const numA = Number(aVal);
+                    const numB = Number(bVal);
+                    if (!isNaN(numA) && !isNaN(numB)) {
+                        return sortConfig.direction === 'asc' ? numA - numB : numB - numA;
+                    }
+                }
+
+                // 2. Caso especial: Nombre de cliente (está anidado)
                 if (sortConfig.key === 'cliente') {
                     aVal = a.cliente?.nombreRazonSocial || '';
                     bVal = b.cliente?.nombreRazonSocial || '';
                 }
                 
-                // Comparación
+                // 3. Comparación estándar para texto o fallback
                 if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
                 if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
                 return 0;
