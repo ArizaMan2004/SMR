@@ -152,6 +152,24 @@ export function EstadisticasDashboard({
   // NUEVO ESTADO PARA DETALLE DE MATERIAL
   const [selectedMaterialDetail, setSelectedMaterialDetail] = useState<any | null>(null);
 
+  // --- HELPER PARA FECHAS DE PAGO (VERSIÓN BLINDADA) ---
+  const getFechaRealPago = (c: any) => {
+      // 1. Buscamos la fecha más precisa disponible
+      // IMPORTANTE: 'fecha' es como se guarda dentro de 'registroPagos' en Firebase (según tu imagen)
+      const raw = c.fecha || c.fechaRegistro || c.fechaPago || c.timestamp;
+      
+      // 2. Si es Timestamp de Firebase
+      if (raw && typeof raw.toDate === 'function') {
+          return raw.toDate();
+      }
+      
+      // 3. Si encontramos una fecha válida
+      if (raw) return new Date(raw);
+
+      // 4. FALLBACK: Si no hay fecha, usamos Date(0) para no contaminar el mes actual
+      return new Date(0); 
+  };
+
   // --- PDF ---
   const handleDownloadPDF = async () => {
     if (!dashboardRef.current) return;
@@ -232,12 +250,58 @@ export function EstadisticasDashboard({
     return map;
   }, [ordenes]);
 
+  // --- TRANSACCIONES REALES (CORREGIDO: AÑADIDO registroPagos) ---
+  const transaccionesReales = useMemo(() => {
+      const list: any[] = [];
+      
+      ordenes.forEach(orden => {
+          if (orden.estado === 'ANULADO') return;
+
+          // CORRECCIÓN: Ahora buscamos 'registroPagos' primero, que es el nombre real en Firebase
+          const historial = (orden as any).registroPagos || (orden as any).historial || (orden as any).pagos || (orden as any).historialPagos || [];
+
+          if (Array.isArray(historial) && historial.length > 0) {
+              // CASO 1: ORDEN CON HISTORIAL (Desglose real)
+              historial.forEach((pago: any, index: number) => {
+                  list.push({
+                      id: `${orden.id}_pago_${index}`, // ID único virtual
+                      ordenId: orden.id,
+                      ordenData: orden,
+                      ordenNumero: orden.ordenNumero,
+                      nombreCliente: orden.cliente?.nombreRazonSocial || "Cliente Desconocido",
+                      fechaReal: getFechaRealPago(pago), // Usa la fecha interna del pago (pago.fecha)
+                      monto: Number(pago.montoUSD) || 0,
+                      tipo: 'ABONO',
+                      metodo: pago.metodo,
+                      nota: pago.nota
+                  });
+              });
+          } else {
+              // CASO 2: FALLBACK PARA DATOS ANTIGUOS
+              const cobroLegacy = cobranzas.find(c => c.id === orden.id);
+              if (cobroLegacy && cobroLegacy.estado === 'pagado') {
+                   list.push({
+                      id: `${orden.id}_legacy`,
+                      ordenId: orden.id,
+                      ordenData: orden,
+                      ordenNumero: orden.ordenNumero,
+                      nombreCliente: orden.cliente?.nombreRazonSocial || "Cliente Desconocido",
+                      fechaReal: getFechaRealPago(cobroLegacy),
+                      monto: Number(cobroLegacy.montoUSD) || 0,
+                      tipo: 'TOTAL_LEGACY'
+                  });
+              }
+          }
+      });
+      return list;
+  }, [ordenes, cobranzas]);
+
+
   const productionMetrics = useMemo(() => {
       const calcularStats = (inicio: Date, fin: Date) => {
           let m2Totales = 0;
           let minutosTotales = 0;
           
-          // Helper para agregar detalle
           const addDetail = (obj: any, item: any, orden: any, qty: number, subtotal: number) => {
               obj.count += qty;
               obj.revenue += subtotal;
@@ -249,11 +313,10 @@ export function EstadisticasDashboard({
                   descripcion: item.nombre || item.descripcion,
                   cantidad: qty,
                   monto: subtotal,
-                  ordenData: orden // Referencia completa para abrir el modal
+                  ordenData: orden 
               });
           };
 
-          // Desglose Impresión
           const matImpresion: any = {
               vinil: { label: 'Vinil / Stickers', count: 0, revenue: 0, details: [] },
               banner: { label: 'Banner / Lona', count: 0, revenue: 0, details: [] },
@@ -263,7 +326,6 @@ export function EstadisticasDashboard({
               otros: { label: 'Otros Print', count: 0, revenue: 0, details: [] }
           };
 
-          // Desglose Corte
           const matCorte: Record<string, { label: string, count: number, revenue: number, details: any[] }> = {};
           const colCorte: Record<string, { label: string, count: number, revenue: number, details: any[] }> = {};
 
@@ -301,7 +363,6 @@ export function EstadisticasDashboard({
                       const minutosItem = (item.tiempo ? parseFloat(item.tiempo) : qty);
                       minutosTotales += minutosItem;
                       
-                      // 1. Detección de Material
                       let materialKey = item.materialDeCorte || 'Otros';
                       if (!item.materialDeCorte || item.materialDeCorte === 'Otros') {
                            const detected = detectarCategoria(nombreLower, MATERIALES_CORTE_KEYS, 'Otros');
@@ -311,7 +372,6 @@ export function EstadisticasDashboard({
                       if (!matCorte[materialKey]) matCorte[materialKey] = { label: materialKey, count: 0, revenue: 0, details: [] };
                       addDetail(matCorte[materialKey], item, o, qty, subtotal);
 
-                      // 2. Detección de Color
                       let colorKey = item.colorAcrilico || 'N/A';
                       if (!item.colorAcrilico || item.colorAcrilico === 'N/A') {
                           colorKey = detectarCategoria(nombreLower, COLORES_KEYS, 'N/A');
@@ -345,18 +405,18 @@ export function EstadisticasDashboard({
       return { actual, anterior, variacionM2, variacionMinutos };
   }, [ordenes, fechas]);
 
-  // --- CÁLCULO DE MÉTRICAS (CORREGIDO: LECTURA DE MONTOUSD) ---
+  // --- CÁLCULO DE MÉTRICAS (CORREGIDO: USANDO transaccionesReales) ---
   const metricas = useMemo(() => {
     const calcularRango = (inicio: Date, fin: Date) => {
         let ingresos = 0; let egresosDirectos = 0; let ordenesCount = 0;
         let gastosFijosPagados = 0; 
         
-        cobranzas?.filter(c => {
-            const f = new Date(c.fecha || '');
-            return c.estado === 'pagado' && f >= inicio && f <= fin;
-        }).forEach(c => {
-            const props = orderBreakdown.get(c.id) || { pctImp: 0, pctCorte: 0, pctOtros: 0 };
-            const monto = Number(c.montoUSD) || 0;
+        // CORRECCIÓN: Usamos transaccionesReales (abonos) en lugar de cobranzas (orden completa)
+        transaccionesReales.filter(pago => {
+            return pago.fechaReal >= inicio && pago.fechaReal <= fin;
+        }).forEach(pago => {
+            const props = orderBreakdown.get(pago.ordenId) || { pctImp: 0, pctCorte: 0, pctOtros: 0 };
+            const monto = pago.monto;
             if (viewMode === 'GENERAL') ingresos += monto;
             else if (viewMode === 'IMPRESION') ingresos += monto * props.pctImp;
             else if (viewMode === 'CORTE') ingresos += monto * props.pctCorte;
@@ -380,10 +440,8 @@ export function EstadisticasDashboard({
             const texto = ((g as any).nombre || g.descripcion || (g as any).concepto || "" + ' ' + (g.categoria || '')).toLowerCase();
             const cat = (g.categoria || "").toLowerCase();
             
-            // CORRECCIÓN PRINCIPAL: Leer montoUSD si monto es 0 o undefined
             const monto = Number(g.monto) || Number(g.montoUSD) || 0;
 
-            // DETECCIÓN DE GASTO FIJO REAL
             if (cat === 'gasto fijo' || cat === 'servicios' || cat === 'alquiler') {
                 if (viewMode === 'GENERAL') {
                     gastosFijosPagados += monto;
@@ -391,7 +449,6 @@ export function EstadisticasDashboard({
                 return; 
             }
 
-            // DETECCIÓN DE INSUMO OPERATIVO
             let relevante = false;
             const keywordsImp = ['tinta', 'vinil', 'lona', 'banner', 'papel', 'impresion', 'microperforado', 'ojales', 'laminacion', 'laminado', 'esmerilado'];
             const keywordsCorte = ['mdf', 'acrilico', 'acr', 'madera', 'laser', 'corte', 'pintura', 'thinner', 'balsa', 'plywood'];
@@ -478,7 +535,7 @@ export function EstadisticasDashboard({
         puntoEquilibrioPct, 
         variacionIngreso: anterior.ingresos > 0 ? ((actual.ingresos - anterior.ingresos) / anterior.ingresos) * 100 : 0 
     };
-  }, [fechaReferencia, viewMode, cobranzas, ordenes, gastosInsumos, gastosFijos, pagosEmpleados, empRoleMap, orderBreakdown, fechas, empleados]);
+  }, [fechaReferencia, viewMode, transaccionesReales, ordenes, gastosInsumos, gastosFijos, pagosEmpleados, empRoleMap, orderBreakdown, fechas, empleados]);
 
   // --- 6. ANÁLISIS DE DEUDA ---
   const analisisDeuda = useMemo(() => {
@@ -535,7 +592,7 @@ export function EstadisticasDashboard({
       return { totalDeuda, deudaCorriente, deudaCritica, topClientesDeuda };
   }, [ordenes, viewMode, orderBreakdown]);
 
-  // --- 7. GRÁFICOS ---
+  // --- 7. GRÁFICOS (CORREGIDO: USANDO transaccionesReales) ---
   const chartData = useMemo(() => {
     const map = new Map();
     const year = fechaReferencia.getFullYear();
@@ -564,14 +621,15 @@ export function EstadisticasDashboard({
         map.set(i, { day: i, label, ingresos: 0, gastos: 0 });
     }
 
-    cobranzas?.filter(c => {
-        const f = new Date(c.fecha || '');
-        return c.estado === 'pagado' && f >= fechas.inicio && f <= fechas.fin;
-    }).forEach(c => {
-        const dia = new Date(c.fecha || '').getDate();
+    // AQUI ESTABA EL PROBLEMA: Ahora usamos transaccionesReales
+    transaccionesReales.filter(pago => {
+        return pago.fechaReal >= fechas.inicio && pago.fechaReal <= fechas.fin;
+    }).forEach(pago => {
+        const dia = pago.fechaReal.getDate();
+
         if (map.has(dia)) {
-            const props = orderBreakdown.get(c.id);
-            let monto = Number(c.montoUSD) || 0;
+            const props = orderBreakdown.get(pago.ordenId);
+            let monto = pago.monto;
             if (viewMode === 'IMPRESION') monto *= (props?.pctImp || 0);
             if (viewMode === 'CORTE') monto *= (props?.pctCorte || 0);
             map.get(dia).ingresos += monto;
@@ -602,7 +660,6 @@ export function EstadisticasDashboard({
             }
 
             if (relevante) {
-                // CORRECCIÓN: Leer montoUSD también
                 map.get(dia).gastos += (Number(g.monto) || Number(g.montoUSD) || 0);
             }
         }
@@ -632,7 +689,8 @@ export function EstadisticasDashboard({
                 if (tipo === 'DISENO' && isPaid) {
                     const fechaPago = item.paymentDate ? new Date(item.paymentDate) : new Date(o.fecha);
                     if (fechaPago >= fechas.inicio && fechaPago <= fechas.fin) {
-                         const dia = fechaPago.getDate();
+                         const dia = fechaPago.getDate(); 
+                         
                          if (map.has(dia)) {
                              const costoReal = (item.costoInterno !== undefined && item.costoInterno !== null) 
                                                 ? Number(item.costoInterno) 
@@ -648,7 +706,7 @@ export function EstadisticasDashboard({
     }
 
     return Array.from(map.values());
-  }, [fechas, viewMode, cobranzas, gastosInsumos, orderBreakdown, pagosEmpleados, empRoleMap, ordenes, selectedWeek]);
+  }, [fechas, viewMode, transaccionesReales, gastosInsumos, orderBreakdown, pagosEmpleados, empRoleMap, ordenes, selectedWeek]);
 
   const cambiarMes = (dir: 'prev' | 'next') => {
       const nueva = new Date(fechaReferencia);
@@ -661,24 +719,24 @@ export function EstadisticasDashboard({
       const day = data.activePayload[0].payload.day;
       const targetDate = new Date(fechaReferencia.getFullYear(), fechaReferencia.getMonth(), day);
 
-      const ingresosDelDia = cobranzas?.filter(c => {
-          const f = new Date(c.fecha || '');
-          return c.estado === 'pagado' && f.getDate() === day && f.getMonth() === fechaReferencia.getMonth() && f.getFullYear() === fechaReferencia.getFullYear();
-      }).map(c => {
-          const props = orderBreakdown.get(c.id) || { pctImp: 0, pctCorte: 0, pctOtros: 0 };
-          let monto = Number(c.montoUSD) || 0;
+      // INGRESOS: Filtramos los ABONOS REALES de ese día
+      const ingresosDelDia = transaccionesReales.filter(pago => {
+          return pago.fechaReal.getDate() === day && 
+                 pago.fechaReal.getMonth() === fechaReferencia.getMonth() && 
+                 pago.fechaReal.getFullYear() === fechaReferencia.getFullYear();
+      }).map(pago => {
+          const props = orderBreakdown.get(pago.ordenId) || { pctImp: 0, pctCorte: 0, pctOtros: 0 };
+          let monto = pago.monto;
           if (viewMode === 'IMPRESION') monto *= props.pctImp;
           else if (viewMode === 'CORTE') monto *= props.pctCorte;
           
-          const orden = ordenes.find(o => o.id === c.id);
-          const cliente = orden?.cliente?.nombreRazonSocial || "Cliente Desconocido";
-          
           return {
-              id: c.id,
-              descripcion: `Orden #${orden?.ordenNumero || 'S/N'} - ${cliente}`,
+              id: pago.id,
+              // Mostramos más detalle: si es abono o legacy
+              descripcion: `${pago.tipo === 'ABONO' ? 'Abono' : 'Cobro'} - Orden #${pago.ordenNumero || 'S/N'} - ${pago.nombreCliente}`,
               monto: monto,
               tipo: "Ingreso",
-              orden: orden
+              orden: pago.ordenData
           };
       }).filter(i => i.monto > 0);
 
@@ -707,7 +765,6 @@ export function EstadisticasDashboard({
                     egresosDelDia.push({
                         id: g.id,
                         descripcion: g.descripcion || (g as any).nombre || "Insumo Vario",
-                        // CORRECCIÓN: Leer montoUSD
                         monto: Number(g.monto) || Number(g.montoUSD) || 0,
                         tipo: "Insumo"
                     });
@@ -790,14 +847,12 @@ export function EstadisticasDashboard({
               return false;
           });
 
-          // CORRECCIÓN: Filtramos y mapeamos asegurando leer montoUSD
           const fijos = (gastosInsumos || []).filter(g => {
              if(!filtroFecha(g.fecha)) return false;
              const cat = (g.categoria || "").toLowerCase();
              return (cat === 'gasto fijo' || cat === 'servicios' || cat === 'alquiler');
           }).map(g => ({
               nombre: g.nombre || g.descripcion,
-              // AQUÍ ESTABA EL ERROR: Ahora lee montoUSD si monto es 0/undefined
               monto: Number(g.monto) || Number(g.montoUSD) || 0 
           }));
 
@@ -835,16 +890,24 @@ export function EstadisticasDashboard({
           return { insumos, fijos, nomina, disenoItems };
       }
       if (selectedDetail === 'INGRESOS') {
-          return cobranzas.filter(c => c.estado === 'pagado' && filtroFecha(c.fecha || '')).map(c => {
-                  const orden = ordenes.find(o => o.id === c.id);
-                  const nombreCliente = orden?.cliente?.nombreRazonSocial || "Cliente Desconocido";
-                  const ordersCount = clientFrequencyMap.get(nombreCliente) || 0;
-                  const pct = viewMode === 'IMPRESION' ? (orderBreakdown.get(c.id)?.pctImp || 0) : (viewMode === 'CORTE' ? (orderBreakdown.get(c.id)?.pctCorte || 0) : 1);
-                  return { ...c, nombreCliente, esRecurrente: ordersCount > 1, montoTotal: c.montoUSD, montoRelevante: (c.montoUSD || 0) * pct, porcentaje: pct * 100 };
+          // CORRECCIÓN: Usar transaccionesReales en lugar de cobranzas
+          return transaccionesReales.filter(pago => {
+                  return pago.fechaReal >= fechas.inicio && pago.fechaReal <= fechas.fin;
+              }).map(pago => {
+                  const ordersCount = clientFrequencyMap.get(pago.nombreCliente) || 0;
+                  const pct = viewMode === 'IMPRESION' ? (orderBreakdown.get(pago.ordenId)?.pctImp || 0) : (viewMode === 'CORTE' ? (orderBreakdown.get(pago.ordenId)?.pctCorte || 0) : 1);
+                  return { 
+                      ...pago,
+                      fecha: pago.fechaReal, 
+                      esRecurrente: ordersCount > 1, 
+                      montoTotal: pago.monto, 
+                      montoRelevante: (pago.monto || 0) * pct, 
+                      porcentaje: pct * 100 
+                  };
               }).filter(c => (c.montoRelevante || 0) > 0);
       }
       return null;
-  }, [selectedDetail, fechas, gastosInsumos, pagosEmpleados, gastosFijos, cobranzas, viewMode, empRoleMap, orderBreakdown, ordenes, clientFrequencyMap]);
+  }, [selectedDetail, fechas, gastosInsumos, pagosEmpleados, gastosFijos, transaccionesReales, viewMode, empRoleMap, orderBreakdown, ordenes, clientFrequencyMap]);
 
   return (
     <motion.div 
