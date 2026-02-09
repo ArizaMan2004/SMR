@@ -394,9 +394,12 @@ export function PaymentAuditView({
                 </TabsContent>
             </Tabs>
 
-            {/* MODAL IMAGEN */}
+            {/* MODAL IMAGEN CORREGIDO */}
             <Dialog open={!!previewImage} onOpenChange={(open) => !open && setPreviewImage(null)}>
                 <DialogContent className="max-w-4xl p-0 bg-transparent border-none shadow-none flex justify-center items-center pointer-events-none">
+                    {/* Título oculto para accesibilidad (Fix del error) */}
+                    <DialogTitle className="sr-only">Vista previa del comprobante</DialogTitle>
+                    
                     <div className="relative group max-h-[90vh] w-auto pointer-events-auto">
                         <div className="absolute top-4 right-4 z-50 opacity-0 group-hover:opacity-100 transition-opacity">
                             {previewImage && (
@@ -405,7 +408,7 @@ export function PaymentAuditView({
                                 </a>
                             )}
                         </div>
-                        {previewImage && <img src={previewImage} className="w-full h-auto max-h-[85vh] object-contain rounded-2xl shadow-2xl bg-white" />}
+                        {previewImage && <img src={previewImage} className="w-full h-auto max-h-[85vh] object-contain rounded-2xl shadow-2xl bg-white" alt="Comprobante" />}
                     </div>
                 </DialogContent>
             </Dialog>
