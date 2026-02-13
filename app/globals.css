@@ -75,7 +75,6 @@
 }
 
 @theme inline {
-  /* optional: --font-sans, --font-serif, --font-mono if they are applied in the layout.tsx */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -121,4 +120,147 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* -----------------------------------------
+   TEMA IOS / APPLE PARA DRIVER.JS (MEJORADO)
+   -----------------------------------------
+*/
+
+/* Contenedor Principal (Popover) con Movimiento Fluido */
+.driver-popover {
+  /* Fondo translucido para efecto vidrio */
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  
+  /* El famoso blur de iOS */
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  
+  /* Bordes y Sombras */
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
+  border-radius: 24px !important;
+  box-shadow: 
+    0 20px 50px -12px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(0, 0, 0, 0.05) !important;
+    
+  padding: 24px !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  color: #1d1d1f !important;
+  min-width: 320px !important;
+  max-width: 380px !important;
+
+  /* SOLUCIÓN AL MOVIMIENTO TOSCO: */
+  /* Forzamos una transición suave en la posición y transformación */
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), 
+              top 0.4s cubic-bezier(0.16, 1, 0.3, 1), 
+              left 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* El elemento resaltado (Stage) también necesita transición si la librería no la aplica bien */
+.driver-active-element {
+   transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* Modo Oscuro */
+.dark .driver-popover {
+  background-color: rgba(30, 30, 30, 0.75) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #f5f5f7 !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Títulos y Textos */
+.driver-popover-title {
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  margin-bottom: 8px !important;
+  color: inherit !important;
+  letter-spacing: -0.01em !important;
+  line-height: 1.3 !important;
+}
+
+.driver-popover-description {
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  line-height: 1.5 !important;
+  color: rgba(0, 0, 0, 0.6) !important;
+  margin-bottom: 24px !important;
+}
+.dark .driver-popover-description { color: rgba(255, 255, 255, 0.6) !important; }
+
+/* Botonera */
+.driver-popover-footer {
+  margin-top: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+}
+
+/* Botones Principales (Siguiente / Listo) */
+.driver-popover-next-btn, 
+.driver-popover-done-btn {
+  background-color: #007AFF !important; /* Azul iOS */
+  color: white !important;
+  border: none !important;
+  border-radius: 100px !important; /* Pill shape */
+  padding: 10px 24px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  transition: transform 0.2s ease, background-color 0.2s ease !important;
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3) !important;
+  text-shadow: none !important;
+}
+
+.driver-popover-next-btn:hover, 
+.driver-popover-done-btn:hover {
+  background-color: #0062cc !important;
+  transform: scale(1.05) !important;
+}
+
+.driver-popover-next-btn:active, 
+.driver-popover-done-btn:active {
+  transform: scale(0.95) !important;
+}
+
+/* Botón Atrás */
+.driver-popover-prev-btn {
+  background: transparent !important;
+  color: rgba(0, 0, 0, 0.5) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  border: none !important;
+  padding: 8px 16px !important;
+}
+.dark .driver-popover-prev-btn { color: rgba(255, 255, 255, 0.5) !important; }
+
+.driver-popover-prev-btn:hover {
+  color: rgba(0, 0, 0, 0.9) !important;
+  background: rgba(0, 0, 0, 0.05) !important;
+  border-radius: 100px !important;
+}
+.dark .driver-popover-prev-btn:hover { color: white !important; background: rgba(255, 255, 255, 0.1) !important; }
+
+/* Indicador de Progreso "1 de 5" */
+.driver-popover-progress-text {
+  position: absolute !important;
+  top: 28px !important;
+  right: 24px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: rgba(0,0,0,0.3) !important;
+  background: rgba(0,0,0,0.05) !important;
+  padding: 4px 8px !important;
+  border-radius: 6px !important;
+}
+
+.dark .driver-popover-progress-text {
+  color: rgba(255,255,255,0.3) !important;
+  background: rgba(255,255,255,0.1) !important;
+}
+
+/* Ocultar elementos innecesarios */
+.driver-popover-arrow, 
+.driver-popover-close-btn { 
+  display: none !important; 
 }

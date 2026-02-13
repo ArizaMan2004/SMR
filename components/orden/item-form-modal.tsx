@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils"
 
 import { 
     X, Scissors, Hash, DollarSign, Box, Type, 
-    User, Calculator, Layers, Palette, MoveVertical, AlertCircle 
+    User, Calculator, Layers, Palette, MoveVertical, AlertCircle, Clock
 } from "lucide-react"
 
 // --- CONSTANTES ---
@@ -59,27 +59,50 @@ export function ItemFormModal({
     customColors = [], onRegisterColor 
 }: any) {
   const [state, setState] = useState<any>(getInitialState());
+  
+  // --- ESTADOS DE TIEMPO (H:MM:SS) ---
+  const [horas, setHoras] = useState('0');
   const [minutos, setMinutos] = useState('0');
   const [segundos, setSegundos] = useState('00');
   
-  // NUEVO ESTADO PARA MANEJAR ERRORES VISUALES
   const [errors, setErrors] = useState<any>({});
 
-  const allColors = useMemo(() => [...COLORES_PREDEFINIDOS, ...customColors], [customColors]);
+  // --- SOLUCIÓN AL ERROR DE DUPLICADOS ---
+  // Usamos un Map para asegurar que cada 'value' sea único.
+  const allColors = useMemo(() => {
+    const uniqueColors = new Map();
+    // Primero insertamos los predefinidos
+    COLORES_PREDEFINIDOS.forEach(c => uniqueColors.set(c.value, c));
+    // Luego los custom (si hay un custom con el mismo nombre, sobrescribe o se ignora según lógica deseada, aquí unificamos)
+    customColors.forEach((c: any) => uniqueColors.set(c.value, c));
+    
+    return Array.from(uniqueColors.values());
+  }, [customColors]);
 
   useEffect(() => {
     if (isOpen) {
       if (itemToEdit) {
+          // Lógica inteligente para detectar formato H:MM:SS o MM:SS
           if (itemToEdit.unidad === 'tiempo' && itemToEdit.tiempoCorte) {
              const parts = itemToEdit.tiempoCorte.split(':');
-             setMinutos(parts[0] || '0'); setSegundos(parts[1] || '00');
+             if (parts.length === 3) {
+                 // Formato H:M:S
+                 setHoras(parts[0] || '0');
+                 setMinutos(parts[1] || '0');
+                 setSegundos(parts[2] || '00');
+             } else {
+                 // Formato M:S (Legacy)
+                 setHoras('0');
+                 setMinutos(parts[0] || '0'); 
+                 setSegundos(parts[1] || '00');
+             }
           }
           setState({ ...getInitialState(), ...itemToEdit, nuevoColorCustom: "" });
       } else {
           setState(getInitialState());
-          setMinutos('0'); setSegundos('00');
+          setHoras('0'); setMinutos('0'); setSegundos('00');
       }
-      setErrors({}); // Limpiar errores al abrir
+      setErrors({}); 
     }
   }, [isOpen, itemToEdit]);
 
@@ -92,7 +115,12 @@ export function ItemFormModal({
 
     if (cantidadCalculo > 0 || (modoCobroLaser === 'tiempo' && tipoServicio === 'CORTE')) {
         if (tipoServicio === 'CORTE' && modoCobroLaser === 'tiempo') {
-            const totalMinutes = (parseFloat(minutos) || 0) + ((parseFloat(segundos) || 0) / 60);
+            // CÁLCULO CON HORAS INCLUIDAS
+            const h = parseFloat(horas) || 0;
+            const m = parseFloat(minutos) || 0;
+            const s = parseFloat(segundos) || 0;
+            
+            const totalMinutes = (h * 60) + m + (s / 60);
             costoBaseUnitario = totalMinutes * PRECIO_LASER_POR_MINUTO;
         } else if (unidad === 'm2' && medidaXCm > 0 && medidaYCm > 0) {
             costoBaseUnitario = (medidaXCm / 100) * (medidaYCm / 100) * precioUnitario;
@@ -103,43 +131,35 @@ export function ItemFormModal({
         const totalUnit = costoBaseUnitario + (suministrarMaterial ? costoMaterialExtra : 0);
         setState((prev: any) => ({ ...prev, subtotal: totalUnit * cantidadCalculo }));
     }
-  }, [state.cantidad, state.precioUnitario, state.unidad, state.medidaXCm, state.medidaYCm, minutos, segundos, state.suministrarMaterial, state.costoMaterialExtra, state.tipoServicio, state.modoCobroLaser]);
+  }, [state.cantidad, state.precioUnitario, state.unidad, state.medidaXCm, state.medidaYCm, horas, minutos, segundos, state.suministrarMaterial, state.costoMaterialExtra, state.tipoServicio, state.modoCobroLaser]);
 
-  // --- FUNCIÓN DE GUARDADO CON VALIDACIONES VISUALES ---
+  // --- FUNCIÓN DE GUARDADO ---
   const handleSave = async () => {
     const newErrors: any = {};
     let hasError = false;
 
-    // 1. VALIDACIÓN: Descripción
-    if (!state.nombre.trim()) {
-        newErrors.nombre = true;
-        hasError = true;
-    }
+    if (!state.nombre.trim()) { newErrors.nombre = true; hasError = true; }
 
-    // 2. VALIDACIÓN: Dimensiones en m2
     if (state.unidad === 'm2') {
         if (state.medidaXCm <= 0) { newErrors.medidaXCm = true; hasError = true; }
         if (state.medidaYCm <= 0) { newErrors.medidaYCm = true; hasError = true; }
     }
 
-    // 3. VALIDACIÓN: Tiempo en Corte Láser
+    // VALIDACIÓN DE TIEMPO
     if (state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo') {
+        const tH = parseFloat(horas) || 0;
         const tMin = parseFloat(minutos) || 0;
         const tSec = parseFloat(segundos) || 0;
-        if (tMin === 0 && tSec === 0) {
-            newErrors.tiempo = true; // Error general de tiempo
+        if (tH === 0 && tMin === 0 && tSec === 0) {
+            newErrors.tiempo = true;
             hasError = true;
         }
     }
 
-    // 4. VALIDACIÓN: Cantidad
-    if ((state.cantidad || 0) <= 0) {
-        newErrors.cantidad = true;
-        hasError = true;
-    }
+    if ((state.cantidad || 0) <= 0) { newErrors.cantidad = true; hasError = true; }
 
     setErrors(newErrors);
-    if (hasError) return; // FRENAR SI HAY ERRORES
+    if (hasError) return;
 
     // --- PROCESO DE GUARDADO ---
     let colorFinal = state.colorAcrilico;
@@ -155,6 +175,16 @@ export function ItemFormModal({
         ? state.precioUnitario 
         : (state.subtotal / (state.cantidad || 1));
 
+    // GENERAR STRING DE TIEMPO
+    const hVal = parseInt(horas) || 0;
+    const mVal = parseInt(minutos) || 0;
+    const sVal = segundos.padStart(2, '0');
+    
+    // Si hay horas, formato H:MM:SS, sino MM:SS
+    const tiempoString = hVal > 0 
+        ? `${hVal}:${mVal.toString().padStart(2, '0')}:${sVal}`
+        : `${mVal}:${sVal}`;
+
     onAddItem({ 
         ...state, 
         cantidad: state.cantidad || 1, 
@@ -163,13 +193,12 @@ export function ItemFormModal({
             ? `${state.materialDeCorte} ${state.materialDeCorte === 'Cartulina' ? 'N/A' : state.grosorMaterial} ${colorFinal}`
             : null,
         precioUnitario: finalUnitPrice,
-        tiempoCorte: state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo' ? `${minutos}:${segundos.padStart(2, '0')}` : "Servicio" 
+        tiempoCorte: state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo' ? tiempoString : "Servicio" 
     });
     
     onClose();
   };
 
-  // Función auxiliar para limpiar errores al escribir
   const clearError = (field: string) => {
     if (errors[field]) setErrors((prev: any) => ({ ...prev, [field]: false }));
   };
@@ -218,7 +247,7 @@ export function ItemFormModal({
                             else if (v === 'CORTE') updates.unidad = 'tiempo';
                             else updates.unidad = 'und';
                             setState({...state, ...updates});
-                            setErrors({}); // Limpiar errores al cambiar tipo
+                            setErrors({});
                         }}>
                             <SelectTrigger className="h-12 rounded-xl border-none bg-blue-50 dark:bg-blue-900/30 text-blue-600 font-black uppercase"><SelectValue /></SelectTrigger>
                             <SelectContent className="rounded-2xl border-none shadow-2xl">
@@ -282,23 +311,48 @@ export function ItemFormModal({
                                 {state.modoCobroLaser === 'tiempo' ? (
                                     <div className="space-y-1.5">
                                         <Label className={cn("text-[9px] font-black uppercase transition-colors", errors.tiempo ? "text-red-500" : "text-orange-400")}>
-                                            Tiempo de Ejecución {errors.tiempo && "(Requerido)"}
+                                            Tiempo (H : M : S) {errors.tiempo && "(Requerido)"}
                                         </Label>
-                                        <div className={cn("flex items-center gap-3 bg-white dark:bg-slate-800 h-14 px-6 rounded-2xl shadow-inner font-black text-xl border transition-all", errors.tiempo ? "border-red-500 ring-2 ring-red-500/20" : "border-transparent")}>
-                                            <input 
-                                                value={minutos === '0' ? '' : minutos} 
-                                                onChange={e => { setMinutos(e.target.value); clearError('tiempo'); }} 
-                                                className="w-full text-center outline-none bg-transparent" 
-                                                placeholder="0" 
-                                            />
-                                            <span className="opacity-20">:</span>
-                                            <input 
-                                                value={segundos === '00' ? '' : segundos} 
-                                                onChange={e => { setSegundos(e.target.value); clearError('tiempo'); }} 
-                                                className="w-full text-center outline-none bg-transparent" 
-                                                placeholder="00" 
-                                                maxLength={2} 
-                                            />
+                                        <div className={cn("flex items-center gap-1 bg-white dark:bg-slate-800 h-14 px-4 rounded-2xl shadow-inner font-black text-xl border transition-all", errors.tiempo ? "border-red-500 ring-2 ring-red-500/20" : "border-transparent")}>
+                                            {/* INPUT HORAS */}
+                                            <div className="flex flex-col items-center justify-center w-full">
+                                                <input 
+                                                    value={horas === '0' ? '' : horas} 
+                                                    onChange={e => { setHoras(e.target.value); clearError('tiempo'); }} 
+                                                    className="w-full text-center outline-none bg-transparent" 
+                                                    placeholder="0" 
+                                                    type="number"
+                                                />
+                                                <span className="text-[7px] text-slate-300 uppercase font-bold tracking-widest">Hrs</span>
+                                            </div>
+
+                                            <span className="opacity-20 pb-3 text-2xl">:</span>
+
+                                            {/* INPUT MINUTOS */}
+                                            <div className="flex flex-col items-center justify-center w-full">
+                                                <input 
+                                                    value={minutos === '0' ? '' : minutos} 
+                                                    onChange={e => { setMinutos(e.target.value); clearError('tiempo'); }} 
+                                                    className="w-full text-center outline-none bg-transparent" 
+                                                    placeholder="00" 
+                                                    type="number"
+                                                />
+                                                <span className="text-[7px] text-slate-300 uppercase font-bold tracking-widest">Min</span>
+                                            </div>
+                                            
+                                            <span className="opacity-20 pb-3 text-2xl">:</span>
+
+                                            {/* INPUT SEGUNDOS */}
+                                            <div className="flex flex-col items-center justify-center w-full">
+                                                <input 
+                                                    value={segundos === '00' ? '' : segundos} 
+                                                    onChange={e => { setSegundos(e.target.value); clearError('tiempo'); }} 
+                                                    className="w-full text-center outline-none bg-transparent" 
+                                                    placeholder="00" 
+                                                    maxLength={2} 
+                                                />
+                                                <span className="text-[7px] text-slate-300 uppercase font-bold tracking-widest">Seg</span>
+                                            </div>
                                         </div>
                                     </div>
                                 ) : (

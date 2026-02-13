@@ -1,13 +1,14 @@
 // @/components/dashboard/WalletsView.tsx
 "use client"
 
-import React, { useMemo, useState } from "react"
+import React, { useMemo, useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { 
     Wallet, TrendingUp, TrendingDown, RefreshCcw, 
-    Plus, ArrowRightLeft, DollarSign, Coins, Landmark, 
-    CreditCard, Calendar, ArrowUpRight, ArrowDownLeft,
-    Banknote, Search, Filter, History, AlertCircle
+    Plus, ArrowRightLeft, Coins, Landmark, 
+    CreditCard, ArrowUpRight, ArrowDownLeft,
+    Banknote, Settings, Save, Calculator, 
+    HelpCircle, X, AlertTriangle, Megaphone, ShieldAlert
 } from "lucide-react"
 
 import { Card } from "@/components/ui/card"
@@ -20,12 +21,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils"
 import { formatCurrency } from "@/lib/utils/order-utils"
 
+// --- TIPOS ---
 interface WalletsViewProps {
     ordenes: any[]
     gastos: any[]
-    gastosFijos: any[]
     pagosEmpleados: any[]
     rates: { usd: number, eur: number, usdt: number }
+    yesterdayRate?: number // Tasa de cierre anterior (opcional para cálculo de tendencia)
+    initialBalancesData?: { cash_usd: number, bank_bs: number, zelle: number, usdt: number }
 }
 
 const WALLETS_CONFIG = [
@@ -35,414 +38,499 @@ const WALLETS_CONFIG = [
     { id: 'usdt', label: 'Binance / USDT', currency: 'USDT', icon: <Coins className="w-6 h-6"/>, color: 'orange', bg: 'bg-orange-500' },
 ]
 
-export function WalletsView({ ordenes, gastos, gastosFijos, pagosEmpleados, rates }: WalletsViewProps) {
+// --- COMPONENTE DE TUTORIAL (Burbuja Flotante) ---
+const TutorialTip = ({ text, position = "top" }: { text: string, position?: "top" | "bottom" | "left" | "right" }) => (
+    <motion.div 
+        initial={{ opacity: 0, scale: 0.8, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.8 }}
+        className={cn(
+            "absolute z-50 bg-indigo-600 text-white text-[10px] font-bold uppercase tracking-wide p-3 rounded-xl shadow-xl w-48 pointer-events-none border-2 border-white/20",
+            position === "top" && "-top-20 left-1/2 -translate-x-1/2",
+            position === "bottom" && "-bottom-20 left-1/2 -translate-x-1/2",
+            position === "left" && "top-1/2 -left-52 -translate-y-1/2",
+            position === "right" && "top-1/2 -right-52 -translate-y-1/2",
+        )}
+    >
+        <div className="absolute inset-0 bg-indigo-600 blur-lg opacity-50 -z-10 rounded-xl"></div>
+        {text}
+        <div className={cn(
+            "absolute w-3 h-3 bg-indigo-600 rotate-45",
+            position === "top" && "bottom-[-6px] left-1/2 -translate-x-1/2",
+            position === "bottom" && "top-[-6px] left-1/2 -translate-x-1/2",
+             position === "left" && "right-[-6px] top-1/2 -translate-y-1/2",
+             position === "right" && "left-[-6px] top-1/2 -translate-y-1/2",
+        )}></div>
+    </motion.div>
+)
+
+export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayRate = 0, initialBalancesData }: WalletsViewProps) {
     
+    // --- ESTADOS ---
     const [selectedWallet, setSelectedWallet] = useState<string>('cash_usd')
-    const [isExchangeModalOpen, setIsExchangeModalOpen] = useState(false)
-    const [isManualModalOpen, setIsManualModalOpen] = useState(false)
+    const [showTutorial, setShowTutorial] = useState(false)
     
-    const [exchangeForm, setExchangeForm] = useState({ 
-        origen: 'bank_bs', destino: 'cash_usd', montoSalida: '', montoEntrada: '', tasa: '' 
+    // Modales
+    const [isConfigModalOpen, setIsConfigModalOpen] = useState(false)
+    const [isManualModalOpen, setIsManualModalOpen] = useState(false)
+    const [isExchangeModalOpen, setIsExchangeModalOpen] = useState(false)
+
+    // Simulación de tasa ayer si no viene por props (para demo visual)
+    const prevRate = yesterdayRate || (rates.usd * 0.98); 
+
+    // Estado Saldos Iniciales
+    const [initialBalances, setInitialBalances] = useState({
+        cash_usd: initialBalancesData?.cash_usd || 0,
+        bank_bs: initialBalancesData?.bank_bs || 0,
+        zelle: initialBalancesData?.zelle || 0,
+        usdt: initialBalancesData?.usdt || 0,
     })
+    const [tempInitialBalances, setTempInitialBalances] = useState(initialBalances)
+
+    // Formulario de Cambio (Compra Divisas)
+    const [exchangeForm, setExchangeForm] = useState({ 
+        origen: 'bank_bs', 
+        destino: 'cash_usd', 
+        montoSalida: '', 
+        montoEntrada: '', 
+        tasa: rates.usd.toString(),
+        referencia: '' 
+    })
+    
+    // Formulario Manual / Cuadre
     const [manualForm, setManualForm] = useState({ 
-        tipo: 'INGRESO', billetera: 'cash_usd', monto: '', descripcion: '', fecha: new Date().toISOString().split('T')[0] 
+        mode: 'SIMPLE', tipo: 'INGRESO', billetera: 'cash_usd', monto: '', montoReal: '', descripcion: '', fecha: new Date().toISOString().split('T')[0] 
     })
 
-    // --- MOTOR DE CÁLCULO DE SALDOS ---
+    useEffect(() => {
+        if(initialBalancesData) {
+            setInitialBalances(initialBalancesData)
+            setTempInitialBalances(initialBalancesData)
+        }
+    }, [initialBalancesData])
+
+    // --- MOTOR DE CÁLCULO ---
     const walletBalances = useMemo(() => {
-        const balances: any = { cash_usd: 0, bank_bs: 0, zelle: 0, usdt: 0 };
+        const balances: any = { 
+            cash_usd: Number(initialBalances.cash_usd), 
+            bank_bs: Number(initialBalances.bank_bs), 
+            zelle: Number(initialBalances.zelle), 
+            usdt: Number(initialBalances.usdt) 
+        };
         const movements: any[] = [];
 
-        // 1. INGRESOS (Cobros de Órdenes)
+        // 0. Saldos Iniciales
+        Object.entries(initialBalances).forEach(([key, value]) => {
+            if (Number(value) > 0) {
+                movements.push({
+                    id: `init-${key}`, type: 'SALDO_INICIAL', wallet: key, amount: Number(value),
+                    description: 'Saldo Inicial Configurado', date: new Date('2024-01-01'), category: 'Ajuste'
+                });
+            }
+        });
+
+        // 1. Ingresos (CORREGIDO: key única con index)
         ordenes.forEach(o => {
-            (o.registroPagos || []).forEach((p: any) => {
+            (o.registroPagos || []).forEach((p: any, index: number) => {
                 const metodo = (p.metodo || p.paymentMethod || '').toLowerCase();
-                let targetWallet = 'cash_usd'; // Default: Efectivo
+                let targetWallet = 'cash_usd'; 
                 let amount = Number(p.montoUSD) || 0;
                 let originalCurrencyAmount = amount;
 
                 if (metodo.includes('movil') || metodo.includes('transferencia') || metodo.includes('bs')) {
                     targetWallet = 'bank_bs';
-                    // Si tenemos el monto en Bs real, lo usamos. Si no, calculamos con la tasa del momento.
                     const tasaRef = p.tasaBCV || rates.usd;
                     originalCurrencyAmount = (p.montoBs && Number(p.montoBs) > 0) ? Number(p.montoBs) : amount * tasaRef;
-                } else if (metodo.includes('zelle')) {
-                    targetWallet = 'zelle';
-                } else if (metodo.includes('binance') || metodo.includes('usdt')) {
-                    targetWallet = 'usdt';
-                }
+                } else if (metodo.includes('zelle')) targetWallet = 'zelle';
+                else if (metodo.includes('usdt')) targetWallet = 'usdt';
 
                 balances[targetWallet] += originalCurrencyAmount;
-                movements.push({
-                    id: `ingreso-${o.id}-${Math.random()}`,
-                    type: 'INGRESO',
-                    wallet: targetWallet,
-                    amount: originalCurrencyAmount,
-                    amountUSD: amount,
-                    description: `Cobro Orden #${o.ordenNumero} - ${o.cliente?.nombreRazonSocial || 'Cliente'}`,
-                    date: new Date(p.fecha || p.fechaPago || o.fecha),
-                    category: 'Venta'
+                
+                // FIX: Usamos index para asegurar ID único
+                movements.push({ 
+                    id: `in-${o.id}-${index}`, 
+                    type: 'INGRESO', wallet: targetWallet, amount: originalCurrencyAmount, 
+                    description: `Orden #${o.ordenNumero}`, date: new Date(p.fecha), category: 'Venta' 
                 });
             });
         });
 
-        // 2. EGRESOS (Insumos)
+        // 2. Gastos
         gastos.forEach(g => {
-            // Lógica simple: Si dice "Dolar" o "Efectivo" es Caja Chica, si no es Banco Bs.
             const metodo = (g.metodoPago || '').toLowerCase();
             let targetWallet = 'bank_bs'; 
             let amountUSD = Number(g.monto) || 0;
-            let amountWallet = amountUSD * rates.usd; // Default a Bs
-
-            if (metodo.includes('dolar') || metodo.includes('efectivo') || metodo.includes('cash')) {
-                targetWallet = 'cash_usd';
-                amountWallet = amountUSD;
-            } else if (metodo.includes('zelle')) {
-                targetWallet = 'zelle';
-                amountWallet = amountUSD;
-            }
+            let amountWallet = amountUSD * rates.usd; 
+            
+            if (metodo.includes('dolar') || metodo.includes('efectivo')) { targetWallet = 'cash_usd'; amountWallet = amountUSD; }
+            else if (metodo.includes('zelle')) { targetWallet = 'zelle'; amountWallet = amountUSD; }
+            else if (metodo.includes('usdt')) { targetWallet = 'usdt'; amountWallet = amountUSD; }
 
             balances[targetWallet] -= amountWallet;
-            movements.push({
-                id: `gasto-${g.id}`, 
-                type: 'EGRESO', 
-                wallet: targetWallet, 
-                amount: amountWallet,
-                amountUSD: amountUSD,
-                description: `Compra: ${g.nombre || g.descripcion || 'Materiales'}`, 
-                date: new Date(g.fecha), 
-                category: 'Insumo'
-            });
+            movements.push({ id: `out-${g.id}`, type: 'EGRESO', wallet: targetWallet, amount: amountWallet, description: g.nombre, date: new Date(g.fecha), category: 'Gasto' });
         });
 
-        // 3. EGRESOS (Nómina)
+        // 3. Nómina
         pagosEmpleados.forEach(p => {
-            // Asumimos efectivo si no hay data, o podrías agregar un campo de método en NóminaView
-            const targetWallet = 'cash_usd'; 
-            const amount = Number(p.totalUSD) || 0;
-            
-            balances[targetWallet] -= amount;
-             movements.push({
-                id: `nomina-${p.id}`, 
-                type: 'EGRESO', 
-                wallet: targetWallet, 
-                amount: amount,
-                amountUSD: amount,
-                description: `Nómina: ${p.nombre || 'Personal'}`, 
-                date: new Date(p.fechaPago || p.fecha), 
-                category: 'Nómina'
-            });
+            balances['cash_usd'] -= (Number(p.totalUSD) || 0);
+            movements.push({ id: `nom-${p.id}`, type: 'EGRESO', wallet: 'cash_usd', amount: Number(p.totalUSD), description: `Nómina: ${p.nombre}`, date: new Date(p.fechaPago), category: 'Nómina' });
         });
 
-        // Ordenar movimientos por fecha descendente
         movements.sort((a, b) => b.date.getTime() - a.date.getTime());
-
         return { balances, movements };
-    }, [ordenes, gastos, pagosEmpleados, rates]);
+    }, [ordenes, gastos, pagosEmpleados, rates, initialBalances]);
 
+    // --- INTELIGENCIA FINANCIERA ---
+    const rateAnalysis = useMemo(() => {
+        const diff = rates.usd - prevRate;
+        const percentChange = prevRate > 0 ? ((diff / prevRate) * 100) : 0;
+        const isRisk = percentChange > 2; // Alerta si sube más del 2%
+        
+        return { diff, percentChange, isRisk, trend: diff > 0 ? 'UP' : diff < 0 ? 'DOWN' : 'EQUAL' }
+    }, [rates.usd, prevRate]);
+
+    // --- LÓGICA CUADRE DE CAJA ---
+    const getWalletBalance = (walletId: string) => walletBalances.balances[walletId] || 0;
+    const calculatedDiff = useMemo(() => {
+        if (manualForm.mode !== 'CUADRE' || !manualForm.montoReal) return 0;
+        return parseFloat(manualForm.montoReal) - getWalletBalance(manualForm.billetera);
+    }, [manualForm.montoReal, manualForm.billetera, walletBalances]);
+
+    // --- HANDLERS ---
     const activeMovements = walletBalances.movements.filter((m:any) => m.wallet === selectedWallet);
-
-    const handleManualTransaction = () => {
-        alert("Función de ajuste manual. \n(Aquí conectaríamos con 'createTransaction' en Firebase)");
-        setIsManualModalOpen(false);
-    }
-    
-    const handleExchange = () => {
-        alert(`Cambio registrado: Salieron ${exchangeForm.montoSalida} de ${exchangeForm.origen} y entraron ${exchangeForm.montoEntrada} a ${exchangeForm.destino}`);
-        setIsExchangeModalOpen(false);
-    }
+    const handleSaveInit = () => { setInitialBalances(tempInitialBalances); setIsConfigModalOpen(false); }
+    const handleManual = () => { setIsManualModalOpen(false); alert("Ajuste Manual Guardado (Conectar a Firebase)"); }
+    const handleEx = () => { setIsExchangeModalOpen(false); alert("Compra de Divisas Registrada (Conectar a Firebase)"); }
 
     return (
-        <div className="space-y-8 p-2 font-sans pb-24 text-slate-800 dark:text-slate-100 animate-in fade-in duration-500">
+        <div className="space-y-6 p-2 font-sans pb-24 text-slate-800 dark:text-slate-100 animate-in fade-in duration-500 relative">
             
+            {/* ALERTA DE RIESGO */}
+            {rateAnalysis.isRisk && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} className="bg-rose-500 rounded-[2rem] p-6 text-white shadow-xl shadow-rose-500/20 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-10"><AlertTriangle size={120}/></div>
+                    <div className="relative z-10 flex items-start gap-4">
+                        <div className="bg-white/20 p-3 rounded-2xl animate-pulse"><Megaphone className="w-8 h-8 text-white"/></div>
+                        <div>
+                            <h3 className="text-xl font-black uppercase tracking-tight">¡Alerta de Devaluación!</h3>
+                            <p className="text-sm font-bold opacity-90 mt-1 max-w-xl">
+                                El dólar subió un <span className="bg-white text-rose-600 px-1 rounded mx-1">{rateAnalysis.percentChange.toFixed(2)}%</span>.
+                                Tus <span className="font-black underline decoration-white">Bs. {walletBalances.balances.bank_bs.toLocaleString()}</span> pierden valor.
+                            </p>
+                            <Button onClick={() => setIsExchangeModalOpen(true)} className="mt-4 bg-white text-rose-600 font-black uppercase tracking-widest hover:bg-rose-50 border-none shadow-lg">
+                                <ShieldAlert className="w-4 h-4 mr-2"/> Proteger Capital
+                            </Button>
+                        </div>
+                    </div>
+                </motion.div>
+            )}
+
             {/* HEADER */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative">
                 <div>
                     <h2 className="text-3xl font-black italic uppercase tracking-tighter flex items-center gap-3">
                         <Wallet className="w-8 h-8 text-blue-600" /> Billeteras <span className="text-slate-300">|</span> Tesorería
                     </h2>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Gestión de Flujo de Caja y Divisas</p>
+                    <div className="flex items-center gap-3 mt-1">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Tasa Hoy: {rates.usd} Bs/$</p>
+                        <Badge variant={rateAnalysis.trend === 'UP' ? 'destructive' : 'secondary'} className="h-5 text-[9px]">
+                            {rateAnalysis.trend === 'UP' ? 'Subió' : 'Bajó'} {Math.abs(rateAnalysis.diff).toFixed(2)} Bs vs Ayer
+                        </Badge>
+                    </div>
                 </div>
-                <div className="flex gap-3">
-                    <Button onClick={() => setIsManualModalOpen(true)} variant="outline" className="rounded-2xl border-slate-200 dark:border-white/10 font-bold uppercase text-[10px] tracking-wider gap-2">
-                        <Plus className="w-4 h-4" /> Ajuste Manual
-                    </Button>
-                    <Button onClick={() => setIsExchangeModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black uppercase text-[10px] tracking-wider gap-2 shadow-lg shadow-indigo-500/20">
-                        <RefreshCcw className="w-4 h-4" /> Comprar Divisas
-                    </Button>
-                </div>
-            </div>
-
-            {/* WALLET CARDS SCROLL */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 overflow-x-auto pb-4">
-                {WALLETS_CONFIG.map(wallet => (
-                    <WalletCard 
-                        key={wallet.id}
-                        config={wallet}
-                        balance={walletBalances.balances[wallet.id]}
-                        isActive={selectedWallet === wallet.id}
-                        onClick={() => setSelectedWallet(wallet.id)}
-                    />
-                ))}
-            </div>
-
-            {/* MAIN CONTENT SPLIT */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 
-                {/* LEFT: DETALLES & ESTADÍSTICAS DE LA WALLET SELECCIONADA */}
+                <div className="flex gap-2 relative">
+                    <AnimatePresence>{showTutorial && <TutorialTip text="Configura aquí tus saldos iniciales o usa los botones para acciones rápidas." position="bottom" />}</AnimatePresence>
+                    <Button onClick={() => setShowTutorial(!showTutorial)} variant={showTutorial ? "default" : "outline"} size="icon" className="rounded-xl border-slate-200 text-indigo-500">
+                        {showTutorial ? <X className="w-5 h-5"/> : <HelpCircle className="w-5 h-5" />}
+                    </Button>
+                    <Button onClick={() => setIsConfigModalOpen(true)} variant="ghost" size="icon" className="rounded-xl hover:bg-slate-100 text-slate-400"><Settings className="w-5 h-5" /></Button>
+                    <Button onClick={() => setIsManualModalOpen(true)} variant="outline" className="rounded-2xl border-slate-200 font-bold uppercase text-[10px] tracking-wider gap-2"><Plus className="w-4 h-4" /> Ajuste</Button>
+                    <Button onClick={() => setIsExchangeModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black uppercase text-[10px] tracking-wider gap-2 shadow-lg"><RefreshCcw className="w-4 h-4" /> Cambiar</Button>
+                </div>
+            </div>
+
+            {/* CARDS */}
+            <div className="relative">
+                <AnimatePresence>{showTutorial && <TutorialTip text="Mira tu tarjeta azul (Bs). Te muestra el equivalente en dólares automáticamente." position="top" />}</AnimatePresence>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 overflow-x-auto pb-4">
+                    {WALLETS_CONFIG.map(wallet => {
+                        const balance = walletBalances.balances[wallet.id];
+                        // Conversión automática para Bs a USD
+                        const secondaryValue = wallet.id === 'bank_bs' ? (balance / rates.usd) : null;
+                        return (
+                            <WalletCard 
+                                key={wallet.id} config={wallet} balance={balance} 
+                                isActive={selectedWallet === wallet.id} onClick={() => setSelectedWallet(wallet.id)}
+                                secondaryValue={secondaryValue} 
+                                rateAnalysis={wallet.id === 'bank_bs' ? rateAnalysis : null}
+                            />
+                        )
+                    })}
+                </div>
+            </div>
+
+            {/* MAIN CONTENT */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2 space-y-6">
                     <Card className="rounded-[2.5rem] border-none shadow-xl bg-white dark:bg-[#1c1c1e] overflow-hidden">
-                        <div className="p-8 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50/50 dark:bg-white/5">
-                            <div>
-                                <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Movimientos Recientes</p>
-                                <h3 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
-                                    {WALLETS_CONFIG.find(w => w.id === selectedWallet)?.label}
-                                </h3>
-                            </div>
-                            <div className="flex gap-2">
-                                <Button variant="ghost" size="icon" className="rounded-xl"><Filter className="w-4 h-4 text-slate-400"/></Button>
-                                <Button variant="ghost" size="icon" className="rounded-xl"><Search className="w-4 h-4 text-slate-400"/></Button>
-                            </div>
+                        <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                            <h3 className="text-2xl font-black italic uppercase tracking-tight">{WALLETS_CONFIG.find(w => w.id === selectedWallet)?.label}</h3>
+                            <Badge variant="outline" className="bg-white">Historial</Badge>
                         </div>
-
-                        <div className="p-4 max-h-[600px] overflow-y-auto custom-scrollbar space-y-3">
-                            {activeMovements.length > 0 ? activeMovements.map((mov: any) => (
+                        <div className="p-4 max-h-[500px] overflow-y-auto custom-scrollbar space-y-3">
+                            {activeMovements.map((mov: any) => (
                                 <MovementRow key={mov.id} movement={mov} currency={WALLETS_CONFIG.find(w => w.id === selectedWallet)?.currency || 'USD'} />
-                            )) : (
-                                <div className="py-20 text-center text-slate-400 flex flex-col items-center">
-                                    <History className="w-12 h-12 mb-4 opacity-20"/>
-                                    <p className="text-xs font-bold uppercase tracking-widest">Sin movimientos registrados</p>
-                                </div>
-                            )}
+                            ))}
+                            {activeMovements.length === 0 && <div className="py-10 text-center text-slate-400 text-xs font-bold uppercase">Sin movimientos</div>}
                         </div>
                     </Card>
                 </div>
-
-                {/* RIGHT: RESUMEN RAPIDO */}
+                
+                {/* RESUMEN PATRIMONIAL */}
                 <div className="space-y-6">
                     <Card className="rounded-[2.5rem] p-8 bg-gradient-to-br from-slate-900 to-slate-800 text-white shadow-2xl border-none relative overflow-hidden">
                         <div className="absolute top-0 right-0 p-10 opacity-10"><TrendingUp size={120} /></div>
-                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-70 mb-6">Patrimonio Líquido</h4>
-                        <div className="space-y-6 relative z-10">
-                            <div>
-                                <p className="text-xs font-bold opacity-60 uppercase mb-1">Total en Dólares (Caja + Zelle)</p>
-                                <p className="text-4xl font-black tracking-tighter">
-                                    {formatCurrency(walletBalances.balances.cash_usd + walletBalances.balances.zelle)}
-                                </p>
-                            </div>
-                            <div>
-                                <p className="text-xs font-bold opacity-60 uppercase mb-1">Total en Bolívares</p>
-                                <p className="text-2xl font-black tracking-tighter text-blue-300">
-                                    Bs. {walletBalances.balances.bank_bs.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
-                                </p>
-                            </div>
-                            <div className="pt-4 border-t border-white/10">
-                                <p className="text-[10px] font-bold opacity-50 uppercase mb-1">USDT (Crypto)</p>
-                                <p className="text-xl font-black tracking-tight text-orange-300">
-                                    {walletBalances.balances.usdt.toFixed(2)} USDT
-                                </p>
-                            </div>
-                        </div>
-                    </Card>
-
-                    <Card className="rounded-[2.5rem] p-6 bg-white dark:bg-[#1c1c1e] border-none shadow-lg">
-                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Acciones Rápidas</h4>
-                        <div className="grid grid-cols-2 gap-3">
-                            <Button onClick={() => setIsManualModalOpen(true)} variant="outline" className="h-20 rounded-2xl flex flex-col gap-2 hover:bg-emerald-50 hover:border-emerald-200 border-slate-100 shadow-sm group transition-all">
-                                <ArrowUpRight className="w-6 h-6 text-emerald-500 group-hover:scale-110 transition-transform"/>
-                                <span className="text-[9px] font-black uppercase text-emerald-700">Registrar<br/>Ingreso Extra</span>
-                            </Button>
-                            <Button onClick={() => setIsManualModalOpen(true)} variant="outline" className="h-20 rounded-2xl flex flex-col gap-2 hover:bg-rose-50 hover:border-rose-200 border-slate-100 shadow-sm group transition-all">
-                                <ArrowDownLeft className="w-6 h-6 text-rose-500 group-hover:scale-110 transition-transform"/>
-                                <span className="text-[9px] font-black uppercase text-rose-700">Registrar<br/>Gasto Vario</span>
-                            </Button>
+                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-70 mb-6">Total Real (USD)</h4>
+                        <div className="space-y-2 relative z-10">
+                            <p className="text-5xl font-black tracking-tighter">
+                                {formatCurrency(
+                                    walletBalances.balances.cash_usd + 
+                                    walletBalances.balances.zelle + 
+                                    walletBalances.balances.usdt + 
+                                    (walletBalances.balances.bank_bs / rates.usd)
+                                )}
+                            </p>
+                            <p className="text-[10px] font-bold opacity-50 uppercase">Sumando todas las cuentas</p>
                         </div>
                     </Card>
                 </div>
             </div>
 
-            {/* --- MODAL: COMPRA DE DIVISAS --- */}
-            <Dialog open={isExchangeModalOpen} onOpenChange={setIsExchangeModalOpen}>
+            {/* --- MODAL CONFIGURACIÓN DE SALDOS --- */}
+            <Dialog open={isConfigModalOpen} onOpenChange={setIsConfigModalOpen}>
+                <DialogContent className="rounded-[2.5rem] bg-white dark:bg-[#1c1c1e]">
+                    <DialogHeader><DialogTitle>Saldos Iniciales</DialogTitle></DialogHeader>
+                    <div className="py-4 space-y-4">
+                        <div className="space-y-1"><Label className="text-xs uppercase text-slate-400">Caja Chica ($)</Label>
+                        <Input type="number" className="rounded-xl bg-slate-50 border-none font-bold" value={tempInitialBalances.cash_usd} onChange={e=>setTempInitialBalances({...tempInitialBalances, cash_usd: +e.target.value})}/></div>
+                        <div className="space-y-1"><Label className="text-xs uppercase text-slate-400">Banco (Bs)</Label>
+                        <Input type="number" className="rounded-xl bg-slate-50 border-none font-bold" value={tempInitialBalances.bank_bs} onChange={e=>setTempInitialBalances({...tempInitialBalances, bank_bs: +e.target.value})}/></div>
+                        <div className="space-y-1"><Label className="text-xs uppercase text-slate-400">Zelle ($)</Label>
+                        <Input type="number" className="rounded-xl bg-slate-50 border-none font-bold" value={tempInitialBalances.zelle} onChange={e=>setTempInitialBalances({...tempInitialBalances, zelle: +e.target.value})}/></div>
+                        <div className="space-y-1"><Label className="text-xs uppercase text-slate-400">Binance (USDT)</Label>
+                        <Input type="number" className="rounded-xl bg-slate-50 border-none font-bold" value={tempInitialBalances.usdt} onChange={e=>setTempInitialBalances({...tempInitialBalances, usdt: +e.target.value})}/></div>
+                        <Button onClick={handleSaveInit} className="w-full h-12 bg-slate-900 text-white rounded-xl uppercase font-black">Guardar</Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+            
+            {/* --- MODAL AJUSTE / CUADRE --- */}
+             <Dialog open={isManualModalOpen} onOpenChange={setIsManualModalOpen}>
                 <DialogContent className="max-w-md rounded-[2.5rem] p-8 border-none bg-white dark:bg-[#1c1c1e] shadow-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-2xl font-black uppercase italic tracking-tighter flex items-center gap-3">
+                            {manualForm.mode === 'SIMPLE' ? 'Ajuste Manual' : 'Cuadre de Caja'}
+                        </DialogTitle>
+                    </DialogHeader>
+
+                    {/* TABS */}
+                    <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl mb-2">
+                        <button onClick={() => setManualForm({...manualForm, mode: 'SIMPLE', monto: '', montoReal: ''})}
+                            className={cn("flex-1 py-2 rounded-xl text-xs font-black uppercase transition-all", manualForm.mode === 'SIMPLE' ? "bg-white dark:bg-slate-700 shadow-sm text-slate-800 dark:text-white" : "text-slate-400 hover:text-slate-600")}>Movimiento</button>
+                        <button onClick={() => setManualForm({...manualForm, mode: 'CUADRE', monto: '', montoReal: ''})}
+                            className={cn("flex-1 py-2 rounded-xl text-xs font-black uppercase transition-all flex items-center justify-center gap-2", manualForm.mode === 'CUADRE' ? "bg-white dark:bg-slate-700 shadow-sm text-indigo-600" : "text-slate-400 hover:text-slate-600")}><Calculator className="w-3 h-3"/> Cuadre Total</button>
+                    </div>
+
+                    <div className="space-y-4 py-2">
+                        <Select value={manualForm.billetera} onValueChange={(v) => setManualForm({...manualForm, billetera: v})}>
+                            <SelectTrigger className="h-12 bg-slate-50 border-none rounded-xl"><SelectValue/></SelectTrigger>
+                            <SelectContent>{WALLETS_CONFIG.map(w => <SelectItem key={w.id} value={w.id}>{w.label}</SelectItem>)}</SelectContent>
+                        </Select>
+
+                        {manualForm.mode === 'SIMPLE' ? (
+                            <>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <Button variant={manualForm.tipo === 'INGRESO' ? 'default' : 'outline'} onClick={() => setManualForm({...manualForm, tipo: 'INGRESO'})} className={cn("rounded-xl font-black", manualForm.tipo === 'INGRESO' && "bg-emerald-600 text-white")}>Ingreso</Button>
+                                    <Button variant={manualForm.tipo === 'EGRESO' ? 'default' : 'outline'} onClick={() => setManualForm({...manualForm, tipo: 'EGRESO'})} className={cn("rounded-xl font-black", manualForm.tipo === 'EGRESO' && "bg-rose-600 text-white")}>Egreso</Button>
+                                </div>
+                                <Input type="number" placeholder="Monto" className="h-12 bg-slate-50 border-none rounded-xl font-bold" value={manualForm.monto} onChange={e => setManualForm({...manualForm, monto: e.target.value})} />
+                            </>
+                        ) : (
+                            <div className="bg-indigo-50 p-4 rounded-2xl space-y-3">
+                                <div className="flex justify-between text-xs font-bold text-slate-500"><span>Saldo Sistema:</span><span>{formatCurrency(getWalletBalance(manualForm.billetera))}</span></div>
+                                <Input type="number" placeholder="Saldo Real (Lo que tienes)" className="h-12 bg-white border-none rounded-xl font-black text-indigo-600" value={manualForm.montoReal} onChange={e => setManualForm({...manualForm, montoReal: e.target.value})} />
+                                {manualForm.montoReal && (
+                                    <div className={cn("p-2 rounded-lg text-center text-xs font-black", calculatedDiff < 0 ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700")}>
+                                        {calculatedDiff < 0 ? "Faltante (Crear Egreso)" : "Sobrante (Crear Ingreso)"}: {formatCurrency(Math.abs(calculatedDiff))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        <Input placeholder="Descripción" className="h-12 bg-slate-50 border-none rounded-xl" value={manualForm.descripcion} onChange={e => setManualForm({...manualForm, descripcion: e.target.value})} />
+                        <Button onClick={handleManual} className="w-full h-12 bg-slate-900 text-white rounded-xl uppercase font-black">Guardar</Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* --- MODAL CAMBIO DIVISAS: CALCULADORA REACTIVA --- */}
+            <Dialog open={isExchangeModalOpen} onOpenChange={setIsExchangeModalOpen}>
+                <DialogContent className="max-w-md rounded-[2.5rem] bg-white dark:bg-[#1c1c1e] shadow-2xl overflow-hidden">
                     <DialogHeader>
                         <DialogTitle className="text-2xl font-black uppercase italic tracking-tighter flex items-center gap-3">
                             <RefreshCcw className="text-indigo-600"/> Compra de Divisas
                         </DialogTitle>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">Registrar cambio de Bs a Divisa</p>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">Calculadora de Cambio Real</p>
                     </DialogHeader>
                     
-                    <div className="space-y-5 py-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label className="text-[10px] font-black uppercase text-slate-400">Sale de (Origen)</Label>
-                                <div className="h-12 bg-blue-50 dark:bg-blue-900/20 rounded-2xl flex items-center px-4 font-bold text-sm text-blue-700 border border-blue-100">
-                                    Banco Nacional
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[10px] font-black uppercase text-slate-400">Entra a (Destino)</Label>
-                                <Select value={exchangeForm.destino} onValueChange={(v) => setExchangeForm({...exchangeForm, destino: v})}>
-                                    <SelectTrigger className="h-12 rounded-2xl bg-slate-100 border-none font-bold text-xs"><SelectValue/></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="cash_usd">Caja Chica ($)</SelectItem>
-                                        <SelectItem value="zelle">Zelle</SelectItem>
-                                        <SelectItem value="usdt">Binance USDT</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                    <div className="py-4 space-y-5">
+                        {/* 1. SELECTOR DE DESTINO */}
+                        <div className="bg-slate-50 p-1 rounded-2xl flex items-center border border-slate-100">
+                            <div className="pl-4 pr-2 text-[10px] font-black uppercase text-slate-400">Destino:</div>
+                            <Select value={exchangeForm.destino} onValueChange={(v) => setExchangeForm({...exchangeForm, destino: v})}>
+                                <SelectTrigger className="h-10 bg-white border-none rounded-xl font-bold text-xs shadow-sm text-indigo-700 flex-1">
+                                    <SelectValue/>
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="cash_usd">💵 Caja Chica (Efectivo)</SelectItem>
+                                    <SelectItem value="zelle">🏛️ Zelle / Bofa</SelectItem>
+                                    <SelectItem value="usdt">🪙 Binance / USDT</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
 
-                        <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-3xl space-y-4 border border-slate-100 dark:border-white/10">
+                        <div className="grid grid-cols-2 gap-4">
+                            {/* 2. PRECIO DEL DÓLAR (TASA) */}
                             <div className="space-y-1">
-                                <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Monto en Bolívares (Pagado)</Label>
+                                <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Precio Compra (Tasa)</Label>
                                 <Input 
                                     type="number" 
-                                    placeholder="0.00" 
-                                    className="h-14 text-xl font-black bg-white dark:bg-black/20 border-none rounded-2xl"
-                                    value={exchangeForm.montoSalida}
+                                    className="h-12 bg-indigo-50 border-indigo-100 text-indigo-700 font-black rounded-xl text-center text-lg" 
+                                    placeholder="0.00"
+                                    value={exchangeForm.tasa}
                                     onChange={(e) => {
-                                        const bs = parseFloat(e.target.value) || 0;
-                                        const tasa = parseFloat(exchangeForm.tasa) || rates.usd;
-                                        setExchangeForm({...exchangeForm, montoSalida: e.target.value, montoEntrada: tasa > 0 ? (bs / tasa).toFixed(2) : ''})
+                                        const newRate = parseFloat(e.target.value);
+                                        const usd = parseFloat(exchangeForm.montoEntrada); 
+                                        const newBs = (usd && newRate) ? (usd * newRate).toFixed(2) : exchangeForm.montoSalida;
+                                        setExchangeForm({ ...exchangeForm, tasa: e.target.value, montoSalida: newBs });
                                     }}
                                 />
                             </div>
-                            
-                            <div className="flex items-center justify-center -my-2 relative z-10">
-                                <div className="bg-white dark:bg-slate-800 p-2 rounded-full shadow-sm border border-slate-100">
-                                    <ArrowRightLeft className="w-4 h-4 text-slate-400"/>
-                                </div>
-                            </div>
 
+                            {/* 3. DÓLARES OBTENIDOS (USD) */}
                             <div className="space-y-1">
-                                <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Monto Recibido (Divisa)</Label>
+                                <Label className="text-[9px] font-black uppercase text-emerald-600 ml-2">Dólares a Recibir ($)</Label>
                                 <Input 
                                     type="number" 
-                                    placeholder="0.00" 
-                                    className="h-14 text-xl font-black bg-white dark:bg-black/20 border-none rounded-2xl text-emerald-600"
+                                    className="h-12 bg-emerald-50 border-emerald-100 text-emerald-600 font-black rounded-xl text-center text-lg shadow-inner" 
+                                    placeholder="0.00"
                                     value={exchangeForm.montoEntrada}
-                                    onChange={(e) => setExchangeForm({...exchangeForm, montoEntrada: e.target.value})}
+                                    onChange={(e) => {
+                                        const newUSD = parseFloat(e.target.value);
+                                        const rate = parseFloat(exchangeForm.tasa);
+                                        const newBs = (newUSD && rate) ? (newUSD * rate).toFixed(2) : '';
+                                        setExchangeForm({ ...exchangeForm, montoEntrada: e.target.value, montoSalida: newBs });
+                                    }}
                                 />
                             </div>
                         </div>
 
-                        <div className="space-y-1">
-                             <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Tasa de Cambio Real</Label>
-                             <Input 
-                                type="number" 
-                                className="h-12 bg-slate-50 border-none rounded-2xl font-bold"
-                                placeholder={`Ref: ${rates.usd}`}
-                                value={exchangeForm.tasa}
-                                onChange={(e) => setExchangeForm({...exchangeForm, tasa: e.target.value})}
-                             />
+                        {/* FLECHA INDICADORA */}
+                        <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-slate-400 uppercase">
+                            <span>Total a Pagar</span>
+                            <ArrowDownLeft className="w-3 h-3" />
                         </div>
-                    </div>
 
-                    <DialogFooter>
-                        <Button onClick={handleExchange} className="w-full h-14 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest shadow-xl">
-                            Registrar Operación
+                        {/* 4. MONTO PAGADO (BS) */}
+                        <div className="space-y-1">
+                            <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Monto Salida (Bolívares)</Label>
+                            <Input 
+                                type="number" 
+                                className="h-14 bg-slate-100 border-none text-slate-800 font-black rounded-2xl text-xl px-4" 
+                                placeholder="0.00"
+                                value={exchangeForm.montoSalida}
+                                onChange={(e) => {
+                                    const newBs = parseFloat(e.target.value);
+                                    const rate = parseFloat(exchangeForm.tasa);
+                                    const newUSD = (newBs && rate) ? (newBs / rate).toFixed(2) : '';
+                                    setExchangeForm({ ...exchangeForm, montoSalida: e.target.value, montoEntrada: newUSD });
+                                }}
+                            />
+                        </div>
+
+                        {/* 5. NOTA O REFERENCIA */}
+                        <div className="space-y-1 pt-2">
+                            <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Nota / Referencia</Label>
+                            <Input 
+                                className="h-10 bg-white border border-slate-200 rounded-xl font-bold text-xs" 
+                                placeholder="Ej: Pago Móvil #123456 - Sr. Cambio"
+                                value={exchangeForm.referencia}
+                                onChange={(e) => setExchangeForm({...exchangeForm, referencia: e.target.value})}
+                            />
+                        </div>
+
+                        <Button onClick={handleEx} className="w-full h-14 bg-slate-900 hover:bg-black text-white rounded-2xl uppercase font-black tracking-widest shadow-xl mt-2 flex flex-col justify-center items-center gap-0">
+                            <span>Registrar Compra</span>
+                            <span className="text-[8px] font-normal opacity-70 normal-case">
+                                {exchangeForm.montoEntrada && exchangeForm.tasa 
+                                    ? `Ingresan $${exchangeForm.montoEntrada} a tasa ${exchangeForm.tasa}` 
+                                    : 'Completa los datos'}
+                            </span>
                         </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-             {/* --- MODAL: AJUSTE MANUAL --- */}
-             <Dialog open={isManualModalOpen} onOpenChange={setIsManualModalOpen}>
-                <DialogContent className="max-w-md rounded-[2.5rem] p-8 border-none bg-white dark:bg-[#1c1c1e] shadow-2xl">
-                    <DialogHeader>
-                        <DialogTitle className="text-2xl font-black uppercase italic tracking-tighter">Ajuste Manual</DialogTitle>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">Corregir saldo o registrar movimiento extra</p>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                         <div className="grid grid-cols-2 gap-4">
-                            <Button 
-                                variant={manualForm.tipo === 'INGRESO' ? 'default' : 'outline'}
-                                onClick={() => setManualForm({...manualForm, tipo: 'INGRESO'})}
-                                className={cn("rounded-2xl h-12 font-black uppercase", manualForm.tipo === 'INGRESO' ? "bg-emerald-600 hover:bg-emerald-700 border-none text-white" : "border-slate-200")}
-                            >Ingreso</Button>
-                            <Button 
-                                variant={manualForm.tipo === 'EGRESO' ? 'default' : 'outline'}
-                                onClick={() => setManualForm({...manualForm, tipo: 'EGRESO'})}
-                                className={cn("rounded-2xl h-12 font-black uppercase", manualForm.tipo === 'EGRESO' ? "bg-rose-600 hover:bg-rose-700 border-none text-white" : "border-slate-200")}
-                            >Egreso</Button>
-                         </div>
-                         
-                         <div className="space-y-1">
-                            <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Billetera Afectada</Label>
-                            <Select value={manualForm.billetera} onValueChange={(v) => setManualForm({...manualForm, billetera: v})}>
-                                <SelectTrigger className="h-12 rounded-2xl bg-slate-100 border-none font-bold text-xs"><SelectValue/></SelectTrigger>
-                                <SelectContent>
-                                    {WALLETS_CONFIG.map(w => <SelectItem key={w.id} value={w.id}>{w.label}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                         </div>
-
-                         <div className="space-y-1">
-                            <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Monto</Label>
-                            <Input type="number" className="h-14 text-xl font-black bg-slate-50 border-none rounded-2xl" placeholder="0.00" value={manualForm.monto} onChange={e => setManualForm({...manualForm, monto: e.target.value})} />
-                         </div>
-
-                         <div className="space-y-1">
-                            <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Descripción</Label>
-                            <Input className="h-12 font-bold bg-slate-50 border-none rounded-2xl" placeholder="Motivo del ajuste..." value={manualForm.descripcion} onChange={e => setManualForm({...manualForm, descripcion: e.target.value})} />
-                         </div>
-                    </div>
-                    <DialogFooter>
-                         <Button onClick={handleManualTransaction} className="w-full h-14 rounded-2xl bg-black text-white font-black uppercase tracking-widest">Guardar Ajuste</Button>
-                    </DialogFooter>
+                     </div>
                 </DialogContent>
             </Dialog>
         </div>
     )
 }
 
-function WalletCard({ config, balance, isActive, onClick }: any) {
+// --- SUBCOMPONENTES ---
+
+function WalletCard({ config, balance, isActive, onClick, secondaryValue, rateAnalysis }: any) {
     return (
-        <motion.div 
-            onClick={onClick}
-            whileHover={{ y: -5 }}
-            whileTap={{ scale: 0.98 }}
-            className={cn(
-                "min-w-[260px] p-6 rounded-[2.5rem] cursor-pointer transition-all border-2 relative overflow-hidden group",
-                isActive 
-                    ? `border-${config.color}-500/50 shadow-xl shadow-${config.color}-500/20 bg-white dark:bg-[#1c1c1e]` 
-                    : "border-transparent bg-white dark:bg-[#1c1c1e] hover:border-slate-200 shadow-sm"
-            )}
-        >
-            {/* Background decoration */}
+        <motion.div onClick={onClick} whileHover={{ y: -5 }} whileTap={{ scale: 0.98 }}
+            className={cn("min-w-[260px] p-6 rounded-[2.5rem] cursor-pointer transition-all border-2 relative overflow-hidden group",
+                isActive ? `border-${config.color}-500/50 shadow-xl shadow-${config.color}-500/20 bg-white` : "border-transparent bg-white hover:border-slate-200 shadow-sm")}>
             <div className={cn("absolute top-0 right-0 w-32 h-32 -mr-10 -mt-10 rounded-full opacity-10 transition-transform group-hover:scale-150", config.bg)} />
-            
             <div className="flex justify-between items-start mb-6 relative z-10">
-                <div className={cn("p-3 rounded-2xl text-white shadow-md", config.bg)}>
-                    {config.icon}
-                </div>
-                {isActive && <Badge className={cn("text-white border-none", config.bg)}>ACTIVO</Badge>}
+                <div className={cn("p-3 rounded-2xl text-white shadow-md", config.bg)}>{config.icon}</div>
+                {rateAnalysis?.isRisk && <div className="animate-bounce bg-rose-500 text-white p-1 rounded-full"><AlertTriangle size={16}/></div>}
             </div>
-            
             <div className="relative z-10">
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">{config.label}</p>
-                <h3 className="text-3xl font-black tracking-tighter text-slate-900 dark:text-white">
+                <h3 className="text-3xl font-black tracking-tighter text-slate-900">
                     {config.currency === 'USD' ? '$' : config.currency === 'USDT' ? '₮' : 'Bs.'}
                     {balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </h3>
+                {secondaryValue !== null && secondaryValue !== undefined && (
+                    <div className="mt-2 flex items-center gap-2">
+                        <Badge variant="secondary" className="bg-slate-100 text-slate-500 font-bold border-none text-[10px]">
+                            ≈ ${secondaryValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                        </Badge>
+                        {rateAnalysis && (
+                            <span className={cn("text-[9px] font-black uppercase", rateAnalysis.trend === 'UP' ? "text-rose-500" : "text-emerald-500")}>
+                                {rateAnalysis.trend === 'UP' ? '↘ Valor bajando' : '→ Estable'}
+                            </span>
+                        )}
+                    </div>
+                )}
             </div>
         </motion.div>
     )
 }
 
 function MovementRow({ movement, currency }: any) {
-    const isIncome = movement.type === 'INGRESO';
+    const isIncome = movement.type === 'INGRESO' || movement.type === 'SALDO_INICIAL';
+    const isInitial = movement.type === 'SALDO_INICIAL';
     return (
-        <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-white/5 rounded-[1.5rem] hover:bg-slate-100 transition-colors group border border-transparent hover:border-slate-200">
+        <div className="flex items-center justify-between p-4 bg-slate-50 rounded-[1.5rem] hover:bg-slate-100 transition-colors group border border-transparent hover:border-slate-200">
             <div className="flex items-center gap-4">
-                <div className={cn(
-                    "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors",
-                    isIncome ? "bg-emerald-100 text-emerald-600 group-hover:bg-emerald-200" : "bg-rose-100 text-rose-600 group-hover:bg-rose-200"
-                )}>
-                    {isIncome ? <ArrowDownLeft className="w-5 h-5" /> : <ArrowUpRight className="w-5 h-5" />}
+                <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors",
+                    isInitial ? "bg-slate-200 text-slate-600" : isIncome ? "bg-emerald-100 text-emerald-600 group-hover:bg-emerald-200" : "bg-rose-100 text-rose-600 group-hover:bg-rose-200")}>
+                    {isInitial ? <Landmark className="w-5 h-5"/> : isIncome ? <ArrowDownLeft className="w-5 h-5" /> : <ArrowUpRight className="w-5 h-5" />}
                 </div>
                 <div>
-                    <p className="text-xs font-bold text-slate-800 dark:text-white line-clamp-1">{movement.description}</p>
+                    <p className="text-xs font-bold text-slate-800 line-clamp-1">{movement.description}</p>
                     <div className="flex items-center gap-2 mt-0.5">
                         <Badge variant="secondary" className="text-[8px] font-black uppercase px-1.5 h-4 bg-white border-slate-200">{movement.category}</Badge>
                         <span className="text-[9px] font-bold text-slate-400">{movement.date.toLocaleDateString()}</span>
@@ -450,7 +538,7 @@ function MovementRow({ movement, currency }: any) {
                 </div>
             </div>
             <div className="text-right">
-                <p className={cn("text-base font-black tracking-tighter", isIncome ? "text-emerald-600" : "text-rose-600")}>
+                <p className={cn("text-base font-black tracking-tighter", isInitial ? "text-slate-600" : isIncome ? "text-emerald-600" : "text-rose-600")}>
                     {isIncome ? "+" : "-"}{movement.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </p>
                 <p className="text-[8px] font-bold text-slate-400 uppercase">{currency}</p>

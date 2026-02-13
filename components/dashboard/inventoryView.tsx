@@ -1,10 +1,11 @@
+// @/components/dashboard/inventoryView.tsx
 "use client"
 
 import React, { useState, useEffect, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { 
     Package, Plus, Minus, Search, ArrowUpRight, ArrowDownLeft, 
-    Box, History, MoreHorizontal, AlertTriangle, DollarSign
+    Box, Trash2, Pencil, X, AlertTriangle, DollarSign
 } from "lucide-react"
 
 // Importaciones de servicios
@@ -12,13 +13,14 @@ import {
     subscribeToInventory, 
     subscribeToMovements, 
     createInventoryItem,
-    registerMovement 
+    registerMovement,
+    deleteInventoryItem // <--- ASEGÚRATE DE IMPORTAR ESTO O CREARLO EN TU SERVICIO
 } from "@/lib/services/inventory-service"
 
 // UI Components (Shadcn)
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -28,31 +30,18 @@ const springConfig = { type: "spring", stiffness: 400, damping: 30 };
 // --- FUNCIÓN AUXILIAR DE FORMATEO DE FECHA ---
 const formatFecha = (fecha: any) => {
     if (!fecha) return "---";
-    
-    // Si es un Timestamp de Firebase (tiene la función toDate)
     if (fecha && typeof fecha.toDate === 'function') {
         return fecha.toDate().toLocaleString('es-VE', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', hour12: true
         });
     }
-    
-    // Si ya es un objeto Date de JS
     if (fecha instanceof Date) {
         return fecha.toLocaleString('es-VE', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', hour12: true
         });
     }
-
     return "Fecha inválida";
 };
 
@@ -62,6 +51,9 @@ export default function InventoryView() {
     const [movements, setMovements] = useState<any[]>([]);
     const [searchTerm, setSearchTerm] = useState("");
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    
+    // --- NUEVO ESTADO PARA MODO EDICIÓN ---
+    const [isEditMode, setIsEditMode] = useState(false);
 
     useEffect(() => {
         const unsubInv = subscribeToInventory(setItems);
@@ -90,14 +82,29 @@ export default function InventoryView() {
                         <p className="text-slate-500 font-bold text-[10px] tracking-widest opacity-60">SMR / CONTROL DE EXISTENCIAS</p>
                     </motion.div>
 
-                    <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
-                        <DialogTrigger asChild>
-                            <Button className="h-14 rounded-[1.8rem] bg-blue-600 hover:bg-blue-700 text-white font-black px-8 shadow-xl shadow-blue-500/20 gap-3 active:scale-95 transition-all">
-                                <Plus className="w-6 h-6" /> NUEVO PRODUCTO
-                            </Button>
-                        </DialogTrigger>
-                        <AddProductModal onClose={() => setIsAddModalOpen(false)} />
-                    </Dialog>
+                    <div className="flex items-center gap-3">
+                        {/* --- BOTÓN DE MODO EDICIÓN --- */}
+                        <Button 
+                            onClick={() => setIsEditMode(!isEditMode)}
+                            variant={isEditMode ? "destructive" : "outline"}
+                            className={cn(
+                                "h-14 rounded-[1.8rem] font-black px-6 gap-2 transition-all border-none shadow-lg",
+                                isEditMode ? "bg-red-500 hover:bg-red-600 text-white" : "bg-white dark:bg-white/10 text-slate-600 dark:text-white"
+                            )}
+                        >
+                            {isEditMode ? <X className="w-5 h-5" /> : <Pencil className="w-5 h-5" />}
+                            {isEditMode ? "FINALIZAR EDICIÓN" : "EDITAR"}
+                        </Button>
+
+                        <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+                            <DialogTrigger asChild>
+                                <Button className="h-14 rounded-[1.8rem] bg-blue-600 hover:bg-blue-700 text-white font-black px-8 shadow-xl shadow-blue-500/20 gap-3 active:scale-95 transition-all">
+                                    <Plus className="w-6 h-6" /> NUEVO
+                                </Button>
+                            </DialogTrigger>
+                            <AddProductModal onClose={() => setIsAddModalOpen(false)} />
+                        </Dialog>
+                    </div>
                 </header>
 
                 {/* STATS */}
@@ -132,9 +139,13 @@ export default function InventoryView() {
                         key={activeTab}
                         initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }}
                         transition={springConfig}
-                        className="bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] shadow-2xl shadow-black/[0.03] border border-black/5 overflow-hidden"
+                        className={cn(
+                            "bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] shadow-2xl shadow-black/[0.03] border overflow-hidden transition-colors duration-500",
+                            isEditMode && activeTab === 'stock' ? "border-red-500/30 ring-4 ring-red-500/10" : "border-black/5"
+                        )}
                     >
-                        {activeTab === 'stock' && <StockTable items={filteredItems} />}
+                        {/* PASAMOS EL MODO EDICIÓN A LA TABLA */}
+                        {activeTab === 'stock' && <StockTable items={filteredItems} isEditMode={isEditMode} />}
                         {activeTab === 'in' && <MovementTable data={movements.filter(m => m.tipo === 'ENTRADA')} color="emerald" />}
                         {activeTab === 'out' && <MovementTable data={movements.filter(m => m.tipo === 'SALIDA')} color="red" />}
                     </motion.div>
@@ -144,7 +155,8 @@ export default function InventoryView() {
     )
 }
 
-function StockTable({ items }: { items: any[] }) {
+// --- TABLA DE STOCK MODIFICADA PARA SOPORTAR EDICIÓN ---
+function StockTable({ items, isEditMode }: { items: any[], isEditMode: boolean }) {
     return (
         <div className="overflow-x-auto">
             <table className="w-full text-left">
@@ -174,8 +186,29 @@ function StockTable({ items }: { items: any[] }) {
                             <td className="px-8 py-6 text-right font-black text-blue-600">${Number(item.precio).toFixed(2)}</td>
                             <td className="px-8 py-6">
                                 <div className="flex justify-end gap-2">
-                                    <QuickAction item={item} type="ENTRADA" />
-                                    <QuickAction item={item} type="SALIDA" />
+                                    <AnimatePresence mode="wait">
+                                        {isEditMode ? (
+                                            <motion.div 
+                                                key="delete"
+                                                initial={{ opacity: 0, scale: 0.8 }} 
+                                                animate={{ opacity: 1, scale: 1 }} 
+                                                exit={{ opacity: 0, scale: 0.8 }}
+                                            >
+                                                <DeleteAction item={item} />
+                                            </motion.div>
+                                        ) : (
+                                            <motion.div 
+                                                key="actions"
+                                                initial={{ opacity: 0, scale: 0.8 }} 
+                                                animate={{ opacity: 1, scale: 1 }} 
+                                                exit={{ opacity: 0, scale: 0.8 }}
+                                                className="flex gap-2"
+                                            >
+                                                <QuickAction item={item} type="ENTRADA" />
+                                                <QuickAction item={item} type="SALIDA" />
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
                                 </div>
                             </td>
                         </tr>
@@ -183,6 +216,53 @@ function StockTable({ items }: { items: any[] }) {
                 </tbody>
             </table>
         </div>
+    )
+}
+
+// --- NUEVO COMPONENTE: ACCIÓN DE ELIMINAR ---
+function DeleteAction({ item }: { item: any }) {
+    const [open, setOpen] = useState(false);
+
+    const handleDelete = async () => {
+        try {
+            // AQUÍ LLAMAMOS A LA FUNCIÓN DEL SERVICIO
+            await deleteInventoryItem(item.id);
+            toast.success(`Producto "${item.nombre}" eliminado`, {
+                icon: <Trash2 className="text-red-500" />
+            });
+            setOpen(false);
+        } catch (e: any) { 
+            toast.error("Error al eliminar", { description: e.message });
+        }
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+                <Button variant="destructive" className="h-10 rounded-xl px-4 font-black text-xs bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/20">
+                    <Trash2 className="w-4 h-4 mr-2" /> ELIMINAR
+                </Button>
+            </DialogTrigger>
+            <DialogContent className="rounded-[2.5rem] p-8 max-w-sm border-none shadow-2xl bg-[#f2f2f7] dark:bg-[#1c1c1e]">
+                <DialogHeader>
+                    <div className="w-14 h-14 bg-red-100 dark:bg-red-900/20 rounded-2xl flex items-center justify-center mb-4 text-red-500 mx-auto">
+                        <AlertTriangle className="w-7 h-7" />
+                    </div>
+                    <DialogTitle className="text-2xl font-black italic uppercase text-center">¿Eliminar Producto?</DialogTitle>
+                    <DialogDescription className="text-center font-medium opacity-60 pt-2">
+                        Estás a punto de borrar permanentemente <br/>
+                        <span className="text-slate-900 dark:text-white font-black">"{item.nombre}"</span>. 
+                        <br/>Esta acción no se puede deshacer.
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="flex gap-2 mt-6">
+                    <Button variant="ghost" onClick={() => setOpen(false)} className="flex-1 h-12 rounded-xl font-bold">Cancelar</Button>
+                    <Button onClick={handleDelete} variant="destructive" className="flex-1 h-12 rounded-xl font-black bg-red-500 hover:bg-red-600">
+                        SÍ, ELIMINAR
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     )
 }
 
@@ -201,7 +281,6 @@ function MovementTable({ data, color }: { data: any[], color: 'emerald' | 'red' 
                 <tbody className="divide-y divide-black/5">
                     {data.map(m => (
                         <tr key={m.id}>
-                            {/* AQUÍ SE USA LA FUNCIÓN DE FORMATEO */}
                             <td className="px-8 py-6 text-[11px] font-bold opacity-60">
                                 {formatFecha(m.fecha)}
                             </td>
@@ -235,6 +314,7 @@ function QuickAction({ item, type }: { item: any, type: 'ENTRADA' | 'SALIDA' }) 
             });
             toast.success("Movimiento registrado");
             setOpen(false);
+            setVal({ qty: '', motivo: '', total: '' }); // Reset form
         } catch (e: any) { toast.error(e.message); }
     };
 

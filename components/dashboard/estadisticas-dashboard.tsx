@@ -154,19 +154,14 @@ export function EstadisticasDashboard({
 
   // --- HELPER PARA FECHAS DE PAGO (VERSIÓN BLINDADA) ---
   const getFechaRealPago = (c: any) => {
-      // 1. Buscamos la fecha más precisa disponible
-      // IMPORTANTE: 'fecha' es como se guarda dentro de 'registroPagos' en Firebase (según tu imagen)
       const raw = c.fecha || c.fechaRegistro || c.fechaPago || c.timestamp;
       
-      // 2. Si es Timestamp de Firebase
       if (raw && typeof raw.toDate === 'function') {
           return raw.toDate();
       }
       
-      // 3. Si encontramos una fecha válida
       if (raw) return new Date(raw);
 
-      // 4. FALLBACK: Si no hay fecha, usamos Date(0) para no contaminar el mes actual
       return new Date(0); 
   };
 
@@ -250,26 +245,24 @@ export function EstadisticasDashboard({
     return map;
   }, [ordenes]);
 
-  // --- TRANSACCIONES REALES (CORREGIDO: AÑADIDO registroPagos) ---
+  // --- TRANSACCIONES REALES ---
   const transaccionesReales = useMemo(() => {
       const list: any[] = [];
       
       ordenes.forEach(orden => {
           if (orden.estado === 'ANULADO') return;
 
-          // CORRECCIÓN: Ahora buscamos 'registroPagos' primero, que es el nombre real en Firebase
           const historial = (orden as any).registroPagos || (orden as any).historial || (orden as any).pagos || (orden as any).historialPagos || [];
 
           if (Array.isArray(historial) && historial.length > 0) {
-              // CASO 1: ORDEN CON HISTORIAL (Desglose real)
               historial.forEach((pago: any, index: number) => {
                   list.push({
-                      id: `${orden.id}_pago_${index}`, // ID único virtual
+                      id: `${orden.id}_pago_${index}`,
                       ordenId: orden.id,
                       ordenData: orden,
                       ordenNumero: orden.ordenNumero,
                       nombreCliente: orden.cliente?.nombreRazonSocial || "Cliente Desconocido",
-                      fechaReal: getFechaRealPago(pago), // Usa la fecha interna del pago (pago.fecha)
+                      fechaReal: getFechaRealPago(pago),
                       monto: Number(pago.montoUSD) || 0,
                       tipo: 'ABONO',
                       metodo: pago.metodo,
@@ -277,7 +270,6 @@ export function EstadisticasDashboard({
                   });
               });
           } else {
-              // CASO 2: FALLBACK PARA DATOS ANTIGUOS
               const cobroLegacy = cobranzas.find(c => c.id === orden.id);
               if (cobroLegacy && cobroLegacy.estado === 'pagado') {
                    list.push({
@@ -405,13 +397,12 @@ export function EstadisticasDashboard({
       return { actual, anterior, variacionM2, variacionMinutos };
   }, [ordenes, fechas]);
 
-  // --- CÁLCULO DE MÉTRICAS (CORREGIDO: USANDO transaccionesReales) ---
+  // --- CÁLCULO DE MÉTRICAS ---
   const metricas = useMemo(() => {
     const calcularRango = (inicio: Date, fin: Date) => {
         let ingresos = 0; let egresosDirectos = 0; let ordenesCount = 0;
         let gastosFijosPagados = 0; 
         
-        // CORRECCIÓN: Usamos transaccionesReales (abonos) en lugar de cobranzas (orden completa)
         transaccionesReales.filter(pago => {
             return pago.fechaReal >= inicio && pago.fechaReal <= fin;
         }).forEach(pago => {
@@ -592,7 +583,7 @@ export function EstadisticasDashboard({
       return { totalDeuda, deudaCorriente, deudaCritica, topClientesDeuda };
   }, [ordenes, viewMode, orderBreakdown]);
 
-  // --- 7. GRÁFICOS (CORREGIDO: USANDO transaccionesReales) ---
+  // --- 7. GRÁFICOS ---
   const chartData = useMemo(() => {
     const map = new Map();
     const year = fechaReferencia.getFullYear();
@@ -621,7 +612,6 @@ export function EstadisticasDashboard({
         map.set(i, { day: i, label, ingresos: 0, gastos: 0 });
     }
 
-    // AQUI ESTABA EL PROBLEMA: Ahora usamos transaccionesReales
     transaccionesReales.filter(pago => {
         return pago.fechaReal >= fechas.inicio && pago.fechaReal <= fechas.fin;
     }).forEach(pago => {
@@ -719,7 +709,6 @@ export function EstadisticasDashboard({
       const day = data.activePayload[0].payload.day;
       const targetDate = new Date(fechaReferencia.getFullYear(), fechaReferencia.getMonth(), day);
 
-      // INGRESOS: Filtramos los ABONOS REALES de ese día
       const ingresosDelDia = transaccionesReales.filter(pago => {
           return pago.fechaReal.getDate() === day && 
                  pago.fechaReal.getMonth() === fechaReferencia.getMonth() && 
@@ -732,7 +721,6 @@ export function EstadisticasDashboard({
           
           return {
               id: pago.id,
-              // Mostramos más detalle: si es abono o legacy
               descripcion: `${pago.tipo === 'ABONO' ? 'Abono' : 'Cobro'} - Orden #${pago.ordenNumero || 'S/N'} - ${pago.nombreCliente}`,
               monto: monto,
               tipo: "Ingreso",
@@ -837,7 +825,7 @@ export function EstadisticasDashboard({
           const insumos = (gastosInsumos || []).filter(g => {
               if(!filtroFecha(g.fecha)) return false;
               const cat = (g.categoria || "").toLowerCase();
-              if (cat === 'gasto fijo' || cat === 'servicios' || cat === 'alquiler') return false; // Excluir fijos
+              if (cat === 'gasto fijo' || cat === 'servicios' || cat === 'alquiler') return false; 
 
               const areaExplicita = (g as any).area;
               const texto = ((g as any).nombre || g.descripcion || "").toLowerCase();
@@ -890,7 +878,6 @@ export function EstadisticasDashboard({
           return { insumos, fijos, nomina, disenoItems };
       }
       if (selectedDetail === 'INGRESOS') {
-          // CORRECCIÓN: Usar transaccionesReales en lugar de cobranzas
           return transaccionesReales.filter(pago => {
                   return pago.fechaReal >= fechas.inicio && pago.fechaReal <= fechas.fin;
               }).map(pago => {
@@ -918,8 +905,8 @@ export function EstadisticasDashboard({
       ref={dashboardRef}
     >
       
-      {/* HEADER DE CONTROL */}
-      <motion.div variants={itemVariants} className="flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4 sm:gap-6 bg-white dark:bg-[#1c1c1e] p-4 sm:p-5 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-black/5 hover:shadow-lg transition-shadow">
+      {/* HEADER DE CONTROL (ID AGREGADO) */}
+      <motion.div id="stats-header" variants={itemVariants} className="flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4 sm:gap-6 bg-white dark:bg-[#1c1c1e] p-4 sm:p-5 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-black/5 hover:shadow-lg transition-shadow">
         <div className="flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
             <motion.div whileHover={{ rotate: 360, transition: { duration: 0.5 } }} className="p-3 bg-slate-100 dark:bg-white/5 rounded-2xl hidden sm:block">
                 <BarChart3 className="w-6 h-6 text-slate-600 dark:text-slate-300" />
@@ -1123,8 +1110,8 @@ export function EstadisticasDashboard({
         )}
       </AnimatePresence>
 
-      {/* KPI PRINCIPALES */}
-      <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+      {/* KPI PRINCIPALES (ID AGREGADO) */}
+      <motion.div id="financial-kpis" variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         <StatCard 
             label="Ingresos Totales" 
             value={metricas.actual.ingresos} 
@@ -1210,7 +1197,8 @@ export function EstadisticasDashboard({
             </Card>
           </motion.div>
 
-          <motion.div variants={itemVariants} className="lg:col-span-2">
+          {/* GRÁFICO PRINCIPAL (ID AGREGADO) */}
+          <motion.div id="main-chart-section" variants={itemVariants} className="lg:col-span-2">
             <Card className="p-6 sm:p-8 rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm relative overflow-hidden h-full">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                     <div className="flex items-center gap-3">
@@ -1272,7 +1260,7 @@ export function EstadisticasDashboard({
       </motion.div>
 
       {/* DEUDA AGRUPADA POR CLIENTE */}
-      <motion.div variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <motion.div id="debt-analysis-section" variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <motion.div variants={itemVariants} whileHover={hoverEffect}>
             <Card className="p-6 sm:p-8 rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col relative overflow-hidden h-full">
                 <h3 className="text-lg font-black uppercase italic mb-6 flex items-center gap-2">

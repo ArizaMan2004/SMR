@@ -39,15 +39,19 @@ import { PaymentAuditView } from "@/components/dashboard/PaymentAuditView"
 // Componentes Administrativos
 import { GastosFijosView } from "@/components/dashboard/gastos-fijos-view"
 import { InsumosView } from "@/components/dashboard/InsumosView"
+import InventoryView from "@/components/dashboard/inventoryView" 
 import { EmpleadosView } from "@/components/dashboard/empleados-view"
 import { EstadisticasDashboard } from "@/components/dashboard/estadisticas-dashboard"
 import { NotificationCenterExpenses, type NotificationGasto } from "@/components/dashboard/notification-center-expenses"
+
+// Controlador del Tutorial
+import { startTour } from "@/components/dashboard/TutorialController" 
 
 // Iconos
 import { 
     Plus, CheckCircle, Calculator, LayoutDashboard, FileSpreadsheet, Clock, 
     Building2, Bell, CheckCircle2, ChevronLeft, Menu, DollarSign, Euro, Coins, 
-    Wallet, Package, Search 
+    Wallet, Package, Search, HelpCircle 
 } from "lucide-react" 
 
 // Servicios
@@ -151,6 +155,7 @@ export default function Dashboard() {
                 { id: 'design_production', label: 'Pago Diseños' },
                 { id: 'fixed_expenses', label: 'Gastos Fijos' },
                 { id: 'insumos_mgmt', label: 'Insumos y Materiales' },
+                { id: 'inventory_general', label: 'Inventario General' },
                 { id: 'employees_mgmt', label: 'Gestión de Personal' },
 
             ]
@@ -429,17 +434,30 @@ export default function Dashboard() {
 
     return (
       <div className="flex h-screen bg-[#f2f2f7] dark:bg-black overflow-hidden relative font-sans text-slate-900 dark:text-white">
-        <Sidebar 
-            activeView={activeView} 
-            setActiveView={setActiveView as any} 
-            navItems={navItems as any} 
-            onLogout={logout} 
-            isMobileOpen={isSidebarOpen} 
-            setIsMobileOpen={setIsSidebarOpen} 
-        />
+        
+        {/* SIDEBAR CON ID PARA TUTORIAL */}
+        <div 
+            id="main-sidebar" 
+            className={cn(
+                "fixed top-0 left-0 h-full z-40 transition-all duration-300", 
+                isSidebarOpen ? "w-72" : "w-0 lg:w-20"
+            )}
+        >
+            <Sidebar 
+                activeView={activeView} 
+                setActiveView={setActiveView as any} 
+                navItems={navItems as any} 
+                onLogout={logout} 
+                isMobileOpen={isSidebarOpen} 
+                setIsMobileOpen={setIsSidebarOpen} 
+            />
+            {/* Capa invisible para asegurar que Driver.js detecte el área correcta */}
+            <div className="absolute inset-0 pointer-events-none" />
+        </div>
         
         <div className={cn("flex-1 flex flex-col relative transition-all duration-700 min-w-0 overflow-hidden", isSidebarOpen ? "lg:pl-72" : "lg:pl-0")}>
-          <header className="sticky top-0 flex items-center justify-between px-4 sm:px-6 py-4 border-b border-black/5 dark:border-white/5 bg-white/60 dark:bg-black/60 backdrop-blur-2xl z-50 w-full overflow-hidden">
+          
+          <header id="dashboard-header" className="sticky top-0 flex items-center justify-between px-4 sm:px-6 py-4 border-b border-black/5 dark:border-white/5 bg-white/60 dark:bg-black/60 backdrop-blur-2xl z-50 w-full overflow-hidden">
             <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
                 <Button variant="ghost" size="icon" className="h-10 w-10 rounded-2xl bg-black/5 dark:bg-white/10 shrink-0" onClick={() => setIsSidebarOpen(!isSidebarOpen)}><Menu className="h-5 w-5" /></Button>
                 <h2 className="text-lg sm:text-xl font-bold tracking-tight italic uppercase truncate max-w-[150px] sm:max-w-none">
@@ -449,17 +467,31 @@ export default function Dashboard() {
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
-                <div className="hidden lg:flex items-center gap-2">
+                <div id="tasas-container" className="hidden lg:flex items-center gap-2">
                     <TasaHeaderBadge label="USD" value={currentBcvRate} icon={<DollarSign className="w-3.5 h-3.5" />} color="emerald" onClick={() => handleUpdateRate("USD")} />
                     <TasaHeaderBadge label="EUR" value={eurRate} icon={<Euro className="w-3.5 h-3.5" />} color="blue" onClick={() => handleUpdateRate("EUR")} />
                     <TasaHeaderBadge label="USDT" value={parallelRate} icon={<Coins className="w-3.5 h-3.5" />} color="orange" onClick={() => handleUpdateRate("USDT")} />
                 </div>
                 
+                {/* BOTÓN TUTORIAL CORREGIDO */}
+                <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="rounded-2xl bg-blue-500/10 h-10 w-10 text-blue-600 hover:bg-blue-500 hover:text-white transition-colors" 
+                    
+                    // CORRECCIÓN CRÍTICA: Se pasa activeView a startTour
+                    onClick={() => startTour(activeView)} 
+                    
+                    title="Ver Tutorial"
+                >
+                    <HelpCircle className="h-5 w-5" />
+                </Button>
+
                 <Button variant="ghost" size="icon" className="rounded-2xl bg-orange-500/10 h-10 w-10 text-orange-600" onClick={() => setIsExpenseNotiOpen(true)}>
                     <Clock className="h-5 w-5" />
                 </Button>
 
-                <div className="relative">
+                <div id="notification-bell" className="relative">
                     <Button variant="ghost" size="icon" className="rounded-2xl bg-black/5 dark:bg-white/10 h-10 w-10 relative" onClick={() => { setIsNotiOpen(true); setHasUnseenNotifications(false); }}>
                         <Bell className="h-5 w-5" />
                         {(hasUnseenNotifications || allNotifications.some(n => !n.isRead)) && <motion.span layoutId="notification-dot" className="absolute top-2.5 right-2.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white dark:border-black" />}
@@ -491,7 +523,7 @@ export default function Dashboard() {
                 
                 {activeView === "orders" && (
                     <div className="max-w-7xl mx-auto space-y-6 md:space-y-8">
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6 w-full">
+                        <div id="stats-grid" className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6 w-full">
                             <StatCard label="Total Órdenes" value={billingStats.total} icon={<FileSpreadsheet />} color="blue" subtext="Histórico" />
                             <StatCard label="Cuentas por Cobrar" value={billingStats.pendientes} icon={<Wallet />} color="orange" subtext="Saldo pendiente" />
                             <StatCard label="Pagadas Total" value={billingStats.pagadas} icon={<CheckCircle2 />} color="green" subtext="Liquidadas" className="col-span-2 md:col-span-1" />
@@ -502,7 +534,7 @@ export default function Dashboard() {
                                 <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 opacity-20" />
                                 <input type="text" placeholder="Buscar orden o cliente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-6 py-3 bg-white dark:bg-black/20 border border-black/5 rounded-[1.8rem] text-sm outline-none" />
                             </div>
-                            <Button onClick={() => { setEditingOrder(null); setIsWizardOpen(true); }} className="px-8 py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-[1.8rem] font-bold text-sm gap-3 shrink-0"><Plus /> NUEVA ORDEN</Button>
+                            <Button id="btn-new-order" onClick={() => { setEditingOrder(null); setIsWizardOpen(true); }} className="px-8 py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-[1.8rem] font-bold text-sm gap-3 shrink-0"><Plus /> NUEVA ORDEN</Button>
                         </div>
                         <div className="bg-white dark:bg-[#1c1c1e] rounded-[2rem] border border-black/5 shadow-2xl overflow-hidden">
                             <OrdersTable 
@@ -547,6 +579,31 @@ export default function Dashboard() {
                     />
                 )}
 
+                {/* --- NUEVA VISTA RENDERIZADA AQUÍ --- */}
+                {activeView === "inventory_general" && (
+                    <InventoryView />
+                )}
+
+                {/* --- VISTA DE ESTADÍSTICAS FINANCIERAS --- */}
+                {activeView === "financial_stats" && (
+                    <EstadisticasDashboard 
+                        gastosInsumos={gastos as any} 
+                        gastosFijos={gastosFijos} 
+                        empleados={empleados} 
+                        pagosEmpleados={pagos} 
+                        cobranzas={ordenes.map(o => ({
+                            id: o.id, 
+                            montoUSD: (o as any).totalUSD || 0, 
+                            montoBs: (o as any).totalBs || 0,
+                            estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente',
+                            fecha: o.fecha
+                        })) as any}
+                        ordenes={ordenes}
+                        clientes={clientes}
+                        rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
+                    />
+                )}
+
                 {activeView === "employees_mgmt" && (
                     <EmpleadosView 
                         empleados={empleados} 
@@ -568,28 +625,8 @@ export default function Dashboard() {
                 {activeView === "payment_audit" && (
                     <PaymentAuditView 
                         ordenes={ordenes} 
-                        // --- AQUÍ ESTÁ LA SOLUCIÓN DEL CERO ---
                         gastos={[...gastos, ...gastosFijos]} 
                         pagosEmpleados={pagos} 
-                    />
-                )}
-
-                {activeView === "financial_stats" && (
-                    <EstadisticasDashboard 
-                        gastosInsumos={gastos as any} 
-                        gastosFijos={gastosFijos} 
-                        empleados={empleados} 
-                        pagosEmpleados={pagos} 
-                        cobranzas={ordenes.map(o => ({
-                            id: o.id, 
-                            montoUSD: (o as any).totalUSD || 0, 
-                            montoBs: (o as any).totalBs || 0,
-                            estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente',
-                            fecha: o.fecha
-                        })) as any}
-                        ordenes={ordenes}
-                        clientes={clientes}
-                        rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
                     />
                 )}
 
