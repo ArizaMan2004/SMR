@@ -6,6 +6,7 @@ import {
     Wand2, Upload, Image as ImageIcon, Download, 
     RefreshCw, Layers, Sparkles, CheckCircle2, X 
 } from "lucide-react"
+// Importación correcta
 import { removeBackground, Config } from "@imgly/background-removal"
 
 import { Card } from "@/components/ui/card"
@@ -39,17 +40,18 @@ export function BackgroundRemoverView() {
         if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0])
     }
 
+    // --- PROCESO DE ELIMINACIÓN DE FONDO ---
     const processImage = async () => {
         if (!imageSrc) return
+
         setIsProcessing(true)
         setProgress(0)
         const startTime = Date.now()
 
         try {
+            // CONFIGURACIÓN CORREGIDA: MODO CDN (INTERNET)
+            // Al no poner 'publicPath', la librería descarga los modelos faltantes automáticamente.
             const config: Config = {
-                // ESTA LÍNEA ES LA CLAVE: Apunta a tu carpeta existente
-                publicPath: '/ai-assets/', 
-                
                 model: 'medium',
                 output: { format: 'image/png', quality: 0.8 },
                 progress: (key: string, current: number, total: number) => {
@@ -64,7 +66,7 @@ export function BackgroundRemoverView() {
             setProcessTime((Date.now() - startTime) / 1000)
         } catch (error) {
             console.error("Error IA:", error)
-            alert("Error al procesar. Verifica la consola para más detalles.")
+            alert("Error al procesar. Revisa tu conexión a internet (descargando modelos).")
         } finally {
             setIsProcessing(false)
             setProgress(0)
@@ -85,6 +87,7 @@ export function BackgroundRemoverView() {
 
     return (
         <div className="space-y-8 p-2 font-sans pb-24 text-slate-800 dark:text-slate-100 animate-in fade-in duration-500">
+            {/* HEADER */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h2 className="text-3xl font-black italic uppercase tracking-tighter flex items-center gap-3">
@@ -94,7 +97,10 @@ export function BackgroundRemoverView() {
                 </div>
             </div>
 
+            {/* MAIN AREA */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 min-h-[500px]">
+                
+                {/* 1. UPLOAD ZONE */}
                 <Card className={cn("rounded-[2.5rem] border-2 border-dashed relative overflow-hidden flex flex-col justify-center items-center text-center transition-all duration-300", dragActive ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20" : "border-slate-200 dark:border-white/10 bg-white dark:bg-[#1c1c1e]", imageSrc ? "border-solid border-transparent p-0" : "p-12 hover:border-slate-300")}>
                     {!imageSrc ? (
                         <div className="w-full h-full flex flex-col items-center justify-center cursor-pointer" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} onClick={() => fileInputRef.current?.click()}>
@@ -118,6 +124,7 @@ export function BackgroundRemoverView() {
                     )}
                 </Card>
 
+                {/* 2. RESULT ZONE */}
                 <Card className="rounded-[2.5rem] bg-slate-50 dark:bg-[#1c1c1e] border-none shadow-inner relative overflow-hidden flex flex-col">
                     <div className="absolute top-0 left-0 w-full p-6 z-10 flex justify-between items-start">
                         <Badge variant="outline" className="bg-white/50 backdrop-blur-md border-none font-black uppercase text-[10px] tracking-widest">Resultado</Badge>
@@ -128,6 +135,7 @@ export function BackgroundRemoverView() {
                             <div className="text-center">
                                 <div className="relative w-24 h-24 mx-auto mb-4"><div className="absolute inset-0 rounded-full border-4 border-indigo-100"></div><div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin"></div><Sparkles className="absolute inset-0 m-auto text-indigo-600 animate-pulse"/></div>
                                 <p className="text-xs font-black uppercase tracking-widest text-indigo-600 animate-pulse">La IA está trabajando...</p>
+                                <p className="text-[10px] font-bold text-slate-400 mt-1">Descargando recursos (primera vez)...</p>
                             </div>
                         ) : processedImage ? (
                             <motion.img initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} src={processedImage} alt="Processed" className="max-w-full max-h-[400px] object-contain drop-shadow-2xl" />
