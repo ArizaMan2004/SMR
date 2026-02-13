@@ -13,12 +13,6 @@ import { doc, updateDoc, arrayUnion } from "firebase/firestore"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { toast } from "sonner" 
 
 // Componentes SMR/Siskoven
@@ -36,6 +30,9 @@ import { WalletsView } from "@/components/dashboard/WalletsView"
 import { PaymentEditModal } from "@/components/dashboard/PaymentEditModal"
 import { PaymentAuditView } from "@/components/dashboard/PaymentAuditView"
 
+// --- NUEVA IMPORTACIÓN: VISTA DE IA ---
+import { BackgroundRemoverView } from "@/components/dashboard/BackgroundRemoverView"
+
 // Componentes Administrativos
 import { GastosFijosView } from "@/components/dashboard/gastos-fijos-view"
 import { InsumosView } from "@/components/dashboard/InsumosView"
@@ -51,7 +48,7 @@ import { startTour } from "@/components/dashboard/TutorialController"
 import { 
     Plus, CheckCircle, Calculator, LayoutDashboard, FileSpreadsheet, Clock, 
     Building2, Bell, CheckCircle2, ChevronLeft, Menu, DollarSign, Euro, Coins, 
-    Wallet, Package, Search, HelpCircle 
+    Wallet, Search, HelpCircle, Sparkles // Agregué Sparkles para el icono de IA
 } from "lucide-react" 
 
 // Servicios
@@ -127,7 +124,7 @@ export default function Dashboard() {
     const [pagos, setPagos] = useState<PagoEmpleado[]>([]) 
     const [clientes, setClientes] = useState<any[]>([])
 
-    // --- 3. NAV ITEMS ---
+    // --- 3. NAV ITEMS (ACTUALIZADO CON IA TOOLS) ---
     const navItems = useMemo(() => [
         { id: 'orders', label: 'Facturación', icon: <LayoutDashboard className="w-4 h-4" /> }, 
         { 
@@ -167,6 +164,8 @@ export default function Dashboard() {
             children: [
                 { id: 'calculator', label: 'Presupuestos' },
                 { id: 'old_calculator', label: 'Calculadora de Producción' }, 
+                // AQUÍ ESTÁ LA NUEVA VISTA
+                { id: 'ai_background', label: 'IA Quita Fondos' }, 
             ]
         },
     ], []);
@@ -277,7 +276,6 @@ export default function Dashboard() {
         } catch (error) { console.error(error); }
     }, [currentUserId]);
 
-    // --- FUNCIÓN PRINCIPAL DE REGISTRO DE PAGOS (FIREBASE) ---
     const handleRegisterOrderPayment = async (
         ordenId: string, 
         monto: number, 
@@ -435,7 +433,7 @@ export default function Dashboard() {
     return (
       <div className="flex h-screen bg-[#f2f2f7] dark:bg-black overflow-hidden relative font-sans text-slate-900 dark:text-white">
         
-        {/* SIDEBAR CON ID PARA TUTORIAL */}
+        {/* SIDEBAR */}
         <div 
             id="main-sidebar" 
             className={cn(
@@ -451,7 +449,6 @@ export default function Dashboard() {
                 isMobileOpen={isSidebarOpen} 
                 setIsMobileOpen={setIsSidebarOpen} 
             />
-            {/* Capa invisible para asegurar que Driver.js detecte el área correcta */}
             <div className="absolute inset-0 pointer-events-none" />
         </div>
         
@@ -473,17 +470,7 @@ export default function Dashboard() {
                     <TasaHeaderBadge label="USDT" value={parallelRate} icon={<Coins className="w-3.5 h-3.5" />} color="orange" onClick={() => handleUpdateRate("USDT")} />
                 </div>
                 
-                {/* BOTÓN TUTORIAL CORREGIDO */}
-                <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="rounded-2xl bg-blue-500/10 h-10 w-10 text-blue-600 hover:bg-blue-500 hover:text-white transition-colors" 
-                    
-                    // CORRECCIÓN CRÍTICA: Se pasa activeView a startTour
-                    onClick={() => startTour(activeView)} 
-                    
-                    title="Ver Tutorial"
-                >
+                <Button variant="ghost" size="icon" className="rounded-2xl bg-blue-500/10 h-10 w-10 text-blue-600 hover:bg-blue-500 hover:text-white transition-colors" onClick={() => startTour(activeView)} title="Ver Tutorial">
                     <HelpCircle className="h-5 w-5" />
                 </Button>
 
@@ -521,6 +508,7 @@ export default function Dashboard() {
             <AnimatePresence mode="wait">
               <motion.div key={activeView} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={springConfig} className="h-full">
                 
+                {/* --- VISTA: ÓRDENES (DEFAULT) --- */}
                 {activeView === "orders" && (
                     <div className="max-w-7xl mx-auto space-y-6 md:space-y-8">
                         <div id="stats-grid" className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6 w-full">
@@ -579,12 +567,10 @@ export default function Dashboard() {
                     />
                 )}
 
-                {/* --- NUEVA VISTA RENDERIZADA AQUÍ --- */}
                 {activeView === "inventory_general" && (
                     <InventoryView />
                 )}
 
-                {/* --- VISTA DE ESTADÍSTICAS FINANCIERAS --- */}
                 {activeView === "financial_stats" && (
                     <EstadisticasDashboard 
                         gastosInsumos={gastos as any} 
@@ -641,6 +627,7 @@ export default function Dashboard() {
                         selloBase64={assets.sello} handleSelloUpload={(e: any) => handleFileUpload(e, 'sello')} handleClearSello={() => handleClearAsset('sello')}
                     />
                 )}
+                
                 {activeView.startsWith("tasks_") && <TasksView ordenes={ordenes} currentUserId={currentUserId || ""} areaPriorizada={activeView.replace("tasks_", "")} />}
                 {activeView === "design_production" && <DesignerPayrollView designers={designers} ordenes={ordenes} bcvRate={currentBcvRate} />}
                 
@@ -657,6 +644,11 @@ export default function Dashboard() {
                 
                 {activeView === "old_calculator" && (
                     <CalculatorView onSendToProduction={handleSendCalcToOrder} />
+                )}
+
+                {/* --- NUEVA VISTA DE IA: QUITA FONDOS --- */}
+                {activeView === "ai_background" && (
+                    <BackgroundRemoverView />
                 )}
 
                 {activeView === "notifications_full" && (
@@ -745,7 +737,9 @@ function StatCard({ label, value, icon, subtext, color, className }: any) {
     return (
         <Card className={cn("border shadow-sm rounded-3xl overflow-hidden bg-white dark:bg-[#1c1c1e] transition-all w-full", className)}>
             <CardContent className="p-4 sm:p-6 flex items-center gap-5">
-                <div className="p-4 rounded-[1.8rem] shadow-inner shrink-0" className={cn(theme[color])}>{icon && React.cloneElement(icon as any, { className: "w-8 h-8" })}</div>
+                <div className={cn("p-4 rounded-[1.8rem] shadow-inner shrink-0", theme[color])}>
+                    {icon && React.cloneElement(icon as any, { className: "w-8 h-8" })}
+                </div>
                 <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase text-black/30 dark:text-white/30 truncate">{label}</p>
                     <p className="text-3xl font-bold tracking-tighter truncate">{value}</p>

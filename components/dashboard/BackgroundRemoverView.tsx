@@ -4,9 +4,10 @@ import React, { useState, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { 
     Wand2, Upload, Image as ImageIcon, Download, 
-    RefreshCw, Layers, Sparkles, CheckCircle2, X 
+    RefreshCw, Layers, Sparkles, CheckCircle2, X, AlertCircle
 } from "lucide-react"
-import removeBackground from "@imgly/background-removal"
+// CORRECCIÓN 1: Importación nombrada para evitar error de "Export default"
+import { removeBackground, Config } from "@imgly/background-removal"
 
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -19,6 +20,7 @@ export function BackgroundRemoverView() {
     const [isProcessing, setIsProcessing] = useState(false)
     const [dragActive, setDragActive] = useState(false)
     const [processTime, setProcessTime] = useState<number>(0)
+    const [progress, setProgress] = useState<number>(0)
     
     const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -28,8 +30,9 @@ export function BackgroundRemoverView() {
         
         const url = URL.createObjectURL(file)
         setImageSrc(url)
-        setProcessedImage(null) // Resetear resultado anterior
+        setProcessedImage(null)
         setProcessTime(0)
+        setProgress(0)
     }
 
     const onDragOver = (e: React.DragEvent) => {
@@ -55,17 +58,30 @@ export function BackgroundRemoverView() {
         if (!imageSrc) return
 
         setIsProcessing(true)
+        setProgress(0)
         const startTime = Date.now()
 
         try {
-            // Configuración del procesador
-            const config = {
-                progress: (key: string, current: number, total: number) => {
-                    console.log(`Descargando modelo IA: ${current} of ${total}`)
+            // CORRECCIÓN 2: Configuración robusta para Next.js
+            const config: Config = {
+                // Importante: Define dónde buscar los archivos .wasm y .onnx locales
+                publicPath: `${window.location.protocol}//${window.location.host}/ai-assets/`,
+                
+                // 'auto' intenta usar WebGPU, si falla cae a WebAssembly (CPU)
+                device: 'auto', 
+                
+                model: 'medium', // Balance entre calidad y velocidad
+                output: {
+                    format: 'image/png',
+                    quality: 0.8
                 },
-                debug: false,
-                device: 'gpu', // Intenta usar GPU para velocidad
-                model: 'medium' // 'small' (rápido) o 'medium' (mejor calidad)
+                progress: (key: string, current: number, total: number) => {
+                    if (total > 0) {
+                        const percent = Math.round((current / total) * 100)
+                        setProgress(percent)
+                    }
+                },
+                debug: true // Útil para ver errores en consola del navegador
             }
 
             // Ejecutar la IA
@@ -75,10 +91,11 @@ export function BackgroundRemoverView() {
             setProcessedImage(url)
             setProcessTime((Date.now() - startTime) / 1000)
         } catch (error) {
-            console.error("Error al procesar:", error)
-            alert("Ocurrió un error al procesar la imagen. Intenta con otra.")
+            console.error("Error detallado IA:", error)
+            alert("Hubo un problema. Asegúrate de haber copiado la carpeta 'ai-assets' en 'public'.")
         } finally {
             setIsProcessing(false)
+            setProgress(0)
         }
     }
 
@@ -95,6 +112,7 @@ export function BackgroundRemoverView() {
     const reset = () => {
         setImageSrc(null)
         setProcessedImage(null)
+        setProgress(0)
     }
 
     return (
@@ -146,10 +164,10 @@ export function BackgroundRemoverView() {
                                     <Button 
                                         onClick={processImage} 
                                         disabled={isProcessing}
-                                        className="rounded-xl shadow-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase text-xs h-10"
+                                        className="rounded-xl shadow-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase text-xs h-10 min-w-[140px]"
                                     >
                                         {isProcessing ? (
-                                            <><RefreshCw className="w-4 h-4 mr-2 animate-spin"/> Procesando...</>
+                                            <><RefreshCw className="w-4 h-4 mr-2 animate-spin"/> {progress > 0 ? `${progress}%` : "Procesando"}</>
                                         ) : (
                                             <><Wand2 className="w-4 h-4 mr-2"/> Eliminar Fondo</>
                                         )}
@@ -182,7 +200,7 @@ export function BackgroundRemoverView() {
                                     <Sparkles className="absolute inset-0 m-auto text-indigo-600 animate-pulse"/>
                                 </div>
                                 <p className="text-xs font-black uppercase tracking-widest text-indigo-600 animate-pulse">La IA está trabajando...</p>
-                                <p className="text-[10px] font-bold text-slate-400 mt-1">Esto puede tomar unos segundos</p>
+                                <p className="text-[10px] font-bold text-slate-400 mt-1">Cargando modelos y procesando píxeles</p>
                             </div>
                         ) : processedImage ? (
                             <motion.img 
@@ -224,19 +242,19 @@ export function BackgroundRemoverView() {
                 <div className="p-6 bg-indigo-50 dark:bg-indigo-900/10 rounded-[2rem] border border-indigo-100 dark:border-indigo-500/20">
                     <h4 className="font-black text-indigo-600 uppercase text-xs mb-2">01. Procesamiento Local</h4>
                     <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                        Tus imágenes no se suben a la nube. La IA corre directamente en tu navegador usando WebAssembly. Privacidad 100%.
+                        Tus imágenes no se suben a la nube. La IA corre directamente en tu navegador.
                     </p>
                 </div>
                 <div className="p-6 bg-emerald-50 dark:bg-emerald-900/10 rounded-[2rem] border border-emerald-100 dark:border-emerald-500/20">
                     <h4 className="font-black text-emerald-600 uppercase text-xs mb-2">02. Calidad de Impresión</h4>
                     <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                        El resultado es un archivo PNG con canal alfa (transparencia) listo para importar en CorelDRAW o Illustrator.
+                        El resultado es un archivo PNG con canal alfa (transparencia) listo para Corel o Illustrator.
                     </p>
                 </div>
                 <div className="p-6 bg-slate-50 dark:bg-slate-800 rounded-[2rem] border border-slate-100 dark:border-slate-700">
                     <h4 className="font-black text-slate-600 uppercase text-xs mb-2">03. Sin Límites</h4>
                     <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                        Al ser una herramienta interna, no tienes límites de "créditos" diarios. Úsala cuantas veces necesites.
+                        Al ser una herramienta interna, no tienes límites de "créditos" diarios.
                     </p>
                 </div>
             </div>
