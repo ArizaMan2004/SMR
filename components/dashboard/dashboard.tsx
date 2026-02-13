@@ -29,9 +29,8 @@ import { CurrencyToast } from "@/components/dashboard/CurrencyToast"
 import { WalletsView } from "@/components/dashboard/WalletsView"
 import { PaymentEditModal } from "@/components/dashboard/PaymentEditModal"
 import { PaymentAuditView } from "@/components/dashboard/PaymentAuditView"
-
-// --- NUEVA IMPORTACIÓN: VISTA DE IA ---
-import { BackgroundRemoverView } from "@/components/dashboard/BackgroundRemoverView"
+// IMPORTACIÓN NUEVA PARA LA VISTA IA
+import { BackgroundRemoverView } from "@/components/dashboard/BackgroundRemoverView" 
 
 // Componentes Administrativos
 import { GastosFijosView } from "@/components/dashboard/gastos-fijos-view"
@@ -48,7 +47,7 @@ import { startTour } from "@/components/dashboard/TutorialController"
 import { 
     Plus, CheckCircle, Calculator, LayoutDashboard, FileSpreadsheet, Clock, 
     Building2, Bell, CheckCircle2, ChevronLeft, Menu, DollarSign, Euro, Coins, 
-    Wallet, Search, HelpCircle, Sparkles // Agregué Sparkles para el icono de IA
+    Wallet, Search, HelpCircle, Sparkles 
 } from "lucide-react" 
 
 // Servicios
@@ -64,7 +63,7 @@ import {
     deleteGastoInsumo, 
     createNotification, 
     deleteNotification, 
-    updateNotificationStatus,
+    updateNotificationStatus, 
     createGasto 
 } from "@/lib/services/gastos-service"
 import { subscribeToClients } from "@/lib/services/clientes-service"
@@ -164,8 +163,7 @@ export default function Dashboard() {
             children: [
                 { id: 'calculator', label: 'Presupuestos' },
                 { id: 'old_calculator', label: 'Calculadora de Producción' }, 
-                // AQUÍ ESTÁ LA NUEVA VISTA
-                { id: 'ai_background', label: 'IA Quita Fondos' }, 
+                { id: 'ai_background', label: 'IA Quita Fondos' }, // <--- NUEVO ÍTEM
             ]
         },
     ], []);
@@ -734,6 +732,7 @@ function TasaHeaderBadge({ label, value, icon, color, onClick }: any) {
 
 function StatCard({ label, value, icon, subtext, color, className }: any) {
     const theme: any = { blue: "bg-blue-500/10 text-blue-600 border-blue-500/20", orange: "bg-orange-500/10 text-orange-600 border-orange-500/20", green: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" }
+    
     return (
         <Card className={cn("border shadow-sm rounded-3xl overflow-hidden bg-white dark:bg-[#1c1c1e] transition-all w-full", className)}>
             <CardContent className="p-4 sm:p-6 flex items-center gap-5">
@@ -753,6 +752,7 @@ function StatCard({ label, value, icon, subtext, color, className }: any) {
 function ActivityRow({ n }: { n: Notification }) {
     const colors: any = { success: "bg-emerald-500 shadow-emerald-500/20", info: "bg-blue-500 shadow-blue-500/20", warning: "bg-orange-500 shadow-orange-500/20", urgent: "bg-red-500 shadow-red-500/20", neutral: "bg-slate-500" };
     const displayDate = n.timestamp instanceof Date ? n.timestamp : (n.timestamp as any)?.toDate ? (n.timestamp as any).toDate() : new Date();
+    
     return (
         <div className="group flex items-center gap-4 sm:gap-6 p-4 sm:p-6 bg-white dark:bg-[#1c1c1e] rounded-[1.8rem] sm:rounded-[2.5rem] border border-black/5 shadow-sm hover:shadow-xl transition-all w-full min-w-0">
             <div className={cn("w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center text-white shadow-lg shrink-0", colors[n.type] || colors.neutral)}>

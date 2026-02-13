@@ -4,9 +4,8 @@ import React, { useState, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { 
     Wand2, Upload, Image as ImageIcon, Download, 
-    RefreshCw, Layers, Sparkles, CheckCircle2, X, AlertCircle
+    RefreshCw, Layers, Sparkles, CheckCircle2, X 
 } from "lucide-react"
-// CORRECCIÓN 1: Importación nombrada para evitar error de "Export default"
 import { removeBackground, Config } from "@imgly/background-removal"
 
 import { Card } from "@/components/ui/card"
@@ -24,10 +23,8 @@ export function BackgroundRemoverView() {
     
     const fileInputRef = useRef<HTMLInputElement>(null)
 
-    // Manejar subida de archivo
     const handleFile = (file: File) => {
         if (!file.type.startsWith("image/")) return alert("Por favor sube una imagen válida")
-        
         const url = URL.createObjectURL(file)
         setImageSrc(url)
         setProcessedImage(null)
@@ -35,64 +32,39 @@ export function BackgroundRemoverView() {
         setProgress(0)
     }
 
-    const onDragOver = (e: React.DragEvent) => {
-        e.preventDefault()
-        setDragActive(true)
-    }
-
-    const onDragLeave = (e: React.DragEvent) => {
-        e.preventDefault()
-        setDragActive(false)
-    }
-
+    const onDragOver = (e: React.DragEvent) => { e.preventDefault(); setDragActive(true) }
+    const onDragLeave = (e: React.DragEvent) => { e.preventDefault(); setDragActive(false) }
     const onDrop = (e: React.DragEvent) => {
-        e.preventDefault()
-        setDragActive(false)
-        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-            handleFile(e.dataTransfer.files[0])
-        }
+        e.preventDefault(); setDragActive(false)
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0])
     }
 
-    // --- LA MAGIA: REMOVER FONDO ---
     const processImage = async () => {
         if (!imageSrc) return
-
         setIsProcessing(true)
         setProgress(0)
         const startTime = Date.now()
 
         try {
-            // CORRECCIÓN 2: Configuración robusta para Next.js
             const config: Config = {
-                // Importante: Define dónde buscar los archivos .wasm y .onnx locales
-                publicPath: `${window.location.protocol}//${window.location.host}/ai-assets/`,
+                // ESTA LÍNEA ES LA CLAVE: Apunta a tu carpeta existente
+                publicPath: '/ai-assets/', 
                 
-                // 'auto' intenta usar WebGPU, si falla cae a WebAssembly (CPU)
-                device: 'auto', 
-                
-                model: 'medium', // Balance entre calidad y velocidad
-                output: {
-                    format: 'image/png',
-                    quality: 0.8
-                },
+                model: 'medium',
+                output: { format: 'image/png', quality: 0.8 },
                 progress: (key: string, current: number, total: number) => {
-                    if (total > 0) {
-                        const percent = Math.round((current / total) * 100)
-                        setProgress(percent)
-                    }
+                    if (total > 0) setProgress(Math.round((current / total) * 100))
                 },
-                debug: true // Útil para ver errores en consola del navegador
+                debug: true
             }
 
-            // Ejecutar la IA
             const blob = await removeBackground(imageSrc, config)
             const url = URL.createObjectURL(blob)
-            
             setProcessedImage(url)
             setProcessTime((Date.now() - startTime) / 1000)
         } catch (error) {
-            console.error("Error detallado IA:", error)
-            alert("Hubo un problema. Asegúrate de haber copiado la carpeta 'ai-assets' en 'public'.")
+            console.error("Error IA:", error)
+            alert("Error al procesar. Verifica la consola para más detalles.")
         } finally {
             setIsProcessing(false)
             setProgress(0)
@@ -109,16 +81,10 @@ export function BackgroundRemoverView() {
         document.body.removeChild(link)
     }
 
-    const reset = () => {
-        setImageSrc(null)
-        setProcessedImage(null)
-        setProgress(0)
-    }
+    const reset = () => { setImageSrc(null); setProcessedImage(null); setProgress(0) }
 
     return (
         <div className="space-y-8 p-2 font-sans pb-24 text-slate-800 dark:text-slate-100 animate-in fade-in duration-500">
-            
-            {/* HEADER */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h2 className="text-3xl font-black italic uppercase tracking-tighter flex items-center gap-3">
@@ -128,49 +94,23 @@ export function BackgroundRemoverView() {
                 </div>
             </div>
 
-            {/* MAIN AREA */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 min-h-[500px]">
-                
-                {/* 1. UPLOAD ZONE */}
-                <Card className={cn(
-                    "rounded-[2.5rem] border-2 border-dashed relative overflow-hidden flex flex-col justify-center items-center text-center transition-all duration-300",
-                    dragActive ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20" : "border-slate-200 dark:border-white/10 bg-white dark:bg-[#1c1c1e]",
-                    imageSrc ? "border-solid border-transparent p-0" : "p-12 hover:border-slate-300"
-                )}>
+                <Card className={cn("rounded-[2.5rem] border-2 border-dashed relative overflow-hidden flex flex-col justify-center items-center text-center transition-all duration-300", dragActive ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20" : "border-slate-200 dark:border-white/10 bg-white dark:bg-[#1c1c1e]", imageSrc ? "border-solid border-transparent p-0" : "p-12 hover:border-slate-300")}>
                     {!imageSrc ? (
-                        <div 
-                            className="w-full h-full flex flex-col items-center justify-center cursor-pointer"
-                            onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
-                            onClick={() => fileInputRef.current?.click()}
-                        >
+                        <div className="w-full h-full flex flex-col items-center justify-center cursor-pointer" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} onClick={() => fileInputRef.current?.click()}>
                             <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && handleFile(e.target.files[0])} />
-                            <div className="bg-slate-50 dark:bg-white/5 p-6 rounded-full mb-6">
-                                <Upload className="w-10 h-10 text-slate-400" />
-                            </div>
+                            <div className="bg-slate-50 dark:bg-white/5 p-6 rounded-full mb-6"><Upload className="w-10 h-10 text-slate-400" /></div>
                             <h3 className="text-xl font-black uppercase tracking-tight text-slate-700 dark:text-white">Sube o arrastra tu imagen</h3>
                             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-2">Soporta JPG, PNG, WEBP</p>
                         </div>
                     ) : (
                         <div className="relative w-full h-full bg-[url('https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fpng.pngtree.com%2Fpng-vector%2F20190405%2Fourmid%2Fpngtree-vector-transparency-grid-png-image_914522.jpg&f=1&nofb=1')] bg-repeat">
-                            {/* IMAGEN ORIGINAL */}
                             <img src={imageSrc} alt="Original" className="w-full h-full object-contain relative z-10" />
-                            
-                            {/* CONTROLES OVERLAY */}
                             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex gap-3">
-                                <Button onClick={reset} variant="secondary" className="rounded-xl shadow-lg font-bold uppercase text-xs h-10">
-                                    <X className="w-4 h-4 mr-2"/> Cancelar
-                                </Button>
+                                <Button onClick={reset} variant="secondary" className="rounded-xl shadow-lg font-bold uppercase text-xs h-10"><X className="w-4 h-4 mr-2"/> Cancelar</Button>
                                 {!processedImage && (
-                                    <Button 
-                                        onClick={processImage} 
-                                        disabled={isProcessing}
-                                        className="rounded-xl shadow-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase text-xs h-10 min-w-[140px]"
-                                    >
-                                        {isProcessing ? (
-                                            <><RefreshCw className="w-4 h-4 mr-2 animate-spin"/> {progress > 0 ? `${progress}%` : "Procesando"}</>
-                                        ) : (
-                                            <><Wand2 className="w-4 h-4 mr-2"/> Eliminar Fondo</>
-                                        )}
+                                    <Button onClick={processImage} disabled={isProcessing} className="rounded-xl shadow-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase text-xs h-10 min-w-[140px]">
+                                        {isProcessing ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin"/> {progress > 0 ? `${progress}%` : "Procesando"}</> : <><Wand2 className="w-4 h-4 mr-2"/> Eliminar Fondo</>}
                                     </Button>
                                 )}
                             </div>
@@ -178,85 +118,27 @@ export function BackgroundRemoverView() {
                     )}
                 </Card>
 
-                {/* 2. RESULT ZONE */}
                 <Card className="rounded-[2.5rem] bg-slate-50 dark:bg-[#1c1c1e] border-none shadow-inner relative overflow-hidden flex flex-col">
                     <div className="absolute top-0 left-0 w-full p-6 z-10 flex justify-between items-start">
-                        <Badge variant="outline" className="bg-white/50 backdrop-blur-md border-none font-black uppercase text-[10px] tracking-widest">
-                            Resultado
-                        </Badge>
-                        {processTime > 0 && (
-                            <Badge className="bg-emerald-500 text-white border-none font-bold text-[10px]">
-                                <CheckCircle2 className="w-3 h-3 mr-1"/> {processTime.toFixed(1)}s
-                            </Badge>
-                        )}
+                        <Badge variant="outline" className="bg-white/50 backdrop-blur-md border-none font-black uppercase text-[10px] tracking-widest">Resultado</Badge>
+                        {processTime > 0 && <Badge className="bg-emerald-500 text-white border-none font-bold text-[10px]"><CheckCircle2 className="w-3 h-3 mr-1"/> {processTime.toFixed(1)}s</Badge>}
                     </div>
-
                     <div className="flex-1 flex items-center justify-center p-8 bg-[url('https://t3.ftcdn.net/jpg/03/76/74/78/360_F_376747823_L8il80K6c1DkIOe5D6A7D3Z7z88le8fE.jpg')] bg-cover">
                         {isProcessing ? (
                             <div className="text-center">
-                                <div className="relative w-24 h-24 mx-auto mb-4">
-                                    <div className="absolute inset-0 rounded-full border-4 border-indigo-100"></div>
-                                    <div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin"></div>
-                                    <Sparkles className="absolute inset-0 m-auto text-indigo-600 animate-pulse"/>
-                                </div>
+                                <div className="relative w-24 h-24 mx-auto mb-4"><div className="absolute inset-0 rounded-full border-4 border-indigo-100"></div><div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin"></div><Sparkles className="absolute inset-0 m-auto text-indigo-600 animate-pulse"/></div>
                                 <p className="text-xs font-black uppercase tracking-widest text-indigo-600 animate-pulse">La IA está trabajando...</p>
-                                <p className="text-[10px] font-bold text-slate-400 mt-1">Cargando modelos y procesando píxeles</p>
                             </div>
                         ) : processedImage ? (
-                            <motion.img 
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                src={processedImage} 
-                                alt="Processed" 
-                                className="max-w-full max-h-[400px] object-contain drop-shadow-2xl"
-                            />
+                            <motion.img initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} src={processedImage} alt="Processed" className="max-w-full max-h-[400px] object-contain drop-shadow-2xl" />
                         ) : (
-                            <div className="text-center opacity-30">
-                                <Layers className="w-20 h-20 mx-auto mb-4 text-slate-400"/>
-                                <p className="text-xs font-black uppercase tracking-widest text-slate-400">Aquí aparecerá tu imagen PNG</p>
-                            </div>
+                            <div className="text-center opacity-30"><Layers className="w-20 h-20 mx-auto mb-4 text-slate-400"/><p className="text-xs font-black uppercase tracking-widest text-slate-400">Aquí aparecerá tu imagen PNG</p></div>
                         )}
                     </div>
-
-                    {/* FOOTER ACTIONS */}
                     <div className="p-6 bg-white dark:bg-white/5 border-t border-slate-100 dark:border-white/5">
-                        <Button 
-                            onClick={downloadImage} 
-                            disabled={!processedImage}
-                            className={cn(
-                                "w-full h-14 rounded-2xl font-black uppercase tracking-widest shadow-xl transition-all",
-                                processedImage 
-                                    ? "bg-black text-white hover:bg-slate-800 hover:scale-[1.02]" 
-                                    : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                            )}
-                        >
-                            <Download className="w-5 h-5 mr-2" /> Descargar PNG
-                        </Button>
+                        <Button onClick={downloadImage} disabled={!processedImage} className={cn("w-full h-14 rounded-2xl font-black uppercase tracking-widest shadow-xl transition-all", processedImage ? "bg-black text-white hover:bg-slate-800 hover:scale-[1.02]" : "bg-slate-200 text-slate-400 cursor-not-allowed")}><Download className="w-5 h-5 mr-2" /> Descargar PNG</Button>
                     </div>
                 </Card>
-
-            </div>
-
-            {/* INFO SECTION */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="p-6 bg-indigo-50 dark:bg-indigo-900/10 rounded-[2rem] border border-indigo-100 dark:border-indigo-500/20">
-                    <h4 className="font-black text-indigo-600 uppercase text-xs mb-2">01. Procesamiento Local</h4>
-                    <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                        Tus imágenes no se suben a la nube. La IA corre directamente en tu navegador.
-                    </p>
-                </div>
-                <div className="p-6 bg-emerald-50 dark:bg-emerald-900/10 rounded-[2rem] border border-emerald-100 dark:border-emerald-500/20">
-                    <h4 className="font-black text-emerald-600 uppercase text-xs mb-2">02. Calidad de Impresión</h4>
-                    <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                        El resultado es un archivo PNG con canal alfa (transparencia) listo para Corel o Illustrator.
-                    </p>
-                </div>
-                <div className="p-6 bg-slate-50 dark:bg-slate-800 rounded-[2rem] border border-slate-100 dark:border-slate-700">
-                    <h4 className="font-black text-slate-600 uppercase text-xs mb-2">03. Sin Límites</h4>
-                    <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                        Al ser una herramienta interna, no tienes límites de "créditos" diarios.
-                    </p>
-                </div>
             </div>
         </div>
     )

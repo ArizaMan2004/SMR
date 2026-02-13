@@ -6,7 +6,8 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "eslint .",
-    "start": "next start"
+    "start": "next start",
+    "postinstall": "mkdir -p public/ai-assets && cp -r node_modules/@imgly/background-removal/dist/* public/ai-assets/ && cp node_modules/onnxruntime-web/dist/*.wasm public/ai-assets/"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
