@@ -29,8 +29,11 @@ import { CurrencyToast } from "@/components/dashboard/CurrencyToast"
 import { WalletsView } from "@/components/dashboard/WalletsView"
 import { PaymentEditModal } from "@/components/dashboard/PaymentEditModal"
 import { PaymentAuditView } from "@/components/dashboard/PaymentAuditView"
-// IMPORTACIÓN NUEVA PARA LA VISTA IA
+
+// --- IMPORTACIONES DE HERRAMIENTAS IA Y DISEÑO ---
 import { BackgroundRemoverView } from "@/components/dashboard/BackgroundRemoverView" 
+import { UpscaleView } from "@/components/dashboard/UpscaleView"
+import { FormatConverterView } from "@/components/dashboard/FormatConverterView" // <--- NUEVA VISTA
 
 // Componentes Administrativos
 import { GastosFijosView } from "@/components/dashboard/gastos-fijos-view"
@@ -47,7 +50,7 @@ import { startTour } from "@/components/dashboard/TutorialController"
 import { 
     Plus, CheckCircle, Calculator, LayoutDashboard, FileSpreadsheet, Clock, 
     Building2, Bell, CheckCircle2, ChevronLeft, Menu, DollarSign, Euro, Coins, 
-    Wallet, Search, HelpCircle, Sparkles 
+    Wallet, Search, HelpCircle, FileStack 
 } from "lucide-react" 
 
 // Servicios
@@ -123,7 +126,7 @@ export default function Dashboard() {
     const [pagos, setPagos] = useState<PagoEmpleado[]>([]) 
     const [clientes, setClientes] = useState<any[]>([])
 
-    // --- 3. NAV ITEMS (ACTUALIZADO CON IA TOOLS) ---
+    // --- 3. NAV ITEMS ---
     const navItems = useMemo(() => [
         { id: 'orders', label: 'Facturación', icon: <LayoutDashboard className="w-4 h-4" /> }, 
         { 
@@ -153,7 +156,6 @@ export default function Dashboard() {
                 { id: 'insumos_mgmt', label: 'Insumos y Materiales' },
                 { id: 'inventory_general', label: 'Inventario General' },
                 { id: 'employees_mgmt', label: 'Gestión de Personal' },
-
             ]
         },
         {
@@ -163,7 +165,9 @@ export default function Dashboard() {
             children: [
                 { id: 'calculator', label: 'Presupuestos' },
                 { id: 'old_calculator', label: 'Calculadora de Producción' }, 
-                { id: 'ai_background', label: 'IA Quita Fondos' }, // <--- NUEVO ÍTEM
+                { id: 'ai_background', label: 'IA Quita Fondos' }, 
+                { id: 'ai_upscale', label: 'IA Upscale (HD)' },
+                { id: 'format_converter', label: 'Convertidor Formatos' }, // <--- NUEVA OPCIÓN
             ]
         },
     ], []);
@@ -506,7 +510,6 @@ export default function Dashboard() {
             <AnimatePresence mode="wait">
               <motion.div key={activeView} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={springConfig} className="h-full">
                 
-                {/* --- VISTA: ÓRDENES (DEFAULT) --- */}
                 {activeView === "orders" && (
                     <div className="max-w-7xl mx-auto space-y-6 md:space-y-8">
                         <div id="stats-grid" className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6 w-full">
@@ -644,9 +647,18 @@ export default function Dashboard() {
                     <CalculatorView onSendToProduction={handleSendCalcToOrder} />
                 )}
 
-                {/* --- NUEVA VISTA DE IA: QUITA FONDOS --- */}
+                {/* --- HERRAMIENTAS IA --- */}
                 {activeView === "ai_background" && (
                     <BackgroundRemoverView />
+                )}
+
+                {activeView === "ai_upscale" && (
+                    <UpscaleView />
+                )}
+
+                {/* --- NUEVA VISTA: CONVERTIDOR DE FORMATOS --- */}
+                {activeView === "format_converter" && (
+                    <FormatConverterView />
                 )}
 
                 {activeView === "notifications_full" && (
