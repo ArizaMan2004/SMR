@@ -26,7 +26,7 @@ import {
     CalendarClock, Activity, Sparkles,
     ChevronLeft, ChevronRight, Layers, CreditCard,
     UploadCloud, X, Loader2,
-    Printer, Banknote 
+    Printer, Banknote, History, Trash2 // ✅ Iconos nuevos agregados
 } from 'lucide-react'
 
 // Servicios y Utilidades
@@ -37,9 +37,9 @@ import { createNotification } from "@/lib/services/gastos-service"
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
-// FIREBASE (Para el Abono Global)
+// FIREBASE
 import { db } from "@/lib/firebase"
-import { doc, updateDoc, arrayUnion } from "firebase/firestore"
+import { doc, updateDoc, arrayUnion, writeBatch } from "firebase/firestore"
 
 interface ClientSummary {
     key: string
@@ -57,7 +57,6 @@ interface ClientsAndPaymentsViewProps {
         eur: number;
         usdt: number;
     };
-    // Esta función solo ABRE el modal del dashboard
     onRegisterPayment: (orden: OrdenServicio) => void; 
     pdfLogoBase64?: string;
     firmaBase64?: string;
@@ -92,11 +91,14 @@ export function ClientsAndPaymentsView({
     const itemsPerPage = 5
     const [expandedOrdenId, setExpandedOrdenId] = useState<string | null>(null);
 
-    // --- ESTADOS DE MODAL GLOBAL (Lógica interna de esta vista) ---
+    // --- ESTADOS DE MODAL GLOBAL (Pago) ---
     const [isGlobalModalOpen, setIsGlobalModalOpen] = useState(false)
     const [selectedClientForGlobal, setSelectedClientForGlobal] = useState<ClientSummary | null>(null)
     const [globalPaymentData, setGlobalPaymentData] = useState({ monto: 0, nota: '', imagenUrl: '' })
     
+    // --- ESTADOS NUEVOS: MODAL HISTORIAL GLOBAL ---
+    const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false) // ✅ Estado para el historial
+
     const [previewUrl, setPreviewUrl] = useState<string | null>(null) 
     const [isGlobalUploading, setIsGlobalUploading] = useState(false) 
     const globalFileInputRef = useRef<HTMLInputElement>(null)
@@ -151,7 +153,6 @@ export function ClientsAndPaymentsView({
             }
         });
 
-        // Ordenar órdenes internas por fecha
         summaryMap.forEach(s => s.ordenesPendientes.sort((a, b) => new Date(a.fecha || 0).getTime() - new Date(b.fecha || 0).getTime()));
 
         return { 
@@ -164,7 +165,6 @@ export function ClientsAndPaymentsView({
     const totalPages = Math.ceil(clientSummaries.length / itemsPerPage);
     const paginatedClients = useMemo(() => clientSummaries.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage), [clientSummaries, currentPage]);
 
-    // --- HELPER PARA CALCULAR ITEM ---
     const getItemTotal = (item: any) => {
         const qty = parseFloat(item.cantidad?.toString()) || 0;
         const x = parseFloat(item.medidaXCm) || 0;
@@ -181,8 +181,7 @@ export function ClientsAndPaymentsView({
     // --- REPORTES PDF ---
     const handleGenerateGeneralReceipt = (summary: ClientSummary, rateType: 'USD' | 'EUR' | 'USDT' | 'USD_ONLY') => {
         try {
-            toast.loading(`Generando estado de cuenta (${rateType === 'USD_ONLY' ? 'Solo USD' : rateType})...`);
-            
+            toast.loading(`Generando estado de cuenta...`);
             let selectedCurrency = { rate: rates.usd, label: "Tasa BCV ($)", symbol: "Bs." };
             if (rateType === 'EUR') selectedCurrency = { rate: rates.eur, label: "Tasa BCV (€)", symbol: "Bs." };
             if (rateType === 'USDT') selectedCurrency = { rate: rates.usdt, label: "Tasa Monitor", symbol: "Bs." };
@@ -193,7 +192,6 @@ export function ClientsAndPaymentsView({
                     const qty = parseFloat(item.cantidad?.toString()) || 0;
                     const x = parseFloat(item.medidaXCm) || 0;
                     const y = parseFloat(item.medidaYCm) || 0;
-                    const tiempo = item.tiempoCorte;
                     let itemSubtotal = 0;
                     
                     if (item.subtotal !== undefined && item.subtotal !== null) itemSubtotal = parseFloat(item.subtotal);
@@ -204,17 +202,12 @@ export function ClientsAndPaymentsView({
                         else itemSubtotal = price * qty;
                     }
 
-                    const displayUnitPrice = qty > 0 ? (itemSubtotal / qty) : 0;
-                    let medidasDisplay = "N/A";
-                    if (item.unidad === "m2" && x > 0 && y > 0) medidasDisplay = `${x}x${y}cm`;
-                    else if (tiempo && tiempo !== "N/A") medidasDisplay = tiempo;
-
                     return {
                         parentOrder: `#${orden.ordenNumero || 'S/N'}`,
                         nombre: item.nombre,
                         cantidad: qty,
-                        medidasTiempo: medidasDisplay, 
-                        precioUnitario: displayUnitPrice,
+                        medidasTiempo: item.unidad === "m2" ? `${x}x${y}cm` : (item.tiempoCorte || "N/A"), 
+                        precioUnitario: qty > 0 ? (itemSubtotal / qty) : 0,
                         totalUSD: itemSubtotal 
                     };
                 })
@@ -231,7 +224,6 @@ export function ClientsAndPaymentsView({
                 pdfLogoBase64 || "", 
                 { firmaBase64, selloBase64, currency: selectedCurrency }
             );
-
             toast.dismiss();
             toast.success("PDF Generado");
         } catch (error) {
@@ -241,7 +233,7 @@ export function ClientsAndPaymentsView({
         }
     };
 
-    // --- MANEJO DE ABONO GLOBAL (LOGICA AUTÓNOMA) ---
+    // --- MANEJO DE ABONO GLOBAL (Registro) ---
     const handleGlobalImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -270,17 +262,18 @@ export function ClientsAndPaymentsView({
         
         try {
             toast.loading("Distribuyendo abono...");
+            const batch = writeBatch(db); // Usamos batch para consistencia (opcional, pero mejor)
             
-            // Iteramos sobre las órdenes del cliente para pagar
+            // Nota: Firebase batch tiene límite de 500 operaciones. Si son muchas órdenes, cuidado.
+            // Aquí lo hacemos iterativo con updates individuales para asegurar la lógica de arrayUnion
+            
             for (const orden of selectedClientForGlobal.ordenesPendientes) {
-                if (remaining <= 0.009) break; // Si ya no queda saldo, paramos
+                if (remaining <= 0.009) break;
 
                 const saldoOrden = Number(orden.totalUSD) - (Number(orden.montoPagadoUSD) || 0);
                 const aPagar = Math.min(remaining, saldoOrden);
 
                 if (aPagar > 0.009) {
-                    // REALIZAMOS LA TRANSACCIÓN DIRECTAMENTE EN FIREBASE
-                    // (Esto evita depender del modal del dashboard para un proceso en lote)
                     const ordenRef = doc(db, "ordenes", orden.id);
                     const nuevoMontoPagado = (Number(orden.montoPagadoUSD) || 0) + aPagar;
                     const nuevoEstado = (Number(orden.totalUSD) - nuevoMontoPagado) <= 0.01 ? "PAGADO" : "ABONADO";
@@ -300,13 +293,15 @@ export function ClientsAndPaymentsView({
                         registroPagos: arrayUnion(nuevoRecibo)
                     });
 
-                    // Crear Notificación
-                    await createNotification({
-                        title: "Abono Global Aplicado",
-                        description: `Pago de $${aPagar.toFixed(2)} a orden #${orden.ordenNumero}`,
-                        type: 'success',
-                        category: 'system'
-                    });
+                    // Notificación (Opcional, puede saturar si son muchas)
+                    if (selectedClientForGlobal.ordenesPendientes.length < 5) {
+                         await createNotification({
+                            title: "Abono Global Aplicado",
+                            description: `Pago de $${aPagar.toFixed(2)} a orden #${orden.ordenNumero}`,
+                            type: 'success',
+                            category: 'system'
+                        });
+                    }
 
                     remaining -= aPagar;
                 }
@@ -326,6 +321,67 @@ export function ClientsAndPaymentsView({
         setIsGlobalModalOpen(false);
         setPreviewUrl(null);
         setGlobalPaymentData({ monto: 0, nota: '', imagenUrl: '' });
+    };
+
+    // --- LÓGICA DE REVERSIÓN (DESHACER ABONO) ---
+    const handleRevertGlobalBatch = async (group: any) => {
+        if (!confirm(`¿Estás seguro de revertir este abono global de ${formatCurrency(group.totalMonto)}?\n\nSe restará el saldo de ${group.distribucion.length} órdenes y se eliminará este registro.`)) return;
+    
+        try {
+            toast.loading("Revirtiendo abonos...");
+            const batch = writeBatch(db);
+            let operationsCount = 0;
+    
+            for (const item of group.distribucion) {
+                // Buscamos la orden original en memoria
+                const ordenOriginal = ordenes.find((o: any) => o.id === item.ordenId);
+                if (!ordenOriginal) continue;
+    
+                const ordenRef = doc(db, "ordenes", item.ordenId);
+                
+                // Calculamos nuevos valores (Restar el pago)
+                const nuevoMontoPagado = Math.max(0, (Number(ordenOriginal.montoPagadoUSD) || 0) - item.montoAbonado);
+                const nuevoEstado = (Number(ordenOriginal.totalUSD) - nuevoMontoPagado) <= 0.01 ? "PAGADO" : 
+                                    (nuevoMontoPagado > 0 ? "ABONADO" : "PENDIENTE");
+    
+                // Eliminamos el pago específico del array
+                // Comparamos fecha y monto para encontrar el exacto
+                const nuevoHistorial = (ordenOriginal.registroPagos || []).filter((p: any) => {
+                    // Si el pago tiene la misma imagen, es parte del lote (prioridad)
+                    if (group.imagenUrl && p.imagenUrl === group.imagenUrl) return false;
+                    
+                    // Si no tiene imagen, usamos coincidencia exacta de fecha y monto
+                    const isSameDate = p.fecha === item.pagoRef.fecha || p.fechaRegistro === item.pagoRef.fechaRegistro;
+                    const isSameAmount = parseFloat(p.montoUSD) === item.montoAbonado;
+                    const isSameNote = p.nota === item.pagoRef.nota;
+
+                    if (isSameDate && isSameAmount && isSameNote) return false; // Eliminar este
+                    return true; // Mantener los demás
+                });
+    
+                batch.update(ordenRef, {
+                    montoPagadoUSD: nuevoMontoPagado,
+                    estadoPago: nuevoEstado,
+                    registroPagos: nuevoHistorial
+                });
+                operationsCount++;
+            }
+    
+            if (operationsCount > 0) {
+                await batch.commit();
+                toast.dismiss();
+                toast.success("Abono global revertido correctamente");
+                setIsHistoryModalOpen(false);
+            } else {
+                toast.dismiss();
+                toast.error("No se encontraron órdenes para revertir.");
+            }
+    
+        } catch (error) {
+            console.error(error);
+            toast.dismiss();
+            toast.error("Error al revertir el abono");
+        }
     };
 
     const formatBs = (amount: number, rate: number) => {
@@ -354,6 +410,16 @@ export function ClientsAndPaymentsView({
                             className="pl-12 pr-6 py-3 w-full md:w-[300px] bg-white dark:bg-slate-900 border-0 rounded-[1.5rem] shadow-inner text-sm font-bold outline-none"
                         />
                     </div>
+                    {/* ✅ BOTÓN NUEVO: HISTORIAL DE ABONOS GLOBALES */}
+                    <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        onClick={() => setIsHistoryModalOpen(true)}
+                        className="rounded-full w-12 h-12 bg-white dark:bg-black/20 text-blue-600 hover:scale-105 transition-transform"
+                        title="Historial de Abonos Globales"
+                    >
+                        <History className="w-6 h-6" />
+                    </Button>
                 </div>
             </div>
 
@@ -486,7 +552,6 @@ export function ClientsAndPaymentsView({
                                                         </TableCell>
                                                         <TableCell className="text-right">
                                                             <Button 
-                                                                // ✅ USA LA FUNCIÓN DEL DASHBOARD PARA ABRIR EL MODAL CENTRAL
                                                                 onClick={() => onRegisterPayment(orden)} 
                                                                 className="bg-slate-900 dark:bg-white dark:text-black rounded-2xl hover:scale-105 transition-transform font-bold px-6 text-xs uppercase italic mr-2"
                                                             >
@@ -621,7 +686,7 @@ export function ClientsAndPaymentsView({
                 </Card>
             </div>
 
-            {/* MODAL ABONO GLOBAL (Este se mantiene local) */}
+            {/* MODAL ABONO GLOBAL (Registro) */}
             <Dialog open={isGlobalModalOpen} onOpenChange={(open) => !isGlobalUploading && closeGlobalModal()}>
                 <DialogContent className="max-w-md rounded-[2.5rem] border-0 shadow-2xl p-8 outline-none overflow-hidden bg-white dark:bg-[#1c1c1e]">
                     <DialogHeader className="space-y-4">
@@ -703,6 +768,166 @@ export function ClientsAndPaymentsView({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* ✅ MODAL NUEVO: HISTORIAL Y REVERSIÓN DE ABONOS GLOBALES */}
+            <GlobalPaymentHistoryModal 
+                isOpen={isHistoryModalOpen} 
+                onClose={() => setIsHistoryModalOpen(false)}
+                ordenes={ordenes}
+                onDeleteBatch={handleRevertGlobalBatch}
+            />
+
         </motion.div>
+    )
+}
+
+// --- COMPONENTE NUEVO: HISTORIAL DE PAGOS GLOBALES ---
+function GlobalPaymentHistoryModal({ isOpen, onClose, ordenes, onDeleteBatch }: any) {
+    const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+
+    // 1. INGENIERÍA INVERSA MEJORADA: Agrupar por URL de Imagen (Huella Digital)
+    const globalGroups = useMemo(() => {
+        const groups: any = {};
+
+        ordenes.forEach((orden: any) => {
+            (orden.registroPagos || []).forEach((pago: any) => {
+                // Solo procesamos los que tienen la marca de abono global
+                if (pago.nota && pago.nota.includes("(Consolidado Global)")) {
+                    
+                    // --- LÓGICA DE AGRUPACIÓN INTELIGENTE ---
+                    let groupKey: string;
+
+                    // PRIORIDAD 1: Si tiene imagen, esa es su "Huella Digital" única.
+                    // Todos los pagos con el mismo link pertenecen al mismo evento de clic.
+                    if (pago.imagenUrl && pago.imagenUrl.length > 10) {
+                        groupKey = `IMG_${pago.imagenUrl}`;
+                    } 
+                    // PRIORIDAD 2: Si no tiene imagen (es solo texto), usamos Fecha (minuto) + Nota
+                    else {
+                        const dateKey = new Date(pago.fecha || pago.fechaRegistro).toISOString().slice(0, 16); 
+                        // Limpiamos la nota para que sea idéntica
+                        const cleanNote = pago.nota.replace(" (Consolidado Global)", "").trim();
+                        groupKey = `TXT_${dateKey}_${cleanNote}`;
+                    }
+
+                    // --- CREACIÓN DEL GRUPO ---
+                    if (!groups[groupKey]) {
+                        groups[groupKey] = {
+                            id: groupKey,
+                            // Guardamos la fecha del primero que encontremos para mostrar
+                            fecha: pago.fecha || pago.fechaRegistro,
+                            // Limpiamos la etiqueta para mostrarla bonita en el título
+                            notaOriginal: pago.nota.replace(" (Consolidado Global)", ""),
+                            totalMonto: 0,
+                            imagenUrl: pago.imagenUrl, // Guardamos la imagen para mostrarla en el resumen
+                            distribucion: []
+                        };
+                    }
+
+                    // --- ACUMULACIÓN ---
+                    groups[groupKey].totalMonto += parseFloat(pago.montoUSD);
+                    groups[groupKey].distribucion.push({
+                        ordenId: orden.id,
+                        ordenNumero: orden.ordenNumero,
+                        montoAbonado: parseFloat(pago.montoUSD),
+                        pagoRef: pago // Referencia vital para poder borrarlo después
+                    });
+                }
+            });
+        });
+
+        // Ordenar: Los más recientes primero
+        return Object.values(groups).sort((a: any, b: any) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+    }, [ordenes]);
+
+    if (!isOpen) return null;
+
+    return (
+        <Dialog open={isOpen} onOpenChange={onClose}>
+            <DialogContent className="max-w-2xl bg-white dark:bg-[#1c1c1e] rounded-[2rem]">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2 text-xl font-black italic uppercase">
+                        <History className="w-6 h-6 text-blue-600" /> Historial de Abonos Globales
+                    </DialogTitle>
+                    <DialogDescription>
+                        Aquí puedes ver y revertir distribuciones de pago masivas.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="max-h-[60vh] overflow-y-auto space-y-4 pr-2 custom-scrollbar">
+                    {globalGroups.length === 0 ? (
+                        <div className="text-center py-10 opacity-50 font-bold uppercase text-xs">No hay abonos globales registrados</div>
+                    ) : (
+                        globalGroups.map((group: any) => (
+                            <div key={group.id} className="border border-slate-200 dark:border-white/10 rounded-2xl overflow-hidden bg-slate-50 dark:bg-black/20">
+                                {/* CABECERA DEL GRUPO */}
+                                <div className="p-4 flex justify-between items-center bg-white dark:bg-white/5">
+                                    <div className="flex gap-4 items-center">
+                                        <div className="relative h-12 w-12 rounded-xl overflow-hidden border border-black/5 dark:border-white/10">
+                                            {group.imagenUrl ? (
+                                                <img src={group.imagenUrl} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="w-full h-full bg-emerald-100 flex items-center justify-center text-emerald-600"><Layers size={20}/></div>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <p className="font-black text-sm uppercase text-slate-700 dark:text-white leading-tight mb-1">{group.notaOriginal}</p>
+                                            <p className="text-[10px] font-bold text-slate-400">
+                                                {new Date(group.fecha).toLocaleDateString()} • {new Date(group.fecha).toLocaleTimeString()}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-lg font-black text-emerald-600">{formatCurrency(group.totalMonto)}</p>
+                                        <p className="text-[9px] font-bold text-slate-400 uppercase">{group.distribucion.length} Órdenes afectadas</p>
+                                    </div>
+                                </div>
+
+                                {/* ACCIONES Y DETALLES */}
+                                <div className="px-4 py-2 flex justify-between items-center border-t border-slate-200 dark:border-white/5 bg-slate-100 dark:bg-black/40">
+                                    <Button 
+                                        variant="ghost" 
+                                        size="sm" 
+                                        onClick={() => setExpandedGroup(expandedGroup === group.id ? null : group.id)}
+                                        className="text-[10px] font-black uppercase text-slate-500 gap-1 h-8"
+                                    >
+                                        {expandedGroup === group.id ? "Ocultar Detalles" : "Ver Distribución"}
+                                        {expandedGroup === group.id ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>}
+                                    </Button>
+
+                                    <Button 
+                                        size="sm" 
+                                        variant="destructive"
+                                        onClick={() => onDeleteBatch(group)}
+                                        className="h-8 text-[10px] font-black uppercase bg-red-100 text-red-600 hover:bg-red-200 border-0 hover:scale-105 transition-transform"
+                                    >
+                                        <Trash2 className="w-3 h-3 mr-2" /> Revertir Abono
+                                    </Button>
+                                </div>
+
+                                {/* LISTA DESPLEGABLE DE ÓRDENES */}
+                                {expandedGroup === group.id && (
+                                    <div className="p-4 space-y-2 bg-white dark:bg-black/10 border-t border-slate-200 dark:border-white/5">
+                                        <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Detalle de la distribución:</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {group.distribucion.map((item: any, idx: number) => (
+                                                <div key={idx} className="flex justify-between items-center text-xs font-bold p-2 bg-slate-50 dark:bg-white/5 rounded-lg border border-slate-100 dark:border-white/5">
+                                                    <span className="text-slate-600 dark:text-slate-300">Orden #{item.ordenNumero}</span>
+                                                    <span className="text-emerald-600">{formatCurrency(item.montoAbonado)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ))
+                    )}
+                </div>
+                
+                <DialogFooter>
+                     <Button variant="outline" onClick={onClose} className="w-full rounded-xl font-bold h-12">Cerrar Historial</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     )
 }
