@@ -1,7 +1,7 @@
 // @/components/dashboard/ClientsAndPaymentsView.tsx
 "use client"
 
-import React, { useMemo, useState, useRef } from 'react'
+import React, { useMemo, useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { type OrdenServicio, EstadoPago } from '@/lib/types/orden'
 import { formatCurrency } from '@/lib/utils/order-utils' 
@@ -9,6 +9,8 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from "@/components/ui/checkbox"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { 
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter 
 } from "@/components/ui/dialog"
@@ -20,17 +22,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+
+// ✅ IMPORTACIÓN CORREGIDA: Se añadió Coins
 import { 
     Wallet, Search, 
     CheckCircle2, ChevronDown, ChevronUp, DollarSign, 
     CalendarClock, Activity, Sparkles,
     ChevronLeft, ChevronRight, Layers, CreditCard,
     UploadCloud, X, Loader2,
-    Printer, Banknote, History, Trash2 // ✅ Iconos nuevos agregados
+    Printer, Banknote, History, Trash2, Eye, EyeOff,
+    Lock, Unlock, ExternalLink, ImageIcon, CheckSquare, Landmark, Coins
 } from 'lucide-react'
 
 // Servicios y Utilidades
 import { PaymentHistoryView } from '@/components/orden/PaymentHistoryView' 
+import { OrderDetailModal } from '@/components/orden/order-detail-modal' 
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
 import { generateGeneralAccountStatusPDF } from "@/lib/services/pdf-generator"
 import { createNotification } from "@/lib/services/gastos-service"
@@ -91,17 +97,104 @@ export function ClientsAndPaymentsView({
     const itemsPerPage = 5
     const [expandedOrdenId, setExpandedOrdenId] = useState<string | null>(null);
 
+    // --- ESTADOS DE PRIVACIDAD ---
+    const [showTotalDeuda, setShowTotalDeuda] = useState(false);
+
     // --- ESTADOS DE MODAL GLOBAL (Pago) ---
     const [isGlobalModalOpen, setIsGlobalModalOpen] = useState(false)
     const [selectedClientForGlobal, setSelectedClientForGlobal] = useState<ClientSummary | null>(null)
-    const [globalPaymentData, setGlobalPaymentData] = useState({ monto: 0, nota: '', imagenUrl: '' })
+    const [selectedOrdersForGlobal, setSelectedOrdersForGlobal] = useState<string[]>([])
+    const [globalPaymentData, setGlobalPaymentData] = useState({ nota: '', imagenUrl: '' })
     
-    // --- ESTADOS NUEVOS: MODAL HISTORIAL GLOBAL ---
-    const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false) // ✅ Estado para el historial
-
+    // --- NUEVOS ESTADOS: CÁLCULO DE TASAS GLOBALES Y BILLETERAS ---
+    const [globalWallet, setGlobalWallet] = useState('cash_usd'); 
+    const [globalCurrencyMode, setGlobalCurrencyMode] = useState<'USD' | 'BS'>('USD');
+    const [globalCalculationBase, setGlobalCalculationBase] = useState<'USD' | 'EUR' | 'USDT'>('USD');
+    const [globalAmountUSD, setGlobalAmountUSD] = useState<string>('');
+    const [globalAmountBS, setGlobalAmountBS] = useState<string>('');
+    
+    // --- ESTADOS DE HISTORIAL Y VISOR ---
+    const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false) 
+    const [viewingImage, setViewingImage] = useState<string | null>(null)
+    const [viewingOrderDetails, setViewingOrderDetails] = useState<OrdenServicio | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null) 
     const [isGlobalUploading, setIsGlobalUploading] = useState(false) 
     const globalFileInputRef = useRef<HTMLInputElement>(null)
+
+    // ==============================================================
+    // LÓGICA INTELIGENTE DE BILLETERAS Y TASAS (TWO-WAY BINDING)
+    // ==============================================================
+    
+    // Reglas estrictas de Billeteras
+    useEffect(() => {
+        if (globalWallet === 'bank_bs') {
+            setGlobalCurrencyMode('BS');
+            setGlobalCalculationBase('USD'); 
+        } else if (globalWallet === 'zelle') {
+            setGlobalCurrencyMode('USD');
+        } else if (globalWallet === 'usdt') {
+            setGlobalCurrencyMode('USD');
+        } else {
+            setGlobalCurrencyMode('USD');
+        }
+        
+        // Limpiamos al cambiar billetera para evitar confusiones de conversión cruzada
+        setGlobalAmountUSD('');
+        setGlobalAmountBS('');
+    }, [globalWallet])
+
+    const getActiveRate = (base: string) => {
+        return base === 'USD' ? rates.usd : base === 'EUR' ? rates.eur : rates.usdt;
+    };
+
+    const handleAmountUSDChange = (valStr: string) => {
+        setGlobalAmountUSD(valStr);
+        const valUsd = parseFloat(valStr);
+        if (!isNaN(valUsd)) {
+            setGlobalAmountBS((valUsd * getActiveRate(globalCalculationBase)).toFixed(2));
+        } else {
+            setGlobalAmountBS('');
+        }
+    };
+
+    const handleAmountBSChange = (valStr: string) => {
+        setGlobalAmountBS(valStr);
+        const valBs = parseFloat(valStr);
+        if (!isNaN(valBs)) {
+            setGlobalAmountUSD((valBs / getActiveRate(globalCalculationBase)).toFixed(2));
+        } else {
+            setGlobalAmountUSD('');
+        }
+    };
+
+    const handleRateChange = (newBase: 'USD' | 'EUR' | 'USDT') => {
+        setGlobalCalculationBase(newBase);
+        const currentUsd = parseFloat(globalAmountUSD);
+        if (!isNaN(currentUsd) && currentUsd > 0) {
+            setGlobalAmountBS((currentUsd * getActiveRate(newBase)).toFixed(2));
+        }
+    };
+
+    // Auto-suma de montos al seleccionar/desmarcar órdenes
+    useEffect(() => {
+        if (isGlobalModalOpen && selectedClientForGlobal) {
+            const sumUSD = selectedClientForGlobal.ordenesPendientes
+                .filter(o => selectedOrdersForGlobal.includes(o.id))
+                .reduce((acc, orden) => {
+                    const deuda = Number(orden.totalUSD) - (Number(orden.montoPagadoUSD) || 0);
+                    return acc + Math.max(0, deuda);
+                }, 0);
+
+            if (sumUSD > 0) {
+                setGlobalAmountUSD(sumUSD.toFixed(2));
+                setGlobalAmountBS((sumUSD * getActiveRate(globalCalculationBase)).toFixed(2));
+            } else {
+                setGlobalAmountUSD('');
+                setGlobalAmountBS('');
+            }
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedOrdersForGlobal]); 
 
     // --- PROCESAMIENTO DE DATOS ---
     const { clientSummaries, pagadasCompletamente, totalPendienteGlobal } = useMemo(() => {
@@ -109,7 +202,6 @@ export function ClientsAndPaymentsView({
         let totalPendGlobal = 0;
         const lowerCaseSearch = searchTerm.toLowerCase().trim();
 
-        // 1. Filtrar historial de liquidadas
         const pagadas = ordenes
             .filter((o: any) => {
                 const total = Number(o.totalUSD) || 0;
@@ -121,7 +213,6 @@ export function ClientsAndPaymentsView({
             })
             .sort((a: any, b: any) => new Date(b.fecha || 0).getTime() - new Date(a.fecha || 0).getTime());
 
-        // 2. Procesar deudores agrupados
         ordenes.forEach((orden: any) => {
             if (orden.estadoPago === EstadoPago.ANULADO) return;
 
@@ -233,7 +324,7 @@ export function ClientsAndPaymentsView({
         }
     };
 
-    // --- MANEJO DE ABONO GLOBAL (Registro) ---
+    // --- MANEJO DE ABONO GLOBAL ---
     const handleGlobalImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -256,18 +347,36 @@ export function ClientsAndPaymentsView({
     };
 
     const handleProcessGlobalPayment = async () => {
-        if (!selectedClientForGlobal || globalPaymentData.monto <= 0 || isGlobalUploading) return;
+        const finalAmountUSD = parseFloat(globalAmountUSD || '0');
+
+        if (!selectedClientForGlobal || finalAmountUSD <= 0 || isGlobalUploading || selectedOrdersForGlobal.length === 0) return;
         
-        let remaining = globalPaymentData.monto;
+        let remaining = finalAmountUSD;
+        let finalNota = globalPaymentData.nota;
+
+        if (globalCurrencyMode === 'BS') {
+            const activeRate = getActiveRate(globalCalculationBase);
+            const symbol = globalCalculationBase === 'USD' ? '$' : globalCalculationBase === 'EUR' ? '€' : '₮';
+            const autoNote = ` [Ref: Bs. ${parseFloat(globalAmountBS).toLocaleString('es-VE')} @ ${activeRate.toFixed(2)} (${symbol})]`;
+            finalNota = (finalNota + autoNote).trim();
+        }
+
+        // Definir la etiqueta de método de pago según la billetera seleccionada
+        let metodoLegible = "Efectivo USD";
+        if (globalWallet === 'bank_bs') metodoLegible = "Pago Móvil / Bs";
+        if (globalWallet === 'zelle') metodoLegible = "Zelle";
+        if (globalWallet === 'usdt') metodoLegible = "Binance USDT";
+        if (globalWallet === 'cash_usd' && globalCurrencyMode === 'BS') metodoLegible = "Efectivo Bs";
+
+        const metodoFinal = `${metodoLegible} (Abono Global)`;
         
         try {
             toast.loading("Distribuyendo abono...");
-            const batch = writeBatch(db); // Usamos batch para consistencia (opcional, pero mejor)
+            const batch = writeBatch(db); 
             
-            // Nota: Firebase batch tiene límite de 500 operaciones. Si son muchas órdenes, cuidado.
-            // Aquí lo hacemos iterativo con updates individuales para asegurar la lógica de arrayUnion
-            
-            for (const orden of selectedClientForGlobal.ordenesPendientes) {
+            const ordersToProcess = selectedClientForGlobal.ordenesPendientes.filter(o => selectedOrdersForGlobal.includes(o.id));
+
+            for (const orden of ordersToProcess) {
                 if (remaining <= 0.009) break;
 
                 const saldoOrden = Number(orden.totalUSD) - (Number(orden.montoPagadoUSD) || 0);
@@ -281,10 +390,10 @@ export function ClientsAndPaymentsView({
                     const nuevoRecibo = {
                         montoUSD: aPagar,
                         fecha: new Date().toISOString(),
-                        nota: `${globalPaymentData.nota} (Consolidado Global)`.trim(),
+                        nota: finalNota,
                         imagenUrl: globalPaymentData.imagenUrl || "",
                         tasaBCV: rates.usd,
-                        metodo: "Abono Global"
+                        metodo: metodoFinal
                     };
 
                     await updateDoc(ordenRef, {
@@ -292,16 +401,6 @@ export function ClientsAndPaymentsView({
                         estadoPago: nuevoEstado,
                         registroPagos: arrayUnion(nuevoRecibo)
                     });
-
-                    // Notificación (Opcional, puede saturar si son muchas)
-                    if (selectedClientForGlobal.ordenesPendientes.length < 5) {
-                         await createNotification({
-                            title: "Abono Global Aplicado",
-                            description: `Pago de $${aPagar.toFixed(2)} a orden #${orden.ordenNumero}`,
-                            type: 'success',
-                            category: 'system'
-                        });
-                    }
 
                     remaining -= aPagar;
                 }
@@ -320,10 +419,16 @@ export function ClientsAndPaymentsView({
     const closeGlobalModal = () => {
         setIsGlobalModalOpen(false);
         setPreviewUrl(null);
-        setGlobalPaymentData({ monto: 0, nota: '', imagenUrl: '' });
+        setGlobalPaymentData({ nota: '', imagenUrl: '' });
+        setSelectedOrdersForGlobal([]);
+        setGlobalAmountUSD('');
+        setGlobalAmountBS('');
+        setGlobalCurrencyMode('USD');
+        setGlobalCalculationBase('USD');
+        setGlobalWallet('cash_usd'); // Resetea la billetera al salir
     };
 
-    // --- LÓGICA DE REVERSIÓN (DESHACER ABONO) ---
+    // --- REVERSIÓN DE ABONOS ---
     const handleRevertGlobalBatch = async (group: any) => {
         if (!confirm(`¿Estás seguro de revertir este abono global de ${formatCurrency(group.totalMonto)}?\n\nSe restará el saldo de ${group.distribucion.length} órdenes y se eliminará este registro.`)) return;
     
@@ -333,30 +438,22 @@ export function ClientsAndPaymentsView({
             let operationsCount = 0;
     
             for (const item of group.distribucion) {
-                // Buscamos la orden original en memoria
                 const ordenOriginal = ordenes.find((o: any) => o.id === item.ordenId);
                 if (!ordenOriginal) continue;
     
                 const ordenRef = doc(db, "ordenes", item.ordenId);
                 
-                // Calculamos nuevos valores (Restar el pago)
                 const nuevoMontoPagado = Math.max(0, (Number(ordenOriginal.montoPagadoUSD) || 0) - item.montoAbonado);
                 const nuevoEstado = (Number(ordenOriginal.totalUSD) - nuevoMontoPagado) <= 0.01 ? "PAGADO" : 
                                     (nuevoMontoPagado > 0 ? "ABONADO" : "PENDIENTE");
     
-                // Eliminamos el pago específico del array
-                // Comparamos fecha y monto para encontrar el exacto
                 const nuevoHistorial = (ordenOriginal.registroPagos || []).filter((p: any) => {
-                    // Si el pago tiene la misma imagen, es parte del lote (prioridad)
                     if (group.imagenUrl && p.imagenUrl === group.imagenUrl) return false;
-                    
-                    // Si no tiene imagen, usamos coincidencia exacta de fecha y monto
                     const isSameDate = p.fecha === item.pagoRef.fecha || p.fechaRegistro === item.pagoRef.fechaRegistro;
                     const isSameAmount = parseFloat(p.montoUSD) === item.montoAbonado;
                     const isSameNote = p.nota === item.pagoRef.nota;
-
-                    if (isSameDate && isSameAmount && isSameNote) return false; // Eliminar este
-                    return true; // Mantener los demás
+                    if (isSameDate && isSameAmount && isSameNote) return false; 
+                    return true; 
                 });
     
                 batch.update(ordenRef, {
@@ -410,7 +507,6 @@ export function ClientsAndPaymentsView({
                             className="pl-12 pr-6 py-3 w-full md:w-[300px] bg-white dark:bg-slate-900 border-0 rounded-[1.5rem] shadow-inner text-sm font-bold outline-none"
                         />
                     </div>
-                    {/* ✅ BOTÓN NUEVO: HISTORIAL DE ABONOS GLOBALES */}
                     <Button 
                         size="icon" 
                         variant="ghost" 
@@ -428,10 +524,26 @@ export function ClientsAndPaymentsView({
                 <motion.div variants={itemVariants} className="md:col-span-1">
                     <Card className="rounded-[3rem] border-0 bg-gradient-to-br from-rose-500 to-rose-700 text-white shadow-2xl relative p-8 space-y-4">
                         <Activity className="absolute -right-6 -bottom-6 w-32 h-32 opacity-10 rotate-12" />
-                        <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-70">Total por Cobrar</p>
-                        <div>
-                            <h3 className="text-5xl font-black tracking-tighter">{formatCurrency(totalPendienteGlobal)}</h3>
-                            <p className="text-xs font-bold opacity-80 mt-2">≈ {formatBs(totalPendienteGlobal, rates.usd)} (BCV)</p>
+                        
+                        <div className="flex justify-between items-center relative z-10">
+                            <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-70">Total por Cobrar</p>
+                            <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => setShowTotalDeuda(!showTotalDeuda)}
+                                className="text-white/70 hover:text-white hover:bg-white/20 rounded-full h-8 w-8 transition-colors"
+                            >
+                                {showTotalDeuda ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </Button>
+                        </div>
+
+                        <div className="relative z-10">
+                            <h3 className="text-5xl font-black tracking-tighter">
+                                {showTotalDeuda ? formatCurrency(totalPendienteGlobal) : "$***.**"}
+                            </h3>
+                            <p className="text-xs font-bold opacity-80 mt-2">
+                                ≈ {showTotalDeuda ? formatBs(totalPendienteGlobal, rates.usd) : "Bs. ***.**"} (BCV)
+                            </p>
                         </div>
                     </Card>
                 </motion.div>
@@ -527,7 +639,11 @@ export function ClientsAndPaymentsView({
 
                                                 {summary.ordenesPendientes.length > 1 && (
                                                     <Button 
-                                                        onClick={() => { setSelectedClientForGlobal(summary); setIsGlobalModalOpen(true); }}
+                                                        onClick={() => { 
+                                                            setSelectedClientForGlobal(summary); 
+                                                            setSelectedOrdersForGlobal([]);
+                                                            setIsGlobalModalOpen(true); 
+                                                        }}
                                                         className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black py-7 px-8 text-xs uppercase italic tracking-widest gap-3 shadow-xl"
                                                     >
                                                         <Layers className="w-5 h-5"/> Abono Global
@@ -686,246 +802,471 @@ export function ClientsAndPaymentsView({
                 </Card>
             </div>
 
-            {/* MODAL ABONO GLOBAL (Registro) */}
+            {/* MODAL ABONO GLOBAL: DISTRIBUCIÓN EN 2 COLUMNAS */}
             <Dialog open={isGlobalModalOpen} onOpenChange={(open) => !isGlobalUploading && closeGlobalModal()}>
-                <DialogContent className="max-w-md rounded-[2.5rem] border-0 shadow-2xl p-8 outline-none overflow-hidden bg-white dark:bg-[#1c1c1e]">
-                    <DialogHeader className="space-y-4">
-                        <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-500/20 rounded-2xl flex items-center justify-center text-emerald-600 mx-auto shadow-inner"><CreditCard className="w-8 h-8" /></div>
-                        <DialogTitle className="text-2xl font-black uppercase italic text-center text-slate-900 dark:text-white leading-none">Abono General</DialogTitle>
-                        <DialogDescription className="text-center font-bold text-[10px] uppercase text-slate-400 tracking-widest">Pago compartido para {selectedClientForGlobal?.nombre}</DialogDescription>
+                <DialogContent className="max-w-md md:max-w-5xl rounded-[2.5rem] border-0 shadow-2xl p-0 outline-none bg-white dark:bg-[#1c1c1e] flex flex-col max-h-[95vh] overflow-hidden">
+                    
+                    <DialogHeader className="space-y-2 shrink-0 p-6 md:p-8 pb-4 border-b border-slate-100 dark:border-white/5">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-500/20 rounded-2xl flex items-center justify-center text-emerald-600 shadow-inner shrink-0">
+                                <CreditCard className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <DialogTitle className="text-2xl font-black uppercase italic text-slate-900 dark:text-white leading-none">Abono General</DialogTitle>
+                                <DialogDescription className="font-bold text-[10px] uppercase text-slate-400 tracking-widest mt-1">
+                                    Pago compartido para {selectedClientForGlobal?.nombre}
+                                </DialogDescription>
+                            </div>
+                        </div>
                     </DialogHeader>
 
-                    <div className="space-y-6 py-6">
-                        <div className="space-y-2">
-                            <label className="text-[10px] font-black uppercase tracking-widest ml-2 opacity-50 text-slate-900 dark:text-white">Monto del Abono (USD)</label>
-                            <div className="relative">
-                                <DollarSign className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-500" />
-                                <input 
-                                    type="number" 
-                                    value={globalPaymentData.monto} 
-                                    onChange={(e) => setGlobalPaymentData({...globalPaymentData, monto: Number(e.target.value)})}
-                                    className="h-16 w-full pl-14 pr-6 rounded-2xl border-0 bg-slate-50 dark:bg-black/20 font-black text-2xl outline-none focus:ring-2 ring-emerald-500/20 text-slate-900 dark:text-white" 
-                                    placeholder="0.00"
-                                />
+                    {/* CONTENEDOR GRID DE DOS COLUMNAS */}
+                    <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+                        
+                        {/* COLUMNA IZQUIERDA: LISTA DE ÓRDENES */}
+                        <div className="w-full md:w-1/2 bg-slate-50/50 dark:bg-black/10 border-r border-slate-100 dark:border-white/5 p-6 md:p-8 overflow-y-auto custom-scrollbar flex flex-col">
+                            <div className="flex justify-between items-center mb-4">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Órdenes a Liquidar</p>
+                                <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    onClick={() => {
+                                        if (selectedOrdersForGlobal.length === selectedClientForGlobal?.ordenesPendientes.length) {
+                                            setSelectedOrdersForGlobal([]); // Desmarcar todo
+                                        } else {
+                                            setSelectedOrdersForGlobal(selectedClientForGlobal?.ordenesPendientes.map(o => o.id) || []); // Marcar todo
+                                        }
+                                    }}
+                                    className="h-8 text-[9px] font-black uppercase text-blue-600 border-blue-200 hover:text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:hover:bg-blue-900/30 rounded-xl px-3 shadow-sm"
+                                >
+                                    {selectedOrdersForGlobal.length === selectedClientForGlobal?.ordenesPendientes.length ? "Desmarcar Todo" : "Marcar Todo"}
+                                </Button>
+                            </div>
+                            
+                            <div className="space-y-3">
+                                {selectedClientForGlobal?.ordenesPendientes.map(orden => {
+                                    const deudaOrden = Number(orden.totalUSD) - (Number(orden.montoPagadoUSD) || 0);
+
+                                    return (
+                                        <div key={orden.id} className={cn("flex flex-col gap-2 p-4 rounded-2xl transition-all border", selectedOrdersForGlobal.includes(orden.id) ? "bg-white dark:bg-slate-800 border-blue-200 dark:border-blue-900 shadow-md scale-[1.01]" : "bg-slate-50/80 dark:bg-white/5 border-slate-200 dark:border-white/10 opacity-70 hover:opacity-100")}>
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    <Checkbox 
+                                                        checked={selectedOrdersForGlobal.includes(orden.id)}
+                                                        onCheckedChange={(checked) => {
+                                                            if (checked) setSelectedOrdersForGlobal(prev => [...prev, orden.id]);
+                                                            else setSelectedOrdersForGlobal(prev => prev.filter(id => id !== orden.id));
+                                                        }}
+                                                        className="w-5 h-5 rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                                                    />
+                                                    <span className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-tight">Orden #{orden.ordenNumero}</span>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-sm font-black text-rose-500 bg-rose-50 dark:bg-rose-500/10 px-2 py-1 rounded-lg">{formatCurrency(deudaOrden)}</span>
+                                                    <Button 
+                                                        variant="ghost" 
+                                                        size="icon" 
+                                                        className="h-8 w-8 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-500/20 dark:text-blue-400 transition-colors shrink-0"
+                                                        onClick={(e) => { e.preventDefault(); setViewingOrderDetails(orden); }}
+                                                        title="Ver detalles completos"
+                                                    >
+                                                        <Eye className="w-4 h-4" />
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                            
+                                            {/* LISTA VERTICAL DE ÍTEMS */}
+                                            <div className="pl-8 space-y-1.5 pt-1">
+                                                {orden.items && orden.items.length > 0 ? (
+                                                    orden.items.map((item: any, i: number) => (
+                                                        <p key={i} className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase leading-tight flex items-start gap-2">
+                                                            <span className="text-slate-300 mt-0.5">•</span> 
+                                                            <span>{item.nombre} <span className="opacity-60 lowercase font-medium ml-1">x{item.cantidad}</span></span>
+                                                        </p>
+                                                    ))
+                                                ) : (
+                                                    <p className="text-[10px] text-slate-400 italic">Sin ítems detallados</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )
+                                })}
                             </div>
                         </div>
 
-                         <div className="space-y-2">
-                            <label className="text-[10px] font-black uppercase tracking-widest ml-2 opacity-50 text-slate-900 dark:text-white">Capture de Pago</label>
-                            <input type="file" ref={globalFileInputRef} onChange={handleGlobalImageUpload} accept="image/*" className="hidden" />
-                            
-                            {!previewUrl ? (
-                                <div 
-                                    onClick={() => !isGlobalUploading && globalFileInputRef.current?.click()}
-                                    className={cn(
-                                        "h-24 rounded-2xl border-2 border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-slate-100",
-                                        isGlobalUploading && "pointer-events-none opacity-70"
-                                    )}
-                                >
-                                    {isGlobalUploading ? <Loader2 className="w-6 h-6 text-emerald-500 animate-spin" /> : (
-                                        <>
-                                            <UploadCloud className="w-8 h-8 text-slate-300 dark:text-white/30" />
-                                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-2">Haga clic para subir</p>
-                                        </>
-                                    )}
+                        {/* COLUMNA DERECHA: FORMULARIO */}
+                        <div className="w-full md:w-1/2 p-6 md:p-8 flex flex-col overflow-y-auto custom-scrollbar bg-white dark:bg-[#1c1c1e]">
+                            <div className="space-y-6 flex-1">
+                                
+                                {/* NUEVO: SELECCIÓN DE BILLETERA */}
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase tracking-widest ml-1 text-slate-400">Destino del Dinero</label>
+                                    <div className="grid grid-cols-4 gap-2">
+                                        <WalletOption id="cash_usd" label="Caja" icon={Wallet} active={globalWallet} onClick={setGlobalWallet} color="emerald" />
+                                        <WalletOption id="bank_bs" label="Banco" icon={Landmark} active={globalWallet} onClick={setGlobalWallet} color="blue" />
+                                        <WalletOption id="zelle" label="Zelle" icon={CreditCard} active={globalWallet} onClick={setGlobalWallet} color="purple" />
+                                        <WalletOption id="usdt" label="Binance" icon={Coins} active={globalWallet} onClick={setGlobalWallet} color="orange" />
+                                    </div>
                                 </div>
-                            ) : (
-                                <div className="relative h-40 rounded-2xl overflow-hidden border border-black/5 dark:border-white/10 shadow-lg group">
-                                    <img src={previewUrl} alt="Comprobante" className="w-full h-full object-cover" />
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        disabled={isGlobalUploading}
-                                        onClick={() => { setPreviewUrl(null); setGlobalPaymentData(prev => ({ ...prev, imagenUrl: '' })); if(globalFileInputRef.current) globalFileInputRef.current.value = ''; }}
-                                        className="absolute top-2 right-2 bg-black/50 hover:bg-red-500 text-white rounded-full h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                                    >
-                                        <X className="w-4 h-4" />
-                                    </Button>
-                                </div>
-                            )}
-                        </div>
 
-                        <div className="space-y-2">
-                            <label className="text-[10px] font-black uppercase tracking-widest ml-2 opacity-50 text-slate-900 dark:text-white">Referencia de Pago</label>
-                            <textarea 
-                                value={globalPaymentData.nota} 
-                                onChange={(e) => setGlobalPaymentData({...globalPaymentData, nota: e.target.value})}
-                                className="w-full h-24 p-5 rounded-2xl border-0 bg-slate-50 dark:bg-black/20 font-bold text-xs resize-none outline-none focus:ring-2 ring-emerald-500/20 text-slate-900 dark:text-white" 
-                                placeholder="Indica banco, referencia..."
-                            />
+                                {/* SELECTOR DE MONEDA E INPUTS CON TWO-WAY BINDING */}
+                                <div className="space-y-4">
+                                    <Tabs value={globalCurrencyMode} onValueChange={(v) => {setGlobalCurrencyMode(v as any); setGlobalAmountUSD(''); setGlobalAmountBS('');}} className="w-full">
+                                        <TabsList className="grid w-full grid-cols-2 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-xl mb-4 h-12">
+                                            <TabsTrigger value="USD" className="font-black text-xs uppercase tracking-widest rounded-lg data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:shadow-sm">Dólares ($)</TabsTrigger>
+                                            <TabsTrigger value="BS" disabled={globalWallet === 'zelle' || globalWallet === 'usdt'} className="font-black text-xs uppercase tracking-widest rounded-lg data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:shadow-sm disabled:opacity-50">Bolívares (Bs)</TabsTrigger>
+                                        </TabsList>
+
+                                        <TabsContent value="USD" className="mt-0">
+                                            <div className="space-y-2">
+                                                <label className="text-[10px] font-black uppercase tracking-widest ml-1 text-slate-400">Monto del Abono (USD)</label>
+                                                <div className="relative">
+                                                    <DollarSign className="absolute left-5 top-1/2 -translate-y-1/2 w-6 h-6 text-emerald-500" />
+                                                    <input 
+                                                        type="number" 
+                                                        value={globalAmountUSD === '' ? '' : globalAmountUSD} 
+                                                        onChange={(e) => handleAmountUSDChange(e.target.value)}
+                                                        className="h-16 w-full pl-14 pr-6 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 font-black text-2xl outline-none focus:ring-2 ring-emerald-500/20 text-slate-900 dark:text-white transition-all hover:bg-slate-100" 
+                                                        placeholder="0.00"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </TabsContent>
+
+                                        <TabsContent value="BS" className="mt-0 space-y-4">
+                                            <div className="grid grid-cols-3 gap-2">
+                                                <button onClick={() => handleRateChange('USD')} className={cn("flex flex-col items-center justify-center p-2 rounded-xl border transition-all h-14", globalCalculationBase === 'USD' ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 ring-2 ring-emerald-500/20" : "border-slate-200 bg-slate-50 dark:bg-black/20 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5")}>
+                                                    <span className="text-[9px] font-black uppercase flex items-center gap-1"><DollarSign size={10}/> BCV</span>
+                                                    <span className="text-xs font-bold">{rates.usd.toFixed(2)}</span>
+                                                </button>
+                                                <button onClick={() => handleRateChange('EUR')} className={cn("flex flex-col items-center justify-center p-2 rounded-xl border transition-all h-14", globalCalculationBase === 'EUR' ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400 ring-2 ring-blue-500/20" : "border-slate-200 bg-slate-50 dark:bg-black/20 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5")}>
+                                                    <span className="text-[9px] font-black uppercase flex items-center gap-1">€ EUR</span>
+                                                    <span className="text-xs font-bold">{rates.eur.toFixed(2)}</span>
+                                                </button>
+                                                <button onClick={() => handleRateChange('USDT')} className={cn("flex flex-col items-center justify-center p-2 rounded-xl border transition-all h-14", globalCalculationBase === 'USDT' ? "border-orange-500 bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-400 ring-2 ring-orange-500/20" : "border-slate-200 bg-slate-50 dark:bg-black/20 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5")}>
+                                                    <span className="text-[9px] font-black uppercase flex items-center gap-1">₮ PARAL</span>
+                                                    <span className="text-xs font-bold">{rates.usdt.toFixed(2)}</span>
+                                                </button>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-2">
+                                                    <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Monto en Bs.</label>
+                                                    <div className="relative">
+                                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">Bs</span>
+                                                        <input 
+                                                            type="number" 
+                                                            value={globalAmountBS === '' ? '' : globalAmountBS} 
+                                                            onChange={(e) => handleAmountBSChange(e.target.value)}
+                                                            className="h-14 w-full pl-9 pr-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 font-black text-xl outline-none focus:ring-2 ring-emerald-500/20 text-slate-900 dark:text-white transition-all hover:bg-slate-100" 
+                                                            placeholder="0.00"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Equivalente ($)</label>
+                                                    <div className="relative">
+                                                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
+                                                        <input 
+                                                            type="number" 
+                                                            value={globalAmountUSD === '' ? '' : globalAmountUSD} 
+                                                            onChange={(e) => handleAmountUSDChange(e.target.value)}
+                                                            className="h-14 w-full pl-9 pr-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800/50 font-black text-lg outline-none focus:ring-2 ring-emerald-500/20 text-slate-700 dark:text-slate-300 transition-all hover:bg-slate-100" 
+                                                            placeholder="0.00"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </TabsContent>
+                                    </Tabs>
+                                </div>
+
+                                {/* CAPTURE Y NOTA */}
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase tracking-widest ml-1 text-slate-400">Capture de Pago</label>
+                                    <input type="file" ref={globalFileInputRef} onChange={handleGlobalImageUpload} accept="image/*" className="hidden" />
+                                    
+                                    {!previewUrl ? (
+                                        <div 
+                                            onClick={() => !isGlobalUploading && globalFileInputRef.current?.click()}
+                                            className={cn(
+                                                "h-28 rounded-2xl border-2 border-dashed border-slate-300 dark:border-white/20 bg-slate-50 dark:bg-black/20 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-slate-100 hover:border-emerald-400",
+                                                isGlobalUploading && "pointer-events-none opacity-70"
+                                            )}
+                                        >
+                                            {isGlobalUploading ? <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" /> : (
+                                                <>
+                                                    <UploadCloud className="w-8 h-8 text-slate-400 dark:text-white/40 mb-2" />
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Haga clic para subir comprobante</p>
+                                                </>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="relative h-40 rounded-2xl overflow-hidden border border-slate-200 dark:border-white/10 shadow-lg group">
+                                            <img src={previewUrl} alt="Comprobante" className="w-full h-full object-cover" />
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                disabled={isGlobalUploading}
+                                                onClick={() => { setPreviewUrl(null); setGlobalPaymentData(prev => ({ ...prev, imagenUrl: '' })); if(globalFileInputRef.current) globalFileInputRef.current.value = ''; }}
+                                                className="absolute top-2 right-2 bg-black/60 hover:bg-red-500 text-white rounded-full h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm"
+                                            >
+                                                <X className="w-4 h-4" />
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase tracking-widest ml-1 text-slate-400">Referencia de Pago</label>
+                                    <textarea 
+                                        value={globalPaymentData.nota} 
+                                        onChange={(e) => setGlobalPaymentData({...globalPaymentData, nota: e.target.value})}
+                                        className="w-full h-24 p-5 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 font-bold text-xs resize-none outline-none focus:ring-2 ring-emerald-500/20 text-slate-900 dark:text-white transition-all hover:bg-slate-100" 
+                                        placeholder="Indica banco receptor, número de referencia o detalles..."
+                                    />
+                                </div>
+                            </div>
+
+                            {/* BOTONES DE ACCIÓN (AL FINAL DE LA COLUMNA DERECHA) */}
+                            <div className="mt-8 pt-6 border-t border-slate-100 dark:border-white/5 flex flex-col gap-3 shrink-0">
+                                <Button 
+                                    onClick={handleProcessGlobalPayment}
+                                    disabled={parseFloat(globalAmountUSD || '0') <= 0 || isGlobalUploading || selectedOrdersForGlobal.length === 0}
+                                    className="w-full h-16 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl shadow-emerald-500/20 transition-all active:scale-95 disabled:opacity-50"
+                                >
+                                    {isGlobalUploading ? "Subiendo Comprobante..." : "Confirmar Pago Global"}
+                                </Button>
+                                <Button variant="ghost" onClick={closeGlobalModal} className="font-bold text-slate-400 text-xs uppercase tracking-widest h-12 rounded-xl">Cancelar</Button>
+                            </div>
                         </div>
                     </div>
-
-                    <DialogFooter className="flex-col sm:flex-col gap-3">
-                        <Button 
-                            onClick={handleProcessGlobalPayment}
-                            disabled={globalPaymentData.monto <= 0 || isGlobalUploading}
-                            className="w-full h-16 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black uppercase italic tracking-widest shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
-                        >
-                            {isGlobalUploading ? "Subiendo..." : "Confirmar Pago Global"}
-                        </Button>
-                        <Button variant="ghost" onClick={closeGlobalModal} className="font-bold text-slate-400 text-[10px] uppercase">Cerrar</Button>
-                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 
-            {/* ✅ MODAL NUEVO: HISTORIAL Y REVERSIÓN DE ABONOS GLOBALES */}
+            {/* MODAL HISTORIAL Y REVERSIÓN DE ABONOS GLOBALES */}
             <GlobalPaymentHistoryModal 
                 isOpen={isHistoryModalOpen} 
                 onClose={() => setIsHistoryModalOpen(false)}
                 ordenes={ordenes}
                 onDeleteBatch={handleRevertGlobalBatch}
+                onViewImage={(url: string) => setViewingImage(url)}
+            />
+
+            {/* VISOR DE IMAGEN GENERAL */}
+            <Dialog open={!!viewingImage} onOpenChange={(open) => !open && setViewingImage(null)}>
+                <DialogContent className="max-w-4xl p-0 bg-transparent border-none shadow-none flex justify-center items-center pointer-events-none">
+                    <DialogTitle className="sr-only">Vista previa del comprobante</DialogTitle>
+                    <div className="relative group max-h-[90vh] w-auto pointer-events-auto">
+                        <div className="absolute top-4 right-4 z-50 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {viewingImage && (
+                                <a href={viewingImage} target="_blank" rel="noreferrer" className="p-3 bg-black/60 text-white rounded-full flex items-center justify-center hover:bg-black/80 transition-colors backdrop-blur-md">
+                                    <ExternalLink className="w-5 h-5" />
+                                </a>
+                            )}
+                        </div>
+                        {viewingImage && <img src={viewingImage} className="w-full h-auto max-h-[85vh] object-contain rounded-2xl shadow-2xl bg-white" alt="Comprobante" />}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* MODAL PARA VER ORDEN DETALLADA DESDE EL ABONO GLOBAL */}
+            <OrderDetailModal 
+                open={!!viewingOrderDetails} 
+                onClose={() => setViewingOrderDetails(null)} 
+                orden={viewingOrderDetails}
+                rates={rates} 
             />
 
         </motion.div>
     )
 }
 
-// --- COMPONENTE NUEVO: HISTORIAL DE PAGOS GLOBALES ---
-function GlobalPaymentHistoryModal({ isOpen, onClose, ordenes, onDeleteBatch }: any) {
-    const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+// COMPONENTE BILLETERAS
+function WalletOption({ id, label, icon: Icon, active, onClick, color }: any) {
+    const isSelected = active === id;
+    const colors: any = { emerald: "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", blue: "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400", purple: "border-purple-500 bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400", orange: "border-orange-500 bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-400" }
+    return (
+        <div onClick={() => onClick(id)} className={cn("cursor-pointer flex flex-col items-center justify-center gap-1 p-2 rounded-xl border-2 transition-all h-20 hover:scale-105 active:scale-95", isSelected ? colors[color] : "bg-slate-50 dark:bg-black/20 border-transparent hover:bg-slate-100 dark:hover:bg-white/5 text-slate-400 shadow-sm")}>
+            <Icon size={20} />
+            <span className="text-[9px] font-black uppercase text-center leading-none">{label}</span>
+        </div>
+    )
+}
 
-    // 1. INGENIERÍA INVERSA MEJORADA: Agrupar por URL de Imagen (Huella Digital)
+// --- COMPONENTE: HISTORIAL DE PAGOS GLOBALES ---
+function GlobalPaymentHistoryModal({ isOpen, onClose, ordenes, onDeleteBatch, onViewImage }: any) {
+    const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+    const [unlockedState, setUnlockedState] = useState<Record<string, boolean>>({});
+
     const globalGroups = useMemo(() => {
         const groups: any = {};
 
         ordenes.forEach((orden: any) => {
             (orden.registroPagos || []).forEach((pago: any) => {
-                // Solo procesamos los que tienen la marca de abono global
                 if (pago.nota && pago.nota.includes("(Consolidado Global)")) {
                     
-                    // --- LÓGICA DE AGRUPACIÓN INTELIGENTE ---
                     let groupKey: string;
 
-                    // PRIORIDAD 1: Si tiene imagen, esa es su "Huella Digital" única.
-                    // Todos los pagos con el mismo link pertenecen al mismo evento de clic.
                     if (pago.imagenUrl && pago.imagenUrl.length > 10) {
                         groupKey = `IMG_${pago.imagenUrl}`;
                     } 
-                    // PRIORIDAD 2: Si no tiene imagen (es solo texto), usamos Fecha (minuto) + Nota
                     else {
                         const dateKey = new Date(pago.fecha || pago.fechaRegistro).toISOString().slice(0, 16); 
-                        // Limpiamos la nota para que sea idéntica
                         const cleanNote = pago.nota.replace(" (Consolidado Global)", "").trim();
                         groupKey = `TXT_${dateKey}_${cleanNote}`;
                     }
 
-                    // --- CREACIÓN DEL GRUPO ---
                     if (!groups[groupKey]) {
                         groups[groupKey] = {
                             id: groupKey,
-                            // Guardamos la fecha del primero que encontremos para mostrar
                             fecha: pago.fecha || pago.fechaRegistro,
-                            // Limpiamos la etiqueta para mostrarla bonita en el título
                             notaOriginal: pago.nota.replace(" (Consolidado Global)", ""),
+                            clienteNombre: orden.cliente?.nombreRazonSocial || 'Cliente Desconocido',
                             totalMonto: 0,
-                            imagenUrl: pago.imagenUrl, // Guardamos la imagen para mostrarla en el resumen
+                            imagenUrl: pago.imagenUrl, 
                             distribucion: []
                         };
                     }
 
-                    // --- ACUMULACIÓN ---
                     groups[groupKey].totalMonto += parseFloat(pago.montoUSD);
                     groups[groupKey].distribucion.push({
                         ordenId: orden.id,
                         ordenNumero: orden.ordenNumero,
                         montoAbonado: parseFloat(pago.montoUSD),
-                        pagoRef: pago // Referencia vital para poder borrarlo después
+                        pagoRef: pago 
                     });
                 }
             });
         });
 
-        // Ordenar: Los más recientes primero
         return Object.values(groups).sort((a: any, b: any) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
     }, [ordenes]);
+
+    const toggleLock = (id: string) => {
+        setUnlockedState(prev => ({ ...prev, [id]: !prev[id] }));
+    };
 
     if (!isOpen) return null;
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-2xl bg-white dark:bg-[#1c1c1e] rounded-[2rem]">
-                <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2 text-xl font-black italic uppercase">
-                        <History className="w-6 h-6 text-blue-600" /> Historial de Abonos Globales
+            <DialogContent className="max-w-2xl bg-white dark:bg-[#1c1c1e] rounded-[3rem] border-0 p-0 flex flex-col max-h-[95vh] overflow-hidden">
+                <DialogHeader className="p-6 md:p-8 pb-4 shrink-0">
+                    <DialogTitle className="flex items-center gap-3 text-2xl font-black italic uppercase">
+                        <History className="w-8 h-8 text-blue-600" /> Historial de Abonos Globales
                     </DialogTitle>
-                    <DialogDescription>
+                    <DialogDescription className="text-xs font-bold uppercase tracking-widest mt-2">
                         Aquí puedes ver y revertir distribuciones de pago masivas.
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="max-h-[60vh] overflow-y-auto space-y-4 pr-2 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto px-6 md:px-8 space-y-4 custom-scrollbar">
                     {globalGroups.length === 0 ? (
                         <div className="text-center py-10 opacity-50 font-bold uppercase text-xs">No hay abonos globales registrados</div>
                     ) : (
-                        globalGroups.map((group: any) => (
-                            <div key={group.id} className="border border-slate-200 dark:border-white/10 rounded-2xl overflow-hidden bg-slate-50 dark:bg-black/20">
-                                {/* CABECERA DEL GRUPO */}
-                                <div className="p-4 flex justify-between items-center bg-white dark:bg-white/5">
-                                    <div className="flex gap-4 items-center">
-                                        <div className="relative h-12 w-12 rounded-xl overflow-hidden border border-black/5 dark:border-white/10">
-                                            {group.imagenUrl ? (
-                                                <img src={group.imagenUrl} className="w-full h-full object-cover" />
-                                            ) : (
-                                                <div className="w-full h-full bg-emerald-100 flex items-center justify-center text-emerald-600"><Layers size={20}/></div>
-                                            )}
+                        globalGroups.map((group: any) => {
+                            const isUnlocked = !!unlockedState[group.id];
+                            
+                            return (
+                                <div key={group.id} className="border border-slate-200 dark:border-white/10 rounded-3xl overflow-hidden bg-slate-50 dark:bg-black/20">
+                                    {/* CABECERA DEL GRUPO */}
+                                    <div className="p-5 flex justify-between items-center bg-white dark:bg-white/5">
+                                        <div className="flex gap-4 items-center">
+                                            {/* IMAGEN INTERACTIVA */}
+                                            <div 
+                                                onClick={() => group.imagenUrl && onViewImage(group.imagenUrl)}
+                                                className={cn("relative h-14 w-14 rounded-2xl overflow-hidden border border-black/5 dark:border-white/10 shrink-0", group.imagenUrl ? "cursor-pointer hover:opacity-80 transition-opacity" : "")}
+                                                title={group.imagenUrl ? "Ver capture completo" : "Sin comprobante"}
+                                            >
+                                                {group.imagenUrl ? (
+                                                    <img src={group.imagenUrl} className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-400"><ImageIcon size={20}/></div>
+                                                )}
+                                            </div>
+                                            <div className="overflow-hidden">
+                                                <p className="font-black text-sm uppercase text-slate-800 dark:text-white leading-tight mb-1 truncate">{group.clienteNombre}</p>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate max-w-[180px] md:max-w-[220px]">
+                                                    {group.notaOriginal || "Sin nota"}
+                                                </p>
+                                                <p className="text-[9px] font-bold text-slate-400 mt-1">
+                                                    {new Date(group.fecha).toLocaleDateString()} • {new Date(group.fecha).toLocaleTimeString()}
+                                                </p>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <p className="font-black text-sm uppercase text-slate-700 dark:text-white leading-tight mb-1">{group.notaOriginal}</p>
-                                            <p className="text-[10px] font-bold text-slate-400">
-                                                {new Date(group.fecha).toLocaleDateString()} • {new Date(group.fecha).toLocaleTimeString()}
-                                            </p>
+                                        <div className="text-right shrink-0">
+                                            <p className="text-2xl font-black text-emerald-600 tracking-tighter">{formatCurrency(group.totalMonto)}</p>
+                                            <p className="text-[9px] font-bold text-slate-400 uppercase">{group.distribucion.length} Órdenes afectadas</p>
                                         </div>
                                     </div>
-                                    <div className="text-right">
-                                        <p className="text-lg font-black text-emerald-600">{formatCurrency(group.totalMonto)}</p>
-                                        <p className="text-[9px] font-bold text-slate-400 uppercase">{group.distribucion.length} Órdenes afectadas</p>
+
+                                    {/* ACCIONES Y DETALLES */}
+                                    <div className="px-5 py-3 flex justify-between items-center border-t border-slate-200 dark:border-white/5 bg-slate-100 dark:bg-black/40">
+                                        <Button 
+                                            variant="ghost" 
+                                            size="sm" 
+                                            onClick={() => setExpandedGroup(expandedGroup === group.id ? null : group.id)}
+                                            className="text-[10px] font-black uppercase text-slate-500 gap-1 h-8 rounded-xl"
+                                        >
+                                            {expandedGroup === group.id ? "Ocultar Detalles" : "Ver Distribución"}
+                                            {expandedGroup === group.id ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>}
+                                        </Button>
+
+                                        {/* CANDADO DE SEGURIDAD */}
+                                        <div className="flex items-center gap-2">
+                                            <Button 
+                                                variant="ghost" 
+                                                size="icon" 
+                                                onClick={() => toggleLock(group.id)}
+                                                className="h-8 w-8 rounded-full bg-white dark:bg-slate-800 shadow-sm hover:scale-105 transition-transform"
+                                                title={isUnlocked ? "Bloquear acción" : "Desbloquear para revertir"}
+                                            >
+                                                {isUnlocked ? <Unlock className="w-3.5 h-3.5 text-orange-500" /> : <Lock className="w-3.5 h-3.5 text-slate-400" />}
+                                            </Button>
+
+                                            <AnimatePresence>
+                                                {isUnlocked && (
+                                                    <motion.div initial={{ width: 0, opacity: 0 }} animate={{ width: 'auto', opacity: 1 }} exit={{ width: 0, opacity: 0 }}>
+                                                        <Button 
+                                                            size="sm" 
+                                                            variant="destructive"
+                                                            onClick={() => onDeleteBatch(group)}
+                                                            className="h-8 text-[10px] font-black uppercase bg-red-50 text-red-600 hover:bg-red-500 hover:text-white border-0 shadow-sm transition-all rounded-xl"
+                                                        >
+                                                            <Trash2 className="w-3 h-3 mr-2" /> Revertir Abono
+                                                        </Button>
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
+                                        </div>
                                     </div>
-                                </div>
 
-                                {/* ACCIONES Y DETALLES */}
-                                <div className="px-4 py-2 flex justify-between items-center border-t border-slate-200 dark:border-white/5 bg-slate-100 dark:bg-black/40">
-                                    <Button 
-                                        variant="ghost" 
-                                        size="sm" 
-                                        onClick={() => setExpandedGroup(expandedGroup === group.id ? null : group.id)}
-                                        className="text-[10px] font-black uppercase text-slate-500 gap-1 h-8"
-                                    >
-                                        {expandedGroup === group.id ? "Ocultar Detalles" : "Ver Distribución"}
-                                        {expandedGroup === group.id ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>}
-                                    </Button>
-
-                                    <Button 
-                                        size="sm" 
-                                        variant="destructive"
-                                        onClick={() => onDeleteBatch(group)}
-                                        className="h-8 text-[10px] font-black uppercase bg-red-100 text-red-600 hover:bg-red-200 border-0 hover:scale-105 transition-transform"
-                                    >
-                                        <Trash2 className="w-3 h-3 mr-2" /> Revertir Abono
-                                    </Button>
-                                </div>
-
-                                {/* LISTA DESPLEGABLE DE ÓRDENES */}
-                                {expandedGroup === group.id && (
-                                    <div className="p-4 space-y-2 bg-white dark:bg-black/10 border-t border-slate-200 dark:border-white/5">
-                                        <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Detalle de la distribución:</p>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            {group.distribucion.map((item: any, idx: number) => (
-                                                <div key={idx} className="flex justify-between items-center text-xs font-bold p-2 bg-slate-50 dark:bg-white/5 rounded-lg border border-slate-100 dark:border-white/5">
-                                                    <span className="text-slate-600 dark:text-slate-300">Orden #{item.ordenNumero}</span>
-                                                    <span className="text-emerald-600">{formatCurrency(item.montoAbonado)}</span>
+                                    {/* LISTA DESPLEGABLE DE ÓRDENES */}
+                                    <AnimatePresence>
+                                        {expandedGroup === group.id && (
+                                            <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="overflow-hidden">
+                                                <div className="p-5 space-y-2 bg-white dark:bg-black/10 border-t border-slate-200 dark:border-white/5">
+                                                    <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Distribución del Dinero:</p>
+                                                    <div className="grid grid-cols-2 gap-3">
+                                                        {group.distribucion.map((item: any, idx: number) => (
+                                                            <div key={idx} className="flex justify-between items-center text-xs font-bold p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-white/5">
+                                                                <span className="text-slate-600 dark:text-slate-300">Orden #{item.ordenNumero}</span>
+                                                                <span className="text-emerald-600 font-black">{formatCurrency(item.montoAbonado)}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
                                                 </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        ))
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            );
+                        })
                     )}
                 </div>
                 
-                <DialogFooter>
-                     <Button variant="outline" onClick={onClose} className="w-full rounded-xl font-bold h-12">Cerrar Historial</Button>
+                <DialogFooter className="p-6 md:p-8 pt-4 shrink-0 border-t border-slate-100 dark:border-white/5">
+                     <Button variant="outline" onClick={onClose} className="w-full rounded-2xl font-bold h-12 uppercase text-[10px] tracking-widest border-slate-200">Cerrar Historial</Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>

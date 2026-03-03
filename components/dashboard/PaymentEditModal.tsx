@@ -13,9 +13,9 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { 
     DollarSign, RefreshCw, Loader2, Upload, X, 
-    Banknote, ArrowLeftRight, CheckCircle2, Euro, // ✅ Iconos agregados correctamente
+    Banknote, ArrowLeftRight, CheckCircle2, Euro, 
     Wallet, Landmark, CreditCard, Coins, Image as ImageIcon,
-    Tag
+    Tag, CalendarDays
 } from 'lucide-react'
 
 import { formatCurrency } from '@/lib/utils/order-utils'
@@ -27,12 +27,18 @@ import { cn } from '@/lib/utils'
 interface PaymentEditModalProps {
     isOpen: boolean
     orden: OrdenServicio
-    // ✅ Firma actualizada para aceptar descuento
-    onSave: (abonoUSD: number, nota: string | undefined, imagenUrl: string | undefined, metodo: string, descuento?: number) => Promise<void> | void
+    // ✅ Firma actualizada para aceptar descuento y la FECHA DEL PAGO
+    onSave: (abonoUSD: number, nota: string | undefined, imagenUrl: string | undefined, metodo: string, descuento?: number, fechaPago?: string) => Promise<void> | void
     onClose: () => void
     currentUserId: string
     rates?: { usd: number, eur: number, usdt: number }
 }
+
+// --- HELPER PARA INPUT DATETIME-LOCAL ---
+const formatForDateTimeInput = (date: Date) => {
+    const offset = date.getTimezoneOffset() * 60000;
+    return (new Date(date.getTime() - offset)).toISOString().slice(0, 16);
+};
 
 export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: PaymentEditModalProps) {
     
@@ -45,6 +51,9 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
     const [amountUSD, setAmountUSD] = useState<string>('')
     const [amountBS, setAmountBS] = useState<string>('')
     const [nota, setNota] = useState<string>('') 
+    
+    // NUEVO: Estado para la fecha personalizada del pago
+    const [paymentDate, setPaymentDate] = useState<string>("")
     
     // Estado para el Descuento / Ajuste
     const [applyDiscount, setApplyDiscount] = useState(false)
@@ -80,9 +89,13 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
 
     // --- EFECTOS ---
     
-    // Cargar tasas al abrir (Sin resetear formulario para evitar el bug del reinicio)
+    // Cargar tasas al abrir y resetear la fecha a HOY
     useEffect(() => {
-        if (isOpen && !rates) loadRates()
+        if (isOpen) {
+            if (!rates) loadRates();
+            // Resetea la fecha a la hora local actual cada vez que se abre el modal
+            setPaymentDate(formatForDateTimeInput(new Date()));
+        }
     }, [isOpen])
 
     // Reglas de Negocio para Billeteras (Estricto)
@@ -183,10 +196,13 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
             }
 
             // CALCULAR DESCUENTO SI APLICA
-            // Si el switch está activo, la diferencia es el descuento
             const discountAmount = (applyDiscount && difference > 0) ? difference : 0;
+            
+            // CONVERTIR LA FECHA AL FORMATO ISO PARA GUARDARLA
+            const finalDateISO = paymentDate ? new Date(paymentDate).toISOString() : new Date().toISOString();
 
-            await onSave(finalAmount, finalNota || undefined, imageUrl, metodoLegible, discountAmount)
+            // Enviamos la fecha personalizada como el 6to parámetro
+            await onSave(finalAmount, finalNota || undefined, imageUrl, metodoLegible, discountAmount, finalDateISO)
             onClose()
         } catch (error) {
             console.error(error)
@@ -242,7 +258,7 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
                     
                     {/* SELECCIÓN DE BILLETERA */}
                     <div className="space-y-2">
-                        <Label className="text-xs font-black uppercase text-slate-400">Destino del Dinero</Label>
+                        <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Destino del Dinero</Label>
                         <div className="grid grid-cols-4 gap-2">
                             <WalletOption id="cash_usd" label="Caja" icon={Wallet} active={wallet} onClick={setWallet} color="emerald" />
                             <WalletOption id="bank_bs" label="Banco" icon={Landmark} active={wallet} onClick={setWallet} color="blue" />
@@ -261,13 +277,13 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
 
                         {/* INPUT USD */}
                         <TabsContent value="USD" className="space-y-3 mt-0">
-                            <Label className="text-xs font-black uppercase text-slate-400">Monto Real Recibido ($)</Label>
+                            <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Monto Real Recibido ($)</Label>
                             <div className="relative">
                                 <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
                                 <Input
                                     type="number"
                                     placeholder="0.00"
-                                    className="pl-10 text-xl font-bold h-14 rounded-2xl bg-slate-50 border-none"
+                                    className="pl-10 text-xl font-bold h-14 rounded-2xl bg-slate-50 border-none focus-visible:ring-2 focus-visible:ring-blue-500"
                                     value={amountUSD}
                                     onChange={(e) => setAmountUSD(e.target.value)}
                                     autoFocus
@@ -279,7 +295,7 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
                         <TabsContent value="BS" className="space-y-4 mt-0">
                             <div className="space-y-2">
                                 <div className="flex justify-between items-center">
-                                    <Label className="text-xs font-black uppercase text-slate-400">Tasa de Conversión</Label>
+                                    <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Tasa de Conversión</Label>
                                     <Button variant="ghost" size="icon" className="h-5 w-5" onClick={loadRates} disabled={loadingRate}><RefreshCw className={`w-3 h-3 text-blue-600 ${loadingRate ? 'animate-spin' : ''}`} /></Button>
                                 </div>
                                 <div className="grid grid-cols-3 gap-2">
@@ -291,7 +307,7 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1">
                                     <Label className="text-xs font-bold text-slate-500">Monto Bs.</Label>
-                                    <Input type="number" placeholder="0.00" className="text-lg font-bold h-12 rounded-xl" value={amountBS} onChange={(e) => setAmountBS(e.target.value)} autoFocus />
+                                    <Input type="number" placeholder="0.00" className="text-lg font-bold h-12 rounded-xl bg-slate-50 border-none focus-visible:ring-2 focus-visible:ring-blue-500" value={amountBS} onChange={(e) => setAmountBS(e.target.value)} autoFocus />
                                 </div>
                                 <div className="space-y-1">
                                     <Label className="text-xs font-bold text-slate-500">Equivalente ($)</Label>
@@ -325,29 +341,56 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
 
                     <Separator />
 
-                    <div className="flex gap-3">
-                        <div className="flex-1 space-y-1">
-                            <Label className="text-xs font-black uppercase text-slate-400">Nota / Referencia</Label>
-                            <Input value={nota} onChange={e => setNota(e.target.value)} className="h-12 font-bold bg-slate-50 dark:bg-black/20 border-none rounded-xl text-xs" placeholder="Ej: Ref 1234..." />
+                    {/* --- DATOS EXTRAS (FECHA, NOTA Y FOTO) --- */}
+                    <div className="flex flex-col gap-4">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
+                                <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-1.5">
+                                    <CalendarDays className="w-3.5 h-3.5" /> Fecha Real
+                                </Label>
+                                <Input 
+                                    type="datetime-local" 
+                                    value={paymentDate} 
+                                    onChange={e => setPaymentDate(e.target.value)} 
+                                    className="h-11 font-bold bg-slate-50 dark:bg-black/20 border-none rounded-xl text-[11px] text-slate-600 dark:text-slate-300" 
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Nota / Ref</Label>
+                                <Input 
+                                    value={nota} 
+                                    onChange={e => setNota(e.target.value)} 
+                                    className="h-11 font-bold bg-slate-50 dark:bg-black/20 border-none rounded-xl text-xs placeholder:text-slate-300" 
+                                    placeholder="Ej: Zelle de Pedro..." 
+                                />
+                            </div>
                         </div>
-                        <div className="space-y-1">
-                            <Label className="text-xs font-black uppercase text-slate-400 flex justify-between">Foto {previewUrl && <span className="text-emerald-500">OK</span>}</Label>
-                            <div onClick={() => !previewUrl && fileInputRef.current?.click()} className={cn("h-12 w-12 rounded-xl flex items-center justify-center cursor-pointer transition-all border-2 border-dashed relative overflow-hidden", previewUrl ? "border-emerald-500 bg-emerald-50" : "border-slate-200 hover:border-blue-400")}>
+                        
+                        <div className="space-y-1.5">
+                            <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest flex justify-between">
+                                Capture / Comprobante {previewUrl && <span className="text-emerald-500 font-black">ADJUNTO ✅</span>}
+                            </Label>
+                            <div onClick={() => !previewUrl && fileInputRef.current?.click()} className={cn("h-14 w-full rounded-xl flex items-center justify-center cursor-pointer transition-all border-2 border-dashed relative overflow-hidden", previewUrl ? "border-emerald-500 bg-emerald-50" : "border-slate-200 hover:border-blue-400 bg-slate-50/50")}>
                                 {previewUrl ? (
                                     <>
-                                        <img src={previewUrl} className="w-full h-full object-cover opacity-50" />
-                                        <div className="absolute inset-0 flex items-center justify-center"><X className="w-5 h-5 text-red-600 bg-white rounded-full p-0.5 cursor-pointer shadow-sm" onClick={(e) => {e.stopPropagation(); setPreviewUrl(null); setSelectedFile(null)}}/></div>
+                                        <img src={previewUrl} className="w-full h-full object-cover opacity-30" />
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <Button variant="destructive" size="sm" className="h-7 rounded-full text-[10px] font-bold shadow-md" onClick={(e) => {e.stopPropagation(); setPreviewUrl(null); setSelectedFile(null)}}>
+                                                <X className="w-3 h-3 mr-1"/> Quitar
+                                            </Button>
+                                        </div>
                                     </>
-                                ) : <ImageIcon className="w-5 h-5 text-slate-400" />}
+                                ) : <div className="flex items-center gap-2 text-slate-400 font-bold text-xs"><ImageIcon className="w-4 h-4" /> Subir imagen...</div>}
                                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect}/>
                             </div>
                         </div>
                     </div>
+
                 </div>
 
                 <DialogFooter className="bg-gray-50 dark:bg-gray-900/50 p-6 border-t gap-3 sm:gap-0 flex-none">
                     <Button variant="outline" onClick={onClose} disabled={isUploading} className="rounded-xl h-12 font-bold border-slate-200">Cancelar</Button>
-                    <Button onClick={handleSave} disabled={!isValid || isUploading} className={`min-w-[160px] h-12 rounded-xl font-black uppercase tracking-wide ${isValid ? 'bg-blue-600 hover:bg-blue-700' : ''}`}>
+                    <Button onClick={handleSave} disabled={!isValid || isUploading} className={`min-w-[160px] h-12 rounded-xl font-black uppercase tracking-wide transition-all ${isValid ? 'bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/30' : ''}`}>
                         {isUploading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Procesando...</> : <><CheckCircle2 className="w-4 h-4 mr-2" /> {applyDiscount ? 'Saldar y Cerrar' : 'Registrar Pago'}</>}
                     </Button>
                 </DialogFooter>
@@ -360,7 +403,7 @@ function WalletOption({ id, label, icon: Icon, active, onClick, color }: any) {
     const isSelected = active === id;
     const colors: any = { emerald: "border-emerald-500 bg-emerald-50 text-emerald-700", blue: "border-blue-500 bg-blue-50 text-blue-700", purple: "border-purple-500 bg-purple-50 text-purple-700", orange: "border-orange-500 bg-orange-50 text-orange-700" }
     return (
-        <div onClick={() => onClick(id)} className={cn("cursor-pointer flex flex-col items-center justify-center gap-1 p-2 rounded-xl border-2 transition-all h-20 hover:scale-105 active:scale-95", isSelected ? colors[color] : "bg-white border-transparent hover:bg-slate-50 text-slate-400")}>
+        <div onClick={() => onClick(id)} className={cn("cursor-pointer flex flex-col items-center justify-center gap-1 p-2 rounded-xl border-2 transition-all h-20 hover:scale-105 active:scale-95", isSelected ? colors[color] : "bg-white border-transparent hover:bg-slate-50 text-slate-400 shadow-sm")}>
             <Icon size={20} />
             <span className="text-[9px] font-black uppercase text-center leading-none">{label}</span>
         </div>
@@ -370,7 +413,7 @@ function WalletOption({ id, label, icon: Icon, active, onClick, color }: any) {
 function RateButton({ type, rate, active, onClick, icon, label }: any) {
     const isSelected = active === type;
     return (
-        <button onClick={() => onClick(type)} className={cn("flex flex-col items-center justify-center p-2 rounded-xl border transition-all h-16", isSelected ? "border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-500/20" : "border-slate-200 bg-white hover:bg-slate-50 text-slate-400")}>
+        <button onClick={() => onClick(type)} className={cn("flex flex-col items-center justify-center p-2 rounded-xl border transition-all h-16 shadow-sm", isSelected ? "border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-500/20" : "border-slate-200 bg-white hover:bg-slate-50 text-slate-400")}>
             <div className="flex items-center gap-1 mb-1">{icon} <span className="text-[9px] font-black uppercase">{label || type}</span></div>
             <span className="text-xs font-bold">{rate.toFixed(2)}</span>
         </button>

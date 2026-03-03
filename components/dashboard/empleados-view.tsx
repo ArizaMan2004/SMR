@@ -7,7 +7,7 @@ import {
   Users, CheckCircle2, Clock, TrendingUp, Plus, DollarSign, 
   Calendar, ArrowRightLeft, Trash2, Edit3, X, Briefcase, 
   Wallet, ReceiptText, Search, Filter, AlertCircle, ChevronRight,
-  CreditCard, Banknote, Repeat // Icono para frecuencia
+  CreditCard, Banknote, Repeat 
 } from 'lucide-react';
 
 import { Button } from "@/components/ui/button";
@@ -21,16 +21,6 @@ import {
   deleteDoc, doc, serverTimestamp 
 } from "firebase/firestore";
 import { formatBs } from "@/lib/services/bcv-service";
-
-// --- HELPERS ---
-const calcularDiasRestantes = (diaPago: number) => {
-  const hoy = new Date();
-  let fechaPago = new Date(hoy.getFullYear(), hoy.getMonth(), diaPago);
-  if (hoy.getDate() > diaPago) fechaPago.setMonth(fechaPago.getMonth() + 1);
-  const diff = fechaPago.getTime() - hoy.getTime();
-  const dias = Math.ceil(diff / (1000 * 60 * 60 * 24));
-  return dias === 0 ? "Hoy" : dias;
-};
 
 // --- CONSTANTES ---
 const PAYMENT_METHODS = [
@@ -58,6 +48,55 @@ const FREQUENCY_OPTIONS = [
     { value: "Por Proyecto", label: "Por Proyecto" }
 ];
 
+const DAYS_OF_WEEK = [
+    { value: "1", label: "Lunes" },
+    { value: "2", label: "Martes" },
+    { value: "3", label: "Miércoles" },
+    { value: "4", label: "Jueves" },
+    { value: "5", label: "Viernes" },
+    { value: "6", label: "Sábado" },
+    { value: "0", label: "Domingo" }
+];
+
+// --- HELPERS ---
+const calcularDiasRestantes = (emp: any) => {
+    const hoy = new Date();
+    
+    if (emp.frecuenciaPago === 'Semanal') {
+        const targetDay = parseInt(emp.diaPago) || 1; // 0-6
+        const todayDay = hoy.getDay();
+        let diff = targetDay - todayDay;
+        if (diff < 0) diff += 7;
+        
+        // Verificar si se le pagó hace menos de 6 días
+        if (emp.ultimoPagoIso) {
+            const lastP = new Date(emp.ultimoPagoIso);
+            const diffSinceLastPayment = Math.floor((hoy.getTime() - lastP.getTime()) / (1000 * 60 * 60 * 24));
+            if (diffSinceLastPayment < 6 && diff === 0) {
+                return 7; // Ya cobró hoy o ayer, le toca la próxima semana
+            }
+        }
+        return diff === 0 ? "Hoy" : diff;
+    } else {
+        // Mensual o Quincenal
+        const diaPago = parseInt(emp.diaPago) || 15;
+        let fechaPago = new Date(hoy.getFullYear(), hoy.getMonth(), diaPago);
+        if (hoy.getDate() > diaPago) {
+            fechaPago.setMonth(fechaPago.getMonth() + 1);
+        }
+        const diff = fechaPago.getTime() - hoy.getTime();
+        const dias = Math.ceil(diff / (1000 * 60 * 60 * 24));
+        return dias === 0 ? "Hoy" : dias;
+    }
+};
+
+const formatearMes = (yyyy_mm: string) => {
+    if (yyyy_mm === 'todos') return 'Todos los meses';
+    const [y, m] = yyyy_mm.split('-');
+    const date = new Date(parseInt(y), parseInt(m) - 1);
+    return date.toLocaleDateString('es-VE', { month: 'long', year: 'numeric' });
+};
+
 interface EmpleadosViewProps {
   empleados: any[];
   pagos: any[];
@@ -67,7 +106,10 @@ interface EmpleadosViewProps {
 export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
   const [view, setView] = useState<'control' | 'registro' | 'historial'>('control');
   const [editTarget, setEditTarget] = useState<any>(null);
+  
+  // Estados para filtros de historial
   const [filtroHistorial, setFiltroHistorial] = useState("todos");
+  const [selectedMonthHist, setSelectedMonthHist] = useState<string>(new Date().toISOString().slice(0, 7));
 
   // Estados para el Modal de Pago
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
@@ -78,31 +120,34 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
       nota: ""
   });
 
-  // Formulario Registro (AHORA CON FRECUENCIA)
+  // Formulario Registro 
   const [form, setForm] = useState({ 
       nombre: "", 
       cargo: "", 
       sueldo: "", 
       dia: "15", 
-      frecuencia: "Mensual" // Valor por defecto
+      frecuencia: "Mensual" 
   });
 
   // --- 1. ACCIONES ---
   const handleRegistrar = async () => {
     if (!form.nombre || !form.sueldo) return alert("Nombre y sueldo son obligatorios");
     
+    // Si es semanal y no cambió el día (que es 15 por defecto), lo forzamos al Lunes (1)
+    const diaFinal = form.frecuencia === 'Semanal' && parseInt(form.dia) > 6 ? "1" : form.dia;
+
     try {
       await addDoc(collection(db, "empleados"), {
         nombre: form.nombre,
         cargo: form.cargo || "Empleado",
         montoSueldo: parseFloat(form.sueldo),
-        diaPago: parseInt(form.dia),
-        frecuenciaPago: form.frecuencia, // Guardamos la frecuencia
+        diaPago: parseInt(diaFinal),
+        frecuenciaPago: form.frecuencia, 
         comisiones: [],
         ultimoPagoMes: "",
+        ultimoPagoIso: null, // Nuevo campo de precisión
         fechaRegistro: serverTimestamp()
       });
-      // Reset form
       setForm({ nombre: "", cargo: "", sueldo: "", dia: "15", frecuencia: "Mensual" });
       setView('control');
     } catch (error) {
@@ -110,10 +155,8 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
     }
   };
 
-  // Prepara el pago abriendo el modal
   const preparePayment = (emp: any) => {
       setSelectedEmployee(emp);
-      // Intentar pre-seleccionar el intervalo lógico según la frecuencia del empleado
       let defaultInterval = "Mes Completo";
       if (emp.frecuenciaPago === "Quincenal") defaultInterval = "1ra Quincena";
       if (emp.frecuenciaPago === "Semanal") defaultInterval = "Semana";
@@ -126,18 +169,31 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
       setPaymentModalOpen(true);
   };
 
-  // Ejecuta el pago final
   const confirmPayment = async () => {
     if (!selectedEmployee || !rates?.usd) return;
     
     const emp = selectedEmployee;
     const mesActual = new Date().toISOString().slice(0, 7);
+    const hoyIso = new Date().toISOString();
+    
+    const esSemanal = emp.frecuenciaPago === 'Semanal';
+    let sueldo = emp.montoSueldo;
+    
+    // Lógica dinámica para saber si le toca sueldo base o no
+    if (esSemanal) {
+        if (emp.ultimoPagoIso) {
+            const diffDays = Math.floor((new Date().getTime() - new Date(emp.ultimoPagoIso).getTime()) / 86400000);
+            if (diffDays < 6) sueldo = 0; // Ya cobró su semana recientemente
+        }
+    } else {
+        if (emp.ultimoPagoMes === mesActual) sueldo = 0; // Ya cobró su mes completo
+    }
+
     const tCom = emp.comisiones?.reduce((a: number, c: any) => a + c.monto, 0) || 0;
-    const sueldo = emp.ultimoPagoMes === mesActual ? 0 : emp.montoSueldo;
     const totalUSD = sueldo + tCom;
 
     if (totalUSD <= 0) {
-        alert("No hay montos pendientes.");
+        alert("No hay montos pendientes para transferir.");
         return;
     }
 
@@ -154,12 +210,15 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
         tasaBCV: rates.usd,
         metodoPago: paymentConfig.metodo,
         notaAdicional: paymentConfig.nota,
-        fecha: new Date().toISOString(),
+        fecha: hoyIso,
         mesRelativo: mesActual
       });
 
       await updateDoc(doc(db, "empleados", emp.id), {
-        ...(sueldo > 0 ? { ultimoPagoMes: mesActual } : {}),
+        ...(sueldo > 0 ? { 
+            ultimoPagoMes: mesActual,
+            ultimoPagoIso: hoyIso 
+        } : {}),
         comisiones: []
       });
 
@@ -171,18 +230,50 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
     }
   };
 
-  // --- 2. ESTADÍSTICAS ---
+  // --- 2. ESTADÍSTICAS DEL MES ACTUAL (Dashboard Header) ---
   const stats = useMemo(() => {
     const mesActual = new Date().toISOString().slice(0, 7);
     let pend = 0;
     empleados.forEach(e => {
       const com = e.comisiones?.reduce((a: any, c: any) => a + c.monto, 0) || 0;
-      const sueldo = e.ultimoPagoMes === mesActual ? 0 : e.montoSueldo;
+      
+      let sueldo = e.montoSueldo;
+      if (e.frecuenciaPago === 'Semanal') {
+          if (e.ultimoPagoIso) {
+              const diffDays = Math.floor((new Date().getTime() - new Date(e.ultimoPagoIso).getTime()) / 86400000);
+              if (diffDays < 6) sueldo = 0;
+          }
+      } else {
+          if (e.ultimoPagoMes === mesActual) sueldo = 0;
+      }
+
       pend += sueldo + com;
     });
     const pagado = pagos.filter(p => p.mesRelativo === mesActual).reduce((a, p) => a + p.totalUSD, 0);
-    return { pend, pagado, total: pend + pagado };
+    return { pend, pagado };
   }, [empleados, pagos]);
+
+
+  // --- 3. LÓGICA DE HISTORIAL (Filtros y Totales) ---
+  const availableMonths = useMemo(() => {
+      const months = new Set(pagos.map(p => p.mesRelativo || (p.fecha ? p.fecha.slice(0,7) : '')).filter(Boolean));
+      months.add(new Date().toISOString().slice(0, 7)); 
+      return Array.from(months).sort().reverse();
+  }, [pagos]);
+
+  const pagosFiltrados = useMemo(() => {
+      return pagos.filter(p => {
+          const mesDelPago = p.mesRelativo || (p.fecha ? p.fecha.slice(0,7) : '');
+          const matchEmp = filtroHistorial === 'todos' || p.empleadoId === filtroHistorial;
+          const matchMonth = selectedMonthHist === 'todos' || mesDelPago === selectedMonthHist;
+          return matchEmp && matchMonth;
+      }).sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+  }, [pagos, filtroHistorial, selectedMonthHist]);
+
+  const totalFiltradoUSD = useMemo(() => {
+      return pagosFiltrados.reduce((sum, p) => sum + (Number(p.totalUSD) || 0), 0);
+  }, [pagosFiltrados]);
+
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8 min-h-screen bg-[#F2F2F7] text-slate-900 font-sans selection:bg-blue-100">
@@ -206,10 +297,9 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
           </motion.div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <StatCard label="Por Pagar" value={`$${stats.pend.toLocaleString()}`} sub={rates?.usd ? formatBs(stats.pend, rates.usd) : ""} icon={<Clock/>} color="bg-orange-500" />
-          <StatCard label="Pagado este mes" value={`$${stats.pagado.toLocaleString()}`} sub={rates?.usd ? formatBs(stats.pagado, rates.usd) : ""} icon={<CheckCircle2/>} color="bg-green-500" />
-          <StatCard label="Presupuesto Total" value={`$${stats.total.toLocaleString()}`} icon={<TrendingUp/>} color="bg-indigo-600" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <StatCard label="Por Pagar (Nómina)" value={`$${stats.pend.toLocaleString()}`} sub={rates?.usd ? formatBs(stats.pend, rates.usd) : ""} icon={<Clock/>} color="bg-orange-500" />
+          <StatCard label="Pagado (Este mes)" value={`$${stats.pagado.toLocaleString()}`} sub={rates?.usd ? formatBs(stats.pagado, rates.usd) : ""} icon={<CheckCircle2/>} color="bg-green-500" />
         </div>
       </header>
 
@@ -258,10 +348,13 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
                 <Field label="Nombre Completo" value={form.nombre} onChange={(v: string) => setForm({...form, nombre: v})} placeholder="Ej. Juan Pérez" />
                 <Field label="Cargo u Oficio" value={form.cargo} onChange={(v: string) => setForm({...form, cargo: v})} placeholder="Ej. Administrador" />
                 
-                {/* SELECTOR DE FRECUENCIA EN REGISTRO */}
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase ml-6 tracking-widest">Frecuencia de Pago</label>
-                    <Select value={form.frecuencia} onValueChange={(v) => setForm({...form, frecuencia: v})}>
+                    <Select value={form.frecuencia} onValueChange={(v) => {
+                        // Al cambiar la frecuencia, resetear el día para evitar fallos (ej: Día 15 en semanal)
+                        const resetDay = v === 'Semanal' ? "1" : "15";
+                        setForm({...form, frecuencia: v, dia: resetDay});
+                    }}>
                         <SelectTrigger className="rounded-[1.8rem] h-16 bg-gray-50 border-none px-8 font-black text-lg shadow-inner">
                             <SelectValue placeholder="Seleccione frecuencia" />
                         </SelectTrigger>
@@ -275,7 +368,25 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
 
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Sueldo Base ($)" value={form.sueldo} onChange={(v: string) => setForm({...form, sueldo: v})} type="number" />
-                  <Field label="Día de Cobro" value={form.dia} onChange={(v: string) => setForm({...form, dia: v})} type="number" />
+                  
+                  {/* SELECTOR CONDICIONAL DE DÍA SEGÚN LA FRECUENCIA */}
+                  {form.frecuencia === 'Semanal' ? (
+                      <div className="space-y-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase ml-6 tracking-widest">Día de Cobro</label>
+                          <Select value={["0","1","2","3","4","5","6"].includes(form.dia.toString()) ? form.dia.toString() : "1"} onValueChange={(v) => setForm({...form, dia: v})}>
+                              <SelectTrigger className="rounded-[1.8rem] h-16 bg-gray-50 border-none px-8 font-black text-lg shadow-inner">
+                                  <SelectValue placeholder="Día" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                  {DAYS_OF_WEEK.map(opt => (
+                                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                  ))}
+                              </SelectContent>
+                          </Select>
+                      </div>
+                  ) : (
+                      <Field label="Día del Mes" value={form.dia} onChange={(v: string) => setForm({...form, dia: v})} type="number" />
+                  )}
                 </div>
                 <Button onClick={handleRegistrar} className="w-full bg-blue-600 hover:bg-blue-700 h-20 rounded-[2.5rem] font-black text-xl mt-6 shadow-2xl shadow-blue-200 transition-all active:scale-95">
                   Confirmar Registro
@@ -286,17 +397,47 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
 
           {view === 'historial' && (
             <motion.div key="h" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-              <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar">
-                 <button onClick={() => setFiltroHistorial('todos')} className={`px-8 py-3 rounded-full text-[10px] font-black transition-all whitespace-nowrap uppercase tracking-widest ${filtroHistorial === 'todos' ? 'bg-slate-900 text-white shadow-xl' : 'bg-white text-gray-400 shadow-sm'}`}>Todos los registros</button>
-                 {empleados.map(e => (
-                   <button key={e.id} onClick={() => setFiltroHistorial(e.id)} className={`px-8 py-3 rounded-full text-[10px] font-black transition-all whitespace-nowrap uppercase tracking-widest ${filtroHistorial === e.id ? 'bg-blue-600 text-white shadow-xl' : 'bg-white text-gray-400 shadow-sm'}`}>{e.nombre}</button>
-                 ))}
+              
+              {/* FILTROS Y TOTALES DE HISTORIAL */}
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-[2rem] shadow-sm border border-gray-100">
+                  
+                  <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0 w-full md:w-auto custom-scrollbar">
+                     <button onClick={() => setFiltroHistorial('todos')} className={`px-6 py-2 rounded-full text-[10px] font-black transition-all whitespace-nowrap uppercase tracking-widest ${filtroHistorial === 'todos' ? 'bg-slate-900 text-white shadow-md' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}>Todos</button>
+                     {empleados.map(e => (
+                       <button key={e.id} onClick={() => setFiltroHistorial(e.id)} className={`px-6 py-2 rounded-full text-[10px] font-black transition-all whitespace-nowrap uppercase tracking-widest ${filtroHistorial === e.id ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}>{e.nombre.split(" ")[0]}</button>
+                     ))}
+                  </div>
+
+                  <div className="flex items-center gap-4 w-full md:w-auto border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-4">
+                     <Select value={selectedMonthHist} onValueChange={setSelectedMonthHist}>
+                         <SelectTrigger className="w-[160px] rounded-xl bg-gray-50 border-none font-black text-xs uppercase tracking-widest h-12">
+                             <SelectValue />
+                         </SelectTrigger>
+                         <SelectContent className="rounded-xl">
+                             <SelectItem value="todos" className="font-bold text-xs uppercase">Todos los meses</SelectItem>
+                             {availableMonths.map(m => (
+                                 <SelectItem key={m} value={m} className="font-bold text-xs uppercase">{formatearMes(m)}</SelectItem>
+                             ))}
+                         </SelectContent>
+                     </Select>
+                     
+                     <div className="bg-emerald-500 text-white px-5 py-2 rounded-2xl shadow-lg shadow-emerald-500/20 flex flex-col items-end min-w-[120px]">
+                         <span className="text-[8px] uppercase tracking-widest font-black text-emerald-100">Total Filtrado</span>
+                         <span className="font-black text-xl italic leading-none">${totalFiltradoUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                     </div>
+                  </div>
               </div>
+
               <div className="grid gap-4">
-                {pagos.filter(p => filtroHistorial === 'todos' || p.empleadoId === filtroHistorial).map(pago => (
+                {pagosFiltrados.length > 0 ? pagosFiltrados.map(pago => (
                   <Recibo pago={pago} rates={rates} key={pago.id} />
-                ))}
+                )) : (
+                    <div className="text-center py-10 bg-white rounded-[2rem] border border-gray-100">
+                        <p className="text-gray-400 font-black text-xs uppercase tracking-widest">No hay pagos registrados para este filtro.</p>
+                    </div>
+                )}
               </div>
+
             </motion.div>
           )}
         </AnimatePresence>
@@ -314,7 +455,18 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
             {selectedEmployee && (() => {
                 const mesActual = new Date().toISOString().slice(0, 7);
                 const comisiones = selectedEmployee.comisiones?.reduce((a:number,c:any)=>a+c.monto,0) || 0;
-                const sueldoBase = selectedEmployee.ultimoPagoMes === mesActual ? 0 : selectedEmployee.montoSueldo;
+                
+                // MISMA LÓGICA DE VISUALIZACIÓN QUE EN LA TARJETA
+                let sueldoBase = selectedEmployee.montoSueldo;
+                if (selectedEmployee.frecuenciaPago === 'Semanal') {
+                    if (selectedEmployee.ultimoPagoIso) {
+                        const diffDays = Math.floor((new Date().getTime() - new Date(selectedEmployee.ultimoPagoIso).getTime()) / 86400000);
+                        if (diffDays < 6) sueldoBase = 0;
+                    }
+                } else {
+                    if (selectedEmployee.ultimoPagoMes === mesActual) sueldoBase = 0;
+                }
+
                 const total = sueldoBase + comisiones;
                 const totalBs = total * (rates?.usd || 0);
 
@@ -396,7 +548,7 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL EDICIÓN PERFIL (CON FRECUENCIA) */}
+      {/* MODAL EDICIÓN PERFIL (CON DÍAS SEMANALES) */}
       <AnimatePresence>
         {editTarget && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xl z-50 flex items-center justify-center p-4">
@@ -407,10 +559,12 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
                 <Field label="Nombre" value={editTarget.nombre} onChange={(v: string) => setEditTarget({...editTarget, nombre: v})} />
                 <Field label="Cargo" value={editTarget.cargo} onChange={(v: string) => setEditTarget({...editTarget, cargo: v})} />
                 
-                {/* SELECTOR EN EDICIÓN */}
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase ml-6 tracking-widest">Frecuencia</label>
-                    <Select value={editTarget.frecuenciaPago || "Mensual"} onValueChange={(v) => setEditTarget({...editTarget, frecuenciaPago: v})}>
+                    <Select value={editTarget.frecuenciaPago || "Mensual"} onValueChange={(v) => {
+                        const resetDay = v === 'Semanal' ? "1" : "15";
+                        setEditTarget({...editTarget, frecuenciaPago: v, diaPago: resetDay});
+                    }}>
                         <SelectTrigger className="rounded-[1.8rem] h-16 bg-gray-50 border-none px-8 font-black text-lg shadow-inner">
                             <SelectValue />
                         </SelectTrigger>
@@ -424,7 +578,25 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
 
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Sueldo" value={editTarget.montoSueldo} onChange={(v: string) => setEditTarget({...editTarget, montoSueldo: v})} type="number" />
-                  <Field label="Día" value={editTarget.diaPago} onChange={(v: string) => setEditTarget({...editTarget, diaPago: v})} type="number" />
+                  
+                  {/* SELECTOR CONDICIONAL PARA EDICIÓN */}
+                  {editTarget.frecuenciaPago === 'Semanal' ? (
+                      <div className="space-y-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase ml-6 tracking-widest">Día Cobro</label>
+                          <Select value={["0","1","2","3","4","5","6"].includes(editTarget.diaPago?.toString()) ? editTarget.diaPago?.toString() : "1"} onValueChange={(v) => setEditTarget({...editTarget, diaPago: v})}>
+                              <SelectTrigger className="rounded-[1.8rem] h-16 bg-gray-50 border-none px-8 font-black text-lg shadow-inner">
+                                  <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                  {DAYS_OF_WEEK.map(opt => (
+                                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                  ))}
+                              </SelectContent>
+                          </Select>
+                      </div>
+                  ) : (
+                      <Field label="Día del mes" value={editTarget.diaPago} onChange={(v: string) => setEditTarget({...editTarget, diaPago: v})} type="number" />
+                  )}
                 </div>
                 <Button 
                   onClick={async () => {
@@ -454,10 +626,34 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
 
 function EmpleadoCard({ emp, rates, onPagar, onEdit, onDelete, onAddCom }: any) {
   const mesActual = new Date().toISOString().slice(0, 7);
-  const dias = calcularDiasRestantes(emp.diaPago);
+  const esSemanal = emp.frecuenciaPago === 'Semanal';
+  const dias = calcularDiasRestantes(emp);
+  
   const tCom = emp.comisiones?.reduce((a:any, c:any) => a + c.monto, 0) || 0;
-  const sPend = emp.ultimoPagoMes === mesActual ? 0 : emp.montoSueldo;
+  
+  // VERIFICAR SI LE TOCA EL SUELDO SEGÚN SU FRECUENCIA
+  let sPend = emp.montoSueldo;
+  if (esSemanal) {
+      if (emp.ultimoPagoIso) {
+          const diffDays = Math.floor((new Date().getTime() - new Date(emp.ultimoPagoIso).getTime()) / 86400000);
+          if (diffDays < 6) sPend = 0;
+      }
+  } else {
+      if (emp.ultimoPagoMes === mesActual) sPend = 0;
+  }
+
   const total = tCom + sPend;
+
+  // Lógica de visualización del texto de Cobro
+  let textoCobro = "";
+  if (dias === 'Hoy') {
+      textoCobro = "Toca Pagar Hoy";
+  } else if (esSemanal) {
+      const nombreDia = DAYS_OF_WEEK.find(d => d.value === emp.diaPago?.toString())?.label || "Día";
+      textoCobro = `Cobro los ${nombreDia}`;
+  } else {
+      textoCobro = `Cobro en ${dias} días`;
+  }
 
   const [m, setM] = useState("");
   const [d, setD] = useState("");
@@ -485,7 +681,7 @@ function EmpleadoCard({ emp, rates, onPagar, onEdit, onDelete, onAddCom }: any) 
                 <Repeat size={12}/> {emp.frecuenciaPago || "Mensual"}
               </span>
               <span className={`text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest shadow-sm flex items-center gap-2 italic ${dias === 'Hoy' ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-50 text-blue-600'}`}>
-                <Calendar size={12}/> {dias === 'Hoy' ? "Toca Pagar" : `Cobro en ${dias} días`}
+                <Calendar size={12}/> {textoCobro}
               </span>
             </div>
           </div>
@@ -569,14 +765,14 @@ function Recibo({ pago, rates }: any) {
           {pago.conceptos?.map((c:any, i:number) => (
              <div key={i} className="flex justify-between items-center">
                 <span className="font-black text-[10px] text-gray-400 uppercase tracking-tighter italic">{c.tipo}: <span className="text-slate-600 ml-2">{c.motivo}</span></span>
-                <span className="font-black text-slate-900 italic">${c.monto.toFixed(2)}</span>
+                <span className="font-black text-slate-900 italic">${Number(c.monto).toFixed(2)}</span>
              </div>
           ))}
        </div>
        <div className="text-center md:text-right min-w-[180px]">
           <p className="text-[10px] font-black text-gray-400 uppercase mb-1 tracking-widest">Liquidado</p>
-          <p className="text-3xl font-black text-slate-900 tracking-tighter italic">${pago.totalUSD.toLocaleString()}</p>
-          <p className="text-sm font-bold text-blue-600 mt-1 italic uppercase tracking-widest">Bs. {pago.totalVES.toLocaleString()}</p>
+          <p className="text-3xl font-black text-slate-900 tracking-tighter italic">${Number(pago.totalUSD).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+          <p className="text-sm font-bold text-blue-600 mt-1 italic uppercase tracking-widest">Bs. {Number(pago.totalVES).toLocaleString('es-VE', {minimumFractionDigits: 2})}</p>
        </div>
     </motion.div>
   );

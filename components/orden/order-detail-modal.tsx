@@ -35,22 +35,42 @@ interface OrderDetailModalProps {
   };
 }
 
-// --- UTILIDADES DE CÁLCULO ---
+// --- UTILIDADES DE CÁLCULO ACTUALIZADAS ---
 const getItemSubtotal = (item: ItemOrden) => {
-  // Prioridad al subtotal procesado por el Wizard para mantener coherencia
-  if ((item as any).subtotal !== undefined) {
-    return parseFloat((item as any).subtotal);
-  }
+  const itemExtra = item as any;
+  
+  // 1. Prioridad: Si se ajustó manualmente
+  if (itemExtra.totalAjustado !== undefined) return parseFloat(itemExtra.totalAjustado);
+  
+  // 2. Prioridad: Si el wizard ya guardó el subtotal procesado
+  if (itemExtra.subtotal !== undefined) return parseFloat(itemExtra.subtotal);
 
-  const qty = parseFloat(item.cantidad.toString()) || 0;
-  const price = parseFloat(item.precioUnitario.toString()) || 0;
-  const x = parseFloat((item as any).medidaXCm) || 0;
-  const y = parseFloat((item as any).medidaYCm) || 0;
+  // 3. Fallback: Recalcular con toda la nueva lógica (Laminado, Pegado, etc.)
+  const x = parseFloat(itemExtra.medidaXCm) || 0;
+  const y = parseFloat(itemExtra.medidaYCm) || 0;
+  const p = parseFloat(item.precioUnitario.toString()) || 0;
+  const c = parseFloat(item.cantidad.toString()) || 0;
+  const e = itemExtra.suministrarMaterial ? (parseFloat(itemExtra.costoMaterialExtra) || 0) : 0;
 
-  if (item.unidad === "m2" && x > 0 && y > 0) {
-    return (x / 100) * (y / 100) * price * qty;
+  if (item.unidad === 'm2' && x > 0 && y > 0) {
+      let costoBaseUnitario = (x / 100) * (y / 100) * p;
+
+      if (item.tipoServicio === 'IMPRESION') {
+          if (itemExtra.impresionLaminado) {
+              const pLin = parseFloat(itemExtra.precioLaminadoLineal) || 0;
+              const pMan = parseFloat(itemExtra.precioLaminadoManual) || 0;
+              if (itemExtra.tipoCobroLaminado === 'x' && pLin > 0) costoBaseUnitario += (x / 100) * pLin;
+              else if (itemExtra.tipoCobroLaminado === 'y' && pLin > 0) costoBaseUnitario += (y / 100) * pLin;
+              else if (itemExtra.tipoCobroLaminado === 'manual' && pMan > 0) costoBaseUnitario += pMan;
+          }
+          if (itemExtra.impresionPegado && itemExtra.proveedorPegado === 'taller' && itemExtra.precioPegado > 0) {
+              costoBaseUnitario += parseFloat(itemExtra.precioPegado) || 0;
+          }
+      }
+      return (costoBaseUnitario + e) * c;
+  } else {
+      return (p + e) * c;
   }
-  return price * qty;
 };
 
 export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailModalProps) {
@@ -59,10 +79,7 @@ export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailMod
   if (!orden) return null;
 
   const isAliado = orden.cliente?.tipoCliente === "ALIADO";
-
-  // El total base siempre debe ser el total guardado en la orden
   const totalBaseUSD = orden.totalUSD || 0;
-
   const montoPagadoUSD = orden.montoPagadoUSD || 0;
   const montoPendiente = totalBaseUSD - montoPagadoUSD;
   const isPagado = montoPendiente <= 0.01;
@@ -269,21 +286,27 @@ function InfoField({ label, value, icon: Icon, primary, className }: any) {
 }
 
 function ItemRow({ item }: { item: ItemOrden }) {
-    const subtotal = getItemSubtotal(item); // Valor final (ajustado o calculado)
+    const subtotal = getItemSubtotal(item); 
     const qty = parseFloat(item.cantidad.toString()) || 1;
-    
-    // --- LÓGICA DE PRECIO UNITARIO REAL ---
-    // Calculamos qué precio unitario resulta de dividir el subtotal entre la cantidad.
-    // Esto asegura que si ajustaste el item a $2, diga "1 UND X $2.00"
     const precioUnitarioReal = subtotal / qty;
     
     const itemExtra = item as any;
+    const isImpresion = item.tipoServicio === 'IMPRESION';
+    const isCorte = item.tipoServicio === 'CORTE';
+
+    // Desarmamos la cadena "Mat: Vinil | Corte | Laminado" para mostrarla bonita
+    const detallesList = isImpresion && itemExtra.materialDetalleCorte 
+        ? itemExtra.materialDetalleCorte.split(" | ") 
+        : [];
+        
+    const materialPrincipal = detallesList.find((d: string) => d.startsWith("Mat:"));
+    const acabados = detallesList.filter((d: string) => !d.startsWith("Mat:"));
 
     return (
         <motion.div whileHover={{ x: 8 }} className="group flex flex-col md:flex-row items-center gap-4 p-5 md:p-6 bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200/50 dark:border-slate-800 shadow-sm transition-all">
             <div className="flex-1 w-full space-y-4">
                 <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-2">
+                    <div className="space-y-2.5">
                         <div className="flex flex-wrap items-center gap-2">
                             <h4 className="font-black text-slate-900 dark:text-white text-base md:text-lg tracking-tight leading-tight uppercase">
                                 {item.nombre}
@@ -297,16 +320,36 @@ function ItemRow({ item }: { item: ItemOrden }) {
                                 </Badge>
                             )}
                         </div>
-                        <div className="space-y-1">
-                            {itemExtra.materialDetalleCorte && (
-                                <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1.5 italic leading-none">
+
+                        <div className="space-y-1.5">
+                            {/* Visualización para CORTE LÁSER */}
+                            {isCorte && itemExtra.materialDetalleCorte && (
+                                <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1.5 leading-none bg-orange-50 dark:bg-orange-500/10 w-fit px-2 py-1 rounded-md">
                                     <Scissors className="w-3 h-3 text-orange-500" /> {itemExtra.materialDetalleCorte}
                                 </p>
                             )}
-                            {item.materialDeImpresion && (
-                                <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1.5 italic leading-none">
-                                    <Printer className="w-3 h-3 text-blue-500" /> {item.materialDeImpresion}
-                                </p>
+                            
+                            {/* Visualización detallada para IMPRESIÓN */}
+                            {isImpresion && (
+                                <div className="space-y-2">
+                                    {/* Material Base */}
+                                    {(materialPrincipal || itemExtra.materialDeImpresion) && (
+                                        <p className="text-[11px] font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5 leading-none bg-blue-50 dark:bg-blue-500/10 w-fit px-2 py-1 rounded-md">
+                                            <Printer className="w-3 h-3" /> 
+                                            {materialPrincipal ? materialPrincipal.replace("Mat: ", "Material: ") : `Material: ${itemExtra.materialDeImpresion}`}
+                                        </p>
+                                    )}
+                                    {/* Insignias de Acabados (Ojales, PVC, Laminado, etc.) */}
+                                    {acabados.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5 mt-1">
+                                            {acabados.map((acabado: string, i: number) => (
+                                                <Badge key={i} variant="outline" className="text-[8.5px] font-black uppercase border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-900/20 px-1.5 py-0">
+                                                    {acabado}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             )}
                         </div>
                     </div>
@@ -315,12 +358,11 @@ function ItemRow({ item }: { item: ItemOrden }) {
                         <p className="text-xl font-black text-slate-900 dark:text-white tracking-tighter leading-none">
                             {formatCurrency(subtotal)}
                         </p>
-                        {/* Mostramos el precio unitario real calculado para que la matemática cuadre al cliente */}
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tight mt-1">
                             {item.cantidad} {item.unidad} x {formatCurrency(precioUnitarioReal)}
                         </p>
                         {itemExtra.totalAjustado !== undefined && (
-                            <Badge className="bg-amber-100 text-amber-600 border-none text-[7px] font-black uppercase px-1.5 h-3.5 mt-1">
+                            <Badge className="bg-amber-100 text-amber-600 border-none text-[7px] font-black uppercase px-1.5 h-3.5 mt-1 block w-fit ml-auto">
                                 Ajustado Manual
                             </Badge>
                         )}

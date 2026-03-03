@@ -97,27 +97,22 @@ const identificarServicio = (item: any) => {
     const nombre = (item.nombre || item.descripcion || '').toLowerCase();
 
     if (tipo === 'DISENO' || tipo === 'DISEÑO') return 'DISENO'; 
-
-    // PRIORIDAD ABSOLUTA: Si tiene estas palabras, ES IMPRESIÓN (ignora la palabra "corte" si está combinada)
-    const keywordsPrintFuerte = ['vinil', 'vinilo', 'sticker', 'calcomania', 'impresion', 'impresión', 'banner', 'lona', 'microperforado', 'etiqueta', 'dtf', 'clear', 'esmerilado', 'tornasol'];
-    if (item.materialImpresion || keywordsPrintFuerte.some(k => nombre.includes(k))) return 'IMPRESION';
-
     if (tipo === 'IMPRESION') return 'IMPRESION';
     if (tipo === 'CORTE' || tipo === 'CORTE_LASER') return 'CORTE';
 
     const keywordsLaser = [
-        'laser', 'láser', 'grabado', 'marcado', 'mdf', 'acrilico', 'acrílico', 
+        'laser', 'láser', 'corte', 'grabado', 'marcado', 'mdf', 'acrilico', 'acrílico', 
         'madera', 'plywood', 'cuero', 'piel', 'balsa', 'carton', 'reconocimiento', 
         'trofeo', 'medalla', 'galardon', 'placa', 'boligrafo', 'llavero', 'identificador', 
-        'chapa', 'pin', 'topper', 'letras', 'corporeo', 'señaletica', 'buzon', 'rompecabezas',
-        'cartulina', 'corte' // "corte" se queda como fallback si no es vinil/sticker
+        'chapa', 'pin', 'topper', 'letras', 'corporeo', 'señaletica', 'buzon', 'rompecabezas'
     ];
 
     const keywordsPrint = [
-        'print', 'plotter', 'tinta', 'mesh', 'papel', 'bond', 'glasé', 'fotografico', 
+        'impresion', 'impresión', 'print', 'plotter', 'tinta', 'vinil', 'vinilo', 'lona', 
+        'banner', 'mesh', 'microperforado', 'papel', 'bond', 'glasé', 'fotografico', 
         'lienzo', 'canvas', 'back light', 'backlight', 'laminacion', 'laminado', 'matte', 
-        'brillante', 'troquelado', 'pendon', 'valla', 'gigantografia', 
-        'rotulado', 'floor graphic', 'poster', 'tarjeta'
+        'brillante', 'corte con impresion', 'troquelado', 'pendon', 'valla', 'gigantografia', 
+        'sticker', 'calcomania', 'etiqueta', 'rotulado', 'floor graphic', 'esmerilado', 'poster', 'tarjeta'
     ];
     
     if (keywordsLaser.some(k => nombre.includes(k))) return 'CORTE';
@@ -154,11 +149,8 @@ export function EstadisticasDashboard({
   const [selectedClientDebt, setSelectedClientDebt] = useState<any | null>(null);
   const [dayDetail, setDayDetail] = useState<{ date: Date; ingresos: any[]; egresos: any[] } | null>(null);
   
-  // ESTADO PARA DETALLE DE MATERIAL
+  // NUEVO ESTADO PARA DETALLE DE MATERIAL
   const [selectedMaterialDetail, setSelectedMaterialDetail] = useState<any | null>(null);
-
-  // NUEVO ESTADO PARA EL FILTRO DE PAGO EN MATERIALES
-  const [filtroPagoMateriales, setFiltroPagoMateriales] = useState<'TODOS' | 'PAGADO' | 'ABONADO' | 'SIN_PAGAR'>('TODOS');
 
   // --- HELPER PARA FECHAS DE PAGO (VERSIÓN BLINDADA) ---
   const getFechaRealPago = (c: any) => {
@@ -302,23 +294,7 @@ export function EstadisticasDashboard({
           let m2Totales = 0;
           let minutosTotales = 0;
           
-          const addDetailImp = (obj: any, item: any, orden: any, qty: number, subtotal: number, m2Item: number) => {
-              obj.count += qty;
-              obj.m2 += m2Item;
-              obj.revenue += subtotal;
-              obj.details.push({
-                  id: item.id || Math.random(),
-                  ordenNumero: orden.ordenNumero,
-                  cliente: orden.cliente?.nombreRazonSocial || "Cliente Desconocido",
-                  fecha: orden.fecha,
-                  descripcion: item.nombre || item.descripcion,
-                  cantidad: qty,
-                  monto: subtotal,
-                  ordenData: orden 
-              });
-          };
-
-          const addDetailCorte = (obj: any, item: any, orden: any, qty: number, subtotal: number) => {
+          const addDetail = (obj: any, item: any, orden: any, qty: number, subtotal: number) => {
               obj.count += qty;
               obj.revenue += subtotal;
               obj.details.push({
@@ -334,13 +310,12 @@ export function EstadisticasDashboard({
           };
 
           const matImpresion: any = {
-              vinil: { label: 'Vinil / Stickers / DTF / Clear', count: 0, m2: 0, revenue: 0, details: [] },
-              banner: { label: 'Banner / Lona', count: 0, m2: 0, revenue: 0, details: [] },
-              micro: { label: 'Microperforado', count: 0, m2: 0, revenue: 0, details: [] },
-              laminado: { label: 'Laminado Extra', count: 0, m2: 0, revenue: 0, details: [] },
-              rigidos: { label: 'Sustratos Rígidos (PVC/Acr)', count: 0, m2: 0, revenue: 0, details: [] },
-              papel: { label: 'Papel / Poster', count: 0, m2: 0, revenue: 0, details: [] },
-              otros: { label: 'Otros Print', count: 0, m2: 0, revenue: 0, details: [] }
+              vinil: { label: 'Vinil / Stickers', count: 0, revenue: 0, details: [] },
+              banner: { label: 'Banner / Lona', count: 0, revenue: 0, details: [] },
+              micro: { label: 'Microperforado', count: 0, revenue: 0, details: [] },
+              laminado: { label: 'Laminado', count: 0, revenue: 0, details: [] },
+              papel: { label: 'Papel / Poster', count: 0, revenue: 0, details: [] },
+              otros: { label: 'Otros Print', count: 0, revenue: 0, details: [] }
           };
 
           const matCorte: Record<string, { label: string, count: number, revenue: number, details: any[] }> = {};
@@ -348,76 +323,31 @@ export function EstadisticasDashboard({
 
           ordenes.filter(o => {
               const f = new Date(o.fecha);
-              if (f < inicio || f > fin || o.estado === 'ANULADO') return false;
-
-              // FILTRO DE PESTAÑAS DE PAGO
-              const total = Number(o.totalUSD) || 0;
-              const pagado = Number(o.montoPagadoUSD) || 0;
-              const deuda = Math.max(0, total - pagado);
-
-              let estadoPago = 'SIN_PAGAR';
-              if (pagado >= total && total > 0) estadoPago = 'PAGADO';
-              else if (pagado > 0 && deuda > 0) estadoPago = 'ABONADO';
-              else if (total <= 0) estadoPago = 'PAGADO'; // Gratis o bonificado cuenta como pagado
-
-              if (filtroPagoMateriales === 'PAGADO' && estadoPago !== 'PAGADO') return false;
-              if (filtroPagoMateriales === 'ABONADO' && estadoPago !== 'ABONADO') return false;
-              if (filtroPagoMateriales === 'SIN_PAGAR' && estadoPago !== 'SIN_PAGAR') return false;
-
-              return true;
+              return f >= inicio && f <= fin && o.estado !== 'ANULADO';
           }).forEach(o => {
               (o.items || []).forEach((item: any) => {
                   const servicio = identificarServicio(item);
                   const nombreLower = (item.nombre || '').toLowerCase();
-                  const totalSubtotal = Number(item.subtotal) || 0;
+                  const subtotal = Number(item.subtotal) || 0;
                   const qty = parseFloat(item.cantidad) || 1;
 
                   if (servicio === 'IMPRESION') {
                       const x = parseFloat(item.medidaXCm) || 0;
                       const y = parseFloat(item.medidaYCm) || 0;
-                      const m2Item = (x > 0 && y > 0) ? (x * y / 10000) * qty : 0;
+                      if (x > 0 && y > 0) m2Totales += (x * y / 10000) * qty; 
                       
-                      if (m2Item > 0) m2Totales += m2Item; 
-                      
-                      const matName = (item.materialImpresion || item.nombre || '').toLowerCase();
-                      
-                      // 1. EXTRAER COSTO DE LAMINADO
-                      let revLaminado = 0;
-                      if (item.impresionLaminado) {
-                          const pLin = parseFloat(item.precioLaminadoLineal) || 0;
-                          const pMan = parseFloat(item.precioLaminadoManual) || 0;
-                          
-                          if (item.tipoCobroLaminado === 'x' && pLin > 0) revLaminado = (x / 100) * pLin * qty;
-                          else if (item.tipoCobroLaminado === 'y' && pLin > 0) revLaminado = (y / 100) * pLin * qty;
-                          else if (item.tipoCobroLaminado === 'manual' && pMan > 0) revLaminado = pMan * qty;
-                          
-                          if (revLaminado > 0) {
-                              addDetailImp(matImpresion.laminado, { ...item, nombre: `Laminado (${item.nombre})` }, o, qty, revLaminado, m2Item);
-                          }
-                      }
-
-                      // 2. EXTRAER COSTO DE SUSTATO RÍGIDO
-                      let revRigido = 0;
-                      if (item.impresionPegado && item.proveedorPegado === 'taller' && item.precioPegado > 0) {
-                          revRigido = parseFloat(item.precioPegado) * qty;
-                          if (revRigido > 0) {
-                              addDetailImp(matImpresion.rigidos, { ...item, nombre: `Base ${item.tipoPegado} (${item.nombre})` }, o, qty, revRigido, m2Item);
-                          }
-                      }
-
-                      // 3. ASIGNAR EL RESTO AL MATERIAL BASE
-                      const baseSubtotal = Math.max(0, totalSubtotal - revLaminado - revRigido);
-
-                      if (matName.includes('microperforado')) {
-                          addDetailImp(matImpresion.micro, item, o, qty, baseSubtotal, m2Item);
-                      } else if (matName.includes('banner') || matName.includes('lona') || matName.includes('cara negra') || matName.includes('mate')) {
-                          addDetailImp(matImpresion.banner, item, o, qty, baseSubtotal, m2Item);
-                      } else if (matName.includes('papel') || matName.includes('bond') || matName.includes('fotografico') || matName.includes('poster')) {
-                          addDetailImp(matImpresion.papel, item, o, qty, baseSubtotal, m2Item);
-                      } else if (matName.includes('vinil') || matName.includes('sticker') || matName.includes('clear') || matName.includes('dtf') || matName.includes('esmerilado') || matName.includes('tornasol')) {
-                          addDetailImp(matImpresion.vinil, item, o, qty, baseSubtotal, m2Item);
+                      if (nombreLower.includes('microperforado')) {
+                          addDetail(matImpresion.micro, item, o, qty, subtotal);
+                      } else if (nombreLower.includes('laminado') || nombreLower.includes('laminacion')) {
+                          addDetail(matImpresion.laminado, item, o, qty, subtotal);
+                      } else if (nombreLower.includes('banner') || nombreLower.includes('lona') || nombreLower.includes('mesh') || nombreLower.includes('lienzo')) {
+                          addDetail(matImpresion.banner, item, o, qty, subtotal);
+                      } else if (nombreLower.includes('papel') || nombreLower.includes('bond') || nombreLower.includes('fotografico') || nombreLower.includes('poster')) {
+                          addDetail(matImpresion.papel, item, o, qty, subtotal);
+                      } else if (nombreLower.includes('vinil') || nombreLower.includes('sticker') || nombreLower.includes('etiqueta') || nombreLower.includes('rotulado')) {
+                          addDetail(matImpresion.vinil, item, o, qty, subtotal);
                       } else {
-                          addDetailImp(matImpresion.otros, item, o, qty, baseSubtotal, m2Item);
+                          addDetail(matImpresion.otros, item, o, qty, subtotal);
                       }
                   }
                   
@@ -427,12 +357,12 @@ export function EstadisticasDashboard({
                       
                       let materialKey = item.materialDeCorte || 'Otros';
                       if (!item.materialDeCorte || item.materialDeCorte === 'Otros') {
-                             const detected = detectarCategoria(nombreLower, MATERIALES_CORTE_KEYS, 'Otros');
-                             if(detected !== 'Otros') materialKey = detected;
+                           const detected = detectarCategoria(nombreLower, MATERIALES_CORTE_KEYS, 'Otros');
+                           if(detected !== 'Otros') materialKey = detected;
                       }
                       
                       if (!matCorte[materialKey]) matCorte[materialKey] = { label: materialKey, count: 0, revenue: 0, details: [] };
-                      addDetailCorte(matCorte[materialKey], item, o, qty, totalSubtotal);
+                      addDetail(matCorte[materialKey], item, o, qty, subtotal);
 
                       let colorKey = item.colorAcrilico || 'N/A';
                       if (!item.colorAcrilico || item.colorAcrilico === 'N/A') {
@@ -441,7 +371,7 @@ export function EstadisticasDashboard({
                       
                       if (colorKey !== 'N/A' && colorKey !== 'Otros') {
                           if (!colCorte[colorKey]) colCorte[colorKey] = { label: colorKey, count: 0, revenue: 0, details: [] };
-                          addDetailCorte(colCorte[colorKey], item, o, qty, totalSubtotal);
+                          addDetail(colCorte[colorKey], item, o, qty, subtotal);
                       }
                   }
               });
@@ -465,8 +395,7 @@ export function EstadisticasDashboard({
       const variacionMinutos = anterior.minutosTotales > 0 ? ((actual.minutosTotales - anterior.minutosTotales) / anterior.minutosTotales) * 100 : 0;
       
       return { actual, anterior, variacionM2, variacionMinutos };
-      
-  }, [ordenes, fechas, filtroPagoMateriales]); 
+  }, [ordenes, fechas]);
 
   // --- CÁLCULO DE MÉTRICAS ---
   const metricas = useMemo(() => {
@@ -512,7 +441,7 @@ export function EstadisticasDashboard({
             }
 
             let relevante = false;
-            const keywordsImp = ['tinta', 'vinil', 'lona', 'banner', 'papel', 'impresion', 'microperforado', 'ojales', 'laminacion', 'laminado', 'esmerilado', 'dtf', 'clear', 'tornasol', 'pvc', 'rigido'];
+            const keywordsImp = ['tinta', 'vinil', 'lona', 'banner', 'papel', 'impresion', 'microperforado', 'ojales', 'laminacion', 'laminado', 'esmerilado'];
             const keywordsCorte = ['mdf', 'acrilico', 'acr', 'madera', 'laser', 'corte', 'pintura', 'thinner', 'balsa', 'plywood'];
             
             if (viewMode === 'GENERAL') relevante = true;
@@ -707,7 +636,7 @@ export function EstadisticasDashboard({
             const texto = ((g as any).nombre || g.descripcion || "").toLowerCase();
             let relevante = false;
             
-            const keywordsImp = ['tinta', 'vinil', 'impresion', 'lona', 'papel', 'dtf', 'clear', 'tornasol', 'pvc', 'rigido'];
+            const keywordsImp = ['tinta', 'vinil', 'impresion', 'lona', 'papel'];
             const keywordsCorte = ['mdf', 'acrilico', 'laser', 'corte', 'madera'];
 
             if (viewMode === 'GENERAL') relevante = true;
@@ -806,7 +735,7 @@ export function EstadisticasDashboard({
           if (f.getDate() === day && f.getMonth() === fechaReferencia.getMonth() && f.getFullYear() === fechaReferencia.getFullYear()) {
                 const areaExplicita = (g as any).area; 
                 const texto = ((g as any).nombre || g.descripcion || "").toLowerCase();
-                const keywordsImp = ['tinta', 'vinil', 'impresion', 'lona', 'papel', 'dtf', 'clear', 'tornasol', 'pvc', 'rigido'];
+                const keywordsImp = ['tinta', 'vinil', 'impresion', 'lona', 'papel'];
                 const keywordsCorte = ['mdf', 'acrilico', 'laser', 'corte', 'madera'];
                 let relevante = false;
 
@@ -890,7 +819,7 @@ export function EstadisticasDashboard({
           return d >= fechas.inicio && d <= fechas.fin;
       };
       if (selectedDetail === 'EGRESOS') {
-          const keywordsImp = ['tinta', 'vinil', 'lona', 'banner', 'papel', 'impresion', 'microperforado', 'ojales', 'laminacion', 'laminado', 'esmerilado', 'dtf', 'clear', 'tornasol', 'pvc', 'rigido'];
+          const keywordsImp = ['tinta', 'vinil', 'lona', 'banner', 'papel', 'impresion', 'microperforado', 'ojales', 'laminacion', 'laminado', 'esmerilado'];
           const keywordsCorte = ['mdf', 'acrilico', 'acr', 'madera', 'laser', 'corte', 'pintura', 'thinner', 'balsa', 'plywood'];
           
           const insumos = (gastosInsumos || []).filter(g => {
@@ -1062,16 +991,6 @@ export function EstadisticasDashboard({
                         <div className="p-2 bg-slate-100 dark:bg-white/5 rounded-xl"><ImageIcon size={20} className="text-slate-500"/></div>
                         <span className="text-xs font-black uppercase text-slate-400 tracking-widest">Desglose Materiales</span>
                     </div>
-
-                    {/* FILTROS DE PAGO PARA MATERIALES */}
-                    <Tabs value={filtroPagoMateriales} onValueChange={(v) => setFiltroPagoMateriales(v as any)} className="w-full mb-3">
-                        <TabsList className="w-full bg-slate-100 dark:bg-white/5 p-1 rounded-xl flex h-auto">
-                            <TabsTrigger value="TODOS" className="flex-1 text-[9px] uppercase font-black py-1.5">Todos</TabsTrigger>
-                            <TabsTrigger value="PAGADO" className="flex-1 text-[9px] uppercase font-black py-1.5 text-emerald-600 data-[state=active]:bg-emerald-100">Pagado</TabsTrigger>
-                            <TabsTrigger value="ABONADO" className="flex-1 text-[9px] uppercase font-black py-1.5 text-orange-600 data-[state=active]:bg-orange-100">Abono</TabsTrigger>
-                            <TabsTrigger value="SIN_PAGAR" className="flex-1 text-[9px] uppercase font-black py-1.5 text-rose-600 data-[state=active]:bg-rose-100">Sin Pago</TabsTrigger>
-                        </TabsList>
-                    </Tabs>
                     
                     <div className="grid grid-cols-2 gap-3 overflow-y-auto max-h-[160px] custom-scrollbar pr-1">
                         {productionMetrics.actual.breakdownImpresion.map((mat: any, idx: number) => (
@@ -1082,15 +1001,13 @@ export function EstadisticasDashboard({
                             >
                                 <p className="text-[9px] font-black text-slate-400 uppercase truncate" title={mat.label}>{mat.label}</p>
                                 <div>
-                                    <p className="text-lg font-black text-slate-800 dark:text-white leading-none mt-1">
-                                        {mat.m2 > 0 ? mat.m2.toFixed(2) : mat.count} <span className="text-[9px] opacity-50 font-bold">{mat.m2 > 0 ? 'm²' : 'unids'}</span>
-                                    </p>
+                                    <p className="text-lg font-black text-slate-800 dark:text-white leading-none mt-1">{mat.count} <span className="text-[9px] opacity-50 font-bold">unids</span></p>
                                     <p className="text-xs font-bold text-emerald-600 mt-0.5">${mat.revenue.toFixed(0)}</p>
                                 </div>
                             </div>
                         ))}
                         {productionMetrics.actual.breakdownImpresion.length === 0 && (
-                            <div className="col-span-2 text-center text-xs text-slate-400 py-4">No hay datos de impresión con este filtro</div>
+                            <div className="col-span-2 text-center text-xs text-slate-400 py-4">No hay datos de impresión</div>
                         )}
                     </div>
                 </motion.div>
@@ -1139,16 +1056,6 @@ export function EstadisticasDashboard({
                         <span className="text-xs font-black uppercase text-slate-400 tracking-widest">Tendencias Corte</span>
                     </div>
 
-                    {/* FILTROS DE PAGO PARA CORTE */}
-                    <Tabs value={filtroPagoMateriales} onValueChange={(v) => setFiltroPagoMateriales(v as any)} className="w-full mb-3">
-                        <TabsList className="w-full bg-slate-100 dark:bg-white/5 p-1 rounded-xl flex h-auto">
-                            <TabsTrigger value="TODOS" className="flex-1 text-[9px] uppercase font-black py-1.5">Todos</TabsTrigger>
-                            <TabsTrigger value="PAGADO" className="flex-1 text-[9px] uppercase font-black py-1.5 text-emerald-600 data-[state=active]:bg-emerald-100">Pagado</TabsTrigger>
-                            <TabsTrigger value="ABONADO" className="flex-1 text-[9px] uppercase font-black py-1.5 text-orange-600 data-[state=active]:bg-orange-100">Abono</TabsTrigger>
-                            <TabsTrigger value="SIN_PAGAR" className="flex-1 text-[9px] uppercase font-black py-1.5 text-rose-600 data-[state=active]:bg-rose-100">Sin Pago</TabsTrigger>
-                        </TabsList>
-                    </Tabs>
-
                     <Tabs defaultValue="materiales" className="flex-1 flex flex-col">
                         <TabsList className="w-full bg-slate-100 dark:bg-white/5 p-1 rounded-xl mb-3">
                             <TabsTrigger value="materiales" className="flex-1 text-[9px] uppercase font-black">Materiales</TabsTrigger>
@@ -1170,7 +1077,7 @@ export function EstadisticasDashboard({
                                     </div>
                                 ))}
                                 {productionMetrics.actual.breakdownCorteMateriales.length === 0 && (
-                                    <div className="col-span-2 text-center text-xs text-slate-400 py-4">No hay datos de materiales con este filtro</div>
+                                    <div className="col-span-2 text-center text-xs text-slate-400 py-4">No hay datos de materiales</div>
                                 )}
                             </div>
                         </TabsContent>
@@ -1193,7 +1100,7 @@ export function EstadisticasDashboard({
                                     </div>
                                 ))}
                                 {productionMetrics.actual.breakdownCorteColores.length === 0 && (
-                                    <div className="col-span-2 text-center text-xs text-slate-400 py-4">No hay datos de colores con este filtro</div>
+                                    <div className="col-span-2 text-center text-xs text-slate-400 py-4">No hay datos de colores</div>
                                 )}
                             </div>
                         </TabsContent>

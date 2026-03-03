@@ -9,8 +9,8 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area" 
 import { Badge } from "@/components/ui/badge" 
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select" 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select" 
 import { toast } from 'sonner' 
 import { cn } from "@/lib/utils"
 
@@ -19,7 +19,7 @@ import {
     Users, Loader2, Pencil, Trash2, Save, 
     Palette, Scissors, Printer, Calendar, Box, ShoppingCart, 
     DollarSign, ChevronRight, CheckCircle2, Sparkles,
-    Coins, RotateCcw, Clock // <--- IMPORTANTE: Icono Clock agregado
+    Coins, RotateCcw, Clock, Search
 } from "lucide-react" 
 
 import { ItemFormModal } from "@/components/orden/item-form-modal"
@@ -31,18 +31,15 @@ import { subscribeToDesigners, type Designer } from "@/lib/services/designers-se
 const PREFIJOS_RIF = ["V", "E", "P", "R", "J", "G"] as const;
 const PREFIJOS_TELEFONO = ["0412", "0422", "0414", "0424", "0416", "0426"] as const;
 
-// Helper para convertir la fecha ISO de Firebase a formato local para el input HTML
 const formatForDateTimeInput = (isoString: string) => {
     if (!isoString) return "";
     const date = new Date(isoString);
-    // Ajustar el offset para que el input muestre la hora local correcta
     const offset = date.getTimezoneOffset() * 60000;
     return (new Date(date.getTime() - offset)).toISOString().slice(0, 16);
 };
 
 const INITIAL_FORM_DATA = {
     ordenNumero: '', 
-    // INICIALIZACIÓN CLAVE: Fecha exacta actual (ISO)
     fecha: new Date().toISOString(), 
     fechaEntrega: new Date().toISOString().split('T')[0],
     cliente: { 
@@ -64,6 +61,10 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
     const [isClientEditing, setIsClientEditing] = useState(true); 
     const [designersList, setDesignersList] = useState<Designer[]>([]);
     const [customColors, setCustomColors] = useState<any[]>([]);
+    
+    // Estados del Autocompletado
+    const [clientSearchTerm, setClientSearchTerm] = useState("");
+    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
     useEffect(() => {
         const unsubDesigners = subscribeToDesigners(setDesignersList);
@@ -79,15 +80,20 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                 const [prefRif, numRif] = (initialData.cliente?.rifCedula || "V-").split('-');
                 const tel = initialData.cliente?.telefono || "";
                 
-                // CARGA DE DATOS: Aseguramos que 'fecha' se lea de Firebase o se cree una nueva
                 setFormData({ 
                     ...initialData, 
-                    fecha: initialData.fecha || new Date().toISOString(), // <--- Recupera fecha exacta o usa actual
+                    fecha: initialData.fecha || new Date().toISOString(),
                     cliente: { ...initialData.cliente, prefijoRif: prefRif || "V", numeroRif: numRif || "", prefijoTelefono: tel.substring(0, 4) || "0414", numeroTelefono: tel.substring(4) || "" } 
                 });
                 
                 const existing = clients.find(c => c.rifCedulaCompleto === initialData.cliente?.rifCedula);
-                if (existing) { setSelectedClientId(existing.id!); setIsClientEditing(false); }
+                if (existing) { 
+                    setSelectedClientId(existing.id!); 
+                    setIsClientEditing(false); 
+                    setClientSearchTerm(existing.nombreRazonSocial); // Rellenar buscador
+                } else if (initialData.cliente?.nombreRazonSocial) {
+                    setClientSearchTerm(initialData.cliente.nombreRazonSocial);
+                }
             } else {
                 const last = await getLastOrderNumber();
                 setFormData(prev => ({ ...prev, ordenNumero: String(last + 1) }));
@@ -97,6 +103,17 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
         return () => { unsubDesigners(); unsubColors(); };
     }, [initialData]);
 
+    const filteredClients = useMemo(() => {
+        if (!clientSearchTerm.trim()) return frequentClients;
+        const lowerTerm = clientSearchTerm.toLowerCase();
+        return frequentClients.filter(c => 
+            (c.nombreRazonSocial && c.nombreRazonSocial.toLowerCase().includes(lowerTerm)) ||
+            (c.rifCedula && c.rifCedula.toLowerCase().includes(lowerTerm)) ||
+            (c.telefono && c.telefono.toLowerCase().includes(lowerTerm))
+        );
+    }, [frequentClients, clientSearchTerm]);
+
+    // LÓGICA DE CÁLCULO ACTUALIZADA PARA SOPORTAR PEGADO DE PVC Y ACRÍLICO
     const getItemSubtotal = useCallback((item: any) => {
         if (item.totalAjustado !== undefined) return parseFloat(item.totalAjustado);
 
@@ -106,9 +123,33 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
         const c = parseFloat(item.cantidad) || 0;
         const e = item.suministrarMaterial ? (parseFloat(item.costoMaterialExtra) || 0) : 0;
         
-        return item.unidad === 'm2' 
-            ? ((x / 100) * (y / 100) * p + e) * c 
-            : (p + e) * c;
+        if (item.unidad === 'm2') {
+            let costoBaseUnitario = (x / 100) * (y / 100) * p;
+            
+            if (item.tipoServicio === 'IMPRESION') {
+                // Costo de Laminado
+                if (item.impresionLaminado) {
+                    const pLin = parseFloat(item.precioLaminadoLineal) || 0;
+                    const pMan = parseFloat(item.precioLaminadoManual) || 0;
+                    
+                    if (item.tipoCobroLaminado === 'x' && pLin > 0) {
+                        costoBaseUnitario += (x / 100) * pLin;
+                    } else if (item.tipoCobroLaminado === 'y' && pLin > 0) {
+                        costoBaseUnitario += (y / 100) * pLin;
+                    } else if (item.tipoCobroLaminado === 'manual' && pMan > 0) {
+                        costoBaseUnitario += pMan;
+                    }
+                }
+
+                // Costo de Pegado en Rígido (PVC / Acrílico)
+                if (item.impresionPegado && item.proveedorPegado === 'taller' && item.precioPegado > 0) {
+                    costoBaseUnitario += parseFloat(item.precioPegado) || 0;
+                }
+            }
+            return (costoBaseUnitario + e) * c;
+        } else {
+            return (p + e) * c;
+        }
     }, []);
 
     const currentTotal = useMemo(() => {
@@ -119,14 +160,19 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
 
     const handleSelectClient = (clientId: string) => {
         setSelectedClientId(clientId);
+        setIsDropdownOpen(false); // Cierra el menú al elegir
+        
         if (clientId === 'NEW') {
             setIsClientEditing(true);
+            setClientSearchTerm(""); // Limpia el buscador
             setFormData(p => ({ ...p, cliente: INITIAL_FORM_DATA.cliente }));
             return;
         }
+        
         const c = frequentClients.find(client => client.id === clientId);
         if (c) {
             setIsClientEditing(false);
+            setClientSearchTerm(c.nombreRazonSocial); // Coloca el nombre en el input
             const [pref, num] = (c.rifCedula || "V-").split('-');
             setFormData(prev => ({ ...prev, cliente: { ...prev.cliente, nombreRazonSocial: c.nombreRazonSocial, tipoCliente: c.tipoCliente, prefijoRif: pref || "V", numeroRif: num || "", prefijoTelefono: c.telefono?.substring(0, 4) || "0414", numeroTelefono: c.telefono?.substring(4) || "" } }));
         }
@@ -209,10 +255,9 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                 subtotal: parseFloat(getItemSubtotal(item).toFixed(2))
             }));
 
-            // PERSISTENCIA EN FIREBASE: Aquí se construye el objeto final
             const finalPayload = { 
                 ...formData,
-                fecha: formData.fecha, // <--- SE ENVÍA EXPLÍCITAMENTE LA FECHA/HORA EXACTA
+                fecha: formData.fecha,
                 items: processedItems,
                 totalUSD: parseFloat(currentTotal.toFixed(2)), 
                 userId: currentUserId, 
@@ -224,7 +269,6 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                 } 
             };
 
-            // Aquí se llama a la función que escribe en Firebase (onCreate o onUpdate)
             if (initialData?.id) await onUpdate(initialData.id, finalPayload);
             else await onCreate(finalPayload);
             onClose();
@@ -261,13 +305,22 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                                     formData.items.map((item: any, idx: number) => (
                                         <motion.div key={idx} initial={{ opacity: 0, x: -5 }} animate={{ opacity: 1, x: 0 }} className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 flex items-center justify-between group">
                                             <div className="flex items-center gap-3">
-                                                <div className={cn("h-9 w-9 rounded-lg flex items-center justify-center", item.tipoServicio === 'IMPRESION' ? "bg-blue-50 text-blue-500" : "bg-orange-50 text-orange-500")}>{item.tipoServicio === 'IMPRESION' ? <Printer className="w-4 h-4" /> : <Scissors className="w-4 h-4" />}</div>
-                                                <div>
-                                                    <h4 className="font-black text-[11px] uppercase dark:text-white leading-none mb-1">{item.nombre}</h4>
-                                                    <p className="text-[9px] text-slate-400 font-bold uppercase">{item.cantidad} {item.unidad} • {item.unidad === 'm2' ? `${item.medidaXCm}x${item.medidaYCm}cm` : `$${item.precioUnitario}`}</p>
+                                                <div className={cn("h-9 w-9 rounded-lg flex items-center justify-center shrink-0", item.tipoServicio === 'IMPRESION' ? "bg-blue-50 text-blue-500" : "bg-orange-50 text-orange-500")}>
+                                                    {item.tipoServicio === 'IMPRESION' ? <Printer className="w-4 h-4" /> : <Scissors className="w-4 h-4" />}
+                                                </div>
+                                                <div className="flex-1 min-w-0 pr-4">
+                                                    <h4 className="font-black text-[11px] uppercase dark:text-white leading-none mb-1 truncate">{item.nombre}</h4>
+                                                    <p className="text-[9px] text-slate-400 font-bold uppercase truncate">
+                                                        {item.cantidad} {item.unidad} • {item.unidad === 'm2' ? `${item.medidaXCm}x${item.medidaYCm}cm` : `$${item.precioUnitario}`}
+                                                    </p>
+                                                    {item.materialDetalleCorte && (
+                                                        <p className="text-[8px] text-blue-500/80 font-bold uppercase mt-0.5 truncate bg-blue-50/50 inline-block px-1.5 py-0.5 rounded-sm">
+                                                            {item.materialDetalleCorte}
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-3">
+                                            <div className="flex items-center gap-3 shrink-0">
                                                 <div className="text-right">
                                                     <p className="text-sm font-black dark:text-white leading-none">${getItemSubtotal(item).toFixed(2)}</p>
                                                     {item.totalAjustado !== undefined && (
@@ -299,27 +352,72 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                 <aside className="w-full lg:w-[350px] shrink-0 bg-[#f1f5f9] dark:bg-black border-l dark:border-slate-800 flex flex-col min-h-0">
                     <ScrollArea className="flex-1">
                         <div className="p-5 space-y-6">
-                            <section className="space-y-4">
-                                <div className="flex justify-between items-center">
+                            
+                            {/* BÚSQUEDA INTEGRADA Y AUTOCOMPLETADO */}
+                            <section className="space-y-3 relative">
+                                <div className="flex justify-between items-center mb-1">
                                     <Label className="text-[9px] font-black uppercase text-slate-400">Datos del Cliente</Label>
                                     <div className="flex gap-1">
                                         <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-blue-500" onClick={() => setIsClientEditing(!isClientEditing)}><Pencil className="w-3 h-3"/></Button>
                                         {selectedClientId !== 'NEW' && <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 hover:text-red-500" onClick={handleDeleteClient}><Trash2 className="w-3 h-3"/></Button>}
                                     </div>
                                 </div>
-                                <Select onValueChange={handleSelectClient} value={selectedClientId}>
-                                    <SelectTrigger className="h-10 rounded-lg border-none bg-white dark:bg-slate-900 px-4 text-[11px] font-bold"><SelectValue placeholder="Seleccionar cliente..." /></SelectTrigger>
-                                    <SelectContent className="rounded-xl">
-                                        <SelectItem value="NEW" className="font-bold text-blue-600">✨ Venta Directa (Express)</SelectItem>
-                                        {frequentClients.map(c => (
-                                            <SelectItem key={c.id} value={c.id} className="text-[11px] font-bold">
-                                                <div className="flex justify-between w-full gap-2"><span>{c.nombreRazonSocial}</span>{c.tipoCliente === 'ALIADO' && <Badge className="h-3.5 bg-purple-100 text-purple-600 border-none text-[7px] uppercase">Aliado</Badge>}</div>
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                
+                                <div className="relative z-50">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-blue-500" />
+                                    <Input 
+                                        placeholder="Buscar o crear cliente..." 
+                                        value={clientSearchTerm}
+                                        onChange={(e) => {
+                                            setClientSearchTerm(e.target.value);
+                                            setIsDropdownOpen(true);
+                                        }}
+                                        onFocus={() => setIsDropdownOpen(true)}
+                                        onBlur={() => setTimeout(() => setIsDropdownOpen(false), 200)} 
+                                        className={cn(
+                                            "h-10 pl-9 text-[11px] bg-white dark:bg-slate-900 border-none shadow-sm font-bold placeholder:text-slate-300 transition-all focus-visible:ring-2 focus-visible:ring-blue-500",
+                                            isDropdownOpen ? "rounded-t-xl rounded-b-none" : "rounded-xl"
+                                        )}
+                                    />
+                                    <AnimatePresence>
+                                        {isDropdownOpen && (
+                                            <motion.div 
+                                                initial={{ opacity: 0, y: -5 }} 
+                                                animate={{ opacity: 1, y: 0 }} 
+                                                exit={{ opacity: 0, y: -5 }}
+                                                className="absolute top-full left-0 w-full bg-white dark:bg-slate-900 border border-t-0 border-slate-100 shadow-xl rounded-b-xl overflow-hidden max-h-60 overflow-y-auto"
+                                            >
+                                                <div className="p-1">
+                                                    <div 
+                                                        onClick={() => handleSelectClient('NEW')}
+                                                        className="px-3 py-2 text-[11px] font-bold text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors"
+                                                    >
+                                                        ✨ Venta Directa (Express)
+                                                    </div>
+                                                    
+                                                    {filteredClients.map(c => (
+                                                        <div 
+                                                            key={c.id} 
+                                                            onClick={() => handleSelectClient(c.id)}
+                                                            className="flex justify-between items-center px-3 py-2 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
+                                                        >
+                                                            <span className="truncate">{c.nombreRazonSocial}</span>
+                                                            {c.tipoCliente === 'ALIADO' && <Badge className="h-3.5 bg-purple-100 text-purple-600 border-none text-[7px] uppercase shrink-0">Aliado</Badge>}
+                                                        </div>
+                                                    ))}
 
-                                <div className={cn("space-y-3", !isClientEditing && "opacity-60 pointer-events-none")}>
+                                                    {filteredClients.length === 0 && (
+                                                        <div className="py-4 text-center text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                                            No se encontraron coincidencias
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+
+                                <div className={cn("space-y-3 pt-2", !isClientEditing && "opacity-60 pointer-events-none")}>
                                     <div className="space-y-1">
                                         <Label className="text-[8px] font-black text-slate-400 ml-1 uppercase">Razón Social / Nombre</Label>
                                         <Input value={formData.cliente.nombreRazonSocial} onChange={e => handleChange('cliente.nombreRazonSocial', e.target.value)} className="h-9 rounded-lg border-none bg-white dark:bg-slate-900 font-bold text-[11px]" />
@@ -357,7 +455,6 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                             </section>
 
                             <section className="space-y-4">
-                                {/* NUEVO CAMPO: FECHA DE EMISIÓN EXACTA (Se guarda en Firebase) */}
                                 <div className="space-y-1">
                                     <Label className="text-[9px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
                                         <Clock className="w-3.5 h-3.5 text-blue-500" /> Fecha de Emisión (Exacta)
@@ -366,7 +463,6 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                                         type="datetime-local" 
                                         value={formatForDateTimeInput(formData.fecha)} 
                                         onChange={e => {
-                                            // Al cambiar, convertimos la fecha local del input a ISO string para Firebase
                                             const dateValue = new Date(e.target.value);
                                             if (!isNaN(dateValue.getTime())) {
                                                 handleChange('fecha', dateValue.toISOString());

@@ -6,7 +6,7 @@ import {
     FileText, Wallet, User, Building2, Palette, 
     Search, ArrowUpRight, ArrowDownLeft,
     Eye, Loader2, ImageIcon, ExternalLink,
-    Lock, Unlock, CalendarX
+    Lock, Unlock, CalendarX, CalendarDays
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,13 +35,11 @@ interface PaymentAuditViewProps {
 }
 
 // --- CONFIGURACIÓN DE MÉTODOS DE PAGO (Sincronizado con WalletsView) ---
-// Estos valores contienen las palabras clave que WalletsView busca para clasificar
 const PAYMENT_OPTIONS = [
     { value: "Efectivo USD", label: "Caja Chica ($)" },
     { value: "Pago Móvil (Bs)", label: "Banco Nacional (Bs)" },
     { value: "Zelle", label: "Zelle / Bofa" },
     { value: "Binance USDT", label: "Binance / USDT" },
-    // Opción extra por si manejas efectivo en bolívares físico
     { value: "Efectivo Bs", label: "Caja Chica (Bs)" } 
 ];
 
@@ -108,7 +106,7 @@ export function PaymentAuditView({
     }, [ordenes, selectedMonth, selectedYear, searchTerm]);
 
     const handleUpdateIncomeMethod = async (payment: any, newMethod: string) => {
-        setUpdatingId(payment.uniqueId)
+        setUpdatingId(`method-${payment.uniqueId}`)
         try {
             const ordenRef = doc(db, "ordenes", payment.ordenId)
             const ordenSnap = await getDoc(ordenRef)
@@ -124,23 +122,49 @@ export function PaymentAuditView({
         } catch (error) { toast.error("Error al actualizar") } finally { setUpdatingId(null) }
     }
 
+    // NUEVO: ACTUALIZAR FECHA DE INGRESO
+    const handleUpdateIncomeDate = async (payment: any, newDateString: string) => {
+        if (!newDateString) return;
+        setUpdatingId(`date-${payment.uniqueId}`);
+        try {
+            const parts = newDateString.split('-');
+            const oldDate = new Date(payment.dateObj);
+            oldDate.setFullYear(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+            const isoString = oldDate.toISOString();
+
+            const ordenRef = doc(db, "ordenes", payment.ordenId);
+            const ordenSnap = await getDoc(ordenRef);
+            if (ordenSnap.exists()) {
+                const data = ordenSnap.data();
+                const registroPagos = [...(data.registroPagos || [])];
+                if (registroPagos[payment.index]) {
+                    registroPagos[payment.index] = { 
+                        ...registroPagos[payment.index], 
+                        fecha: isoString,
+                        fechaRegistro: isoString 
+                    };
+                    await updateDoc(ordenRef, { registroPagos });
+                    toast.success("Fecha de ingreso ajustada");
+                }
+            }
+        } catch (error) { toast.error("Error al actualizar la fecha"); } 
+        finally { setUpdatingId(null); }
+    };
+
     // ==========================================
     // 2. LÓGICA DE EGRESOS (Gastos Editables)
     // ==========================================
     
     const handleUpdateExpenseMethod = async (item: any, newMethod: string, type: 'gasto' | 'nomina' | 'diseno') => {
-        setUpdatingId(item.id);
+        setUpdatingId(`method-${item.id}`);
         try {
             if (type === 'gasto') {
-                // Actualiza en colección 'gastos_insumos'
                 await updateDoc(doc(db, "gastos_insumos", item.id), { metodoPago: newMethod });
             } 
             else if (type === 'nomina') {
-                // Actualiza en colección 'pagos'
                 await updateDoc(doc(db, "pagos", item.id), { metodoPago: newMethod });
             }
             else if (type === 'diseno') {
-                // Actualiza el item dentro de la orden
                 const ordenRef = doc(db, "ordenes", item.orderId);
                 const ordenSnap = await getDoc(ordenRef);
                 if (ordenSnap.exists()) {
@@ -153,12 +177,45 @@ export function PaymentAuditView({
                 }
             }
             toast.success("Billetera actualizada");
-        } catch (error) {
-            console.error("Error al actualizar:", error);
-            toast.error("Error al actualizar (Revisa consola)");
-        } finally {
-            setUpdatingId(null);
-        }
+        } catch (error) { toast.error("Error al actualizar (Revisa consola)"); } 
+        finally { setUpdatingId(null); }
+    };
+
+    // NUEVO: ACTUALIZAR FECHA DE EGRESO
+    const handleUpdateExpenseDate = async (item: any, newDateString: string, type: 'gasto' | 'nomina' | 'diseno') => {
+        if (!newDateString) return;
+        setUpdatingId(`date-${item.id}`);
+        try {
+            const parts = newDateString.split('-');
+            let oldDate = new Date();
+            if (item.fecha) {
+                const parsed = new Date(item.fecha);
+                if (!isNaN(parsed.getTime())) oldDate = parsed;
+            }
+            oldDate.setFullYear(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+            const isoString = oldDate.toISOString();
+
+            if (type === 'gasto') {
+                await updateDoc(doc(db, "gastos_insumos", item.id), { fecha: isoString });
+            } 
+            else if (type === 'nomina') {
+                await updateDoc(doc(db, "pagos", item.id), { fechaPago: isoString, fecha: isoString });
+            }
+            else if (type === 'diseno') {
+                const ordenRef = doc(db, "ordenes", item.orderId);
+                const ordenSnap = await getDoc(ordenRef);
+                if (ordenSnap.exists()) {
+                    const data = ordenSnap.data();
+                    const items = [...(data.items || [])];
+                    if (items[item.itemIndex]) {
+                        items[item.itemIndex] = { ...items[item.itemIndex], paymentDate: isoString };
+                        await updateDoc(ordenRef, { items });
+                    }
+                }
+            }
+            toast.success("Fecha de gasto ajustada");
+        } catch (error) { toast.error("Error al reasignar fecha"); } 
+        finally { setUpdatingId(null); }
     };
 
     // A. Insumos
@@ -260,7 +317,7 @@ export function PaymentAuditView({
                 </div>
 
                 <div className="flex flex-wrap gap-2 items-center w-full md:w-auto">
-                    {/* BOTÓN MODO EDICIÓN */}
+                    {/* BOTÓN MODO EDICIÓN ACTUALIZADO */}
                     <Button 
                         variant={isEditMode ? "destructive" : "outline"}
                         onClick={() => setIsEditMode(!isEditMode)}
@@ -308,7 +365,9 @@ export function PaymentAuditView({
                             <table className="w-full text-left border-collapse">
                                 <thead className="bg-slate-50 dark:bg-white/5 border-b border-slate-100 dark:border-white/5">
                                     <tr>
-                                        <th className="p-5 text-[9px] font-black uppercase tracking-widest text-slate-400">Fecha</th>
+                                        <th className="p-5 text-[9px] font-black uppercase tracking-widest text-slate-400">
+                                            {isEditMode ? "Ajustar Fecha" : "Fecha"}
+                                        </th>
                                         <th className="p-5 text-[9px] font-black uppercase tracking-widest text-slate-400">Cliente / Orden</th>
                                         <th className="p-5 text-[9px] font-black uppercase tracking-widest text-slate-400 text-center">Capture</th>
                                         <th className="p-5 text-[9px] font-black uppercase tracking-widest text-slate-400 text-right">Monto</th>
@@ -321,10 +380,27 @@ export function PaymentAuditView({
                                     {ingresosData.map((pago) => (
                                         <tr key={pago.uniqueId} className="group hover:bg-emerald-50/30 transition-colors">
                                             <td className="p-5">
-                                                <div className="flex flex-col">
-                                                    <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{format(pago.dateObj, 'dd/MM/yyyy')}</span>
-                                                    <span className="text-[9px] text-slate-400">{format(pago.dateObj, 'hh:mm a')}</span>
-                                                </div>
+                                                {/* CONDICIONAL DE FECHA */}
+                                                {isEditMode ? (
+                                                    updatingId === `date-${pago.uniqueId}` ? (
+                                                        <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin"/> Moviendo...</span>
+                                                    ) : (
+                                                        <div className="flex flex-col gap-1">
+                                                            <Input 
+                                                                type="date" 
+                                                                defaultValue={format(pago.dateObj, 'yyyy-MM-dd')}
+                                                                onChange={(e) => handleUpdateIncomeDate(pago, e.target.value)}
+                                                                className="h-8 text-[11px] font-black uppercase text-emerald-700 bg-emerald-50 border-none rounded-lg w-[130px] cursor-pointer"
+                                                            />
+                                                            <span className="text-[8px] uppercase tracking-widest text-slate-400">{format(pago.dateObj, 'hh:mm a')}</span>
+                                                        </div>
+                                                    )
+                                                ) : (
+                                                    <div className="flex flex-col">
+                                                        <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{format(pago.dateObj, 'dd/MM/yyyy')}</span>
+                                                        <span className="text-[9px] font-bold tracking-widest text-slate-400">{format(pago.dateObj, 'hh:mm a')}</span>
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="p-5">
                                                 <div className="flex flex-col">
@@ -343,7 +419,7 @@ export function PaymentAuditView({
                                             </td>
                                             <td className="p-5">
                                                 {isEditMode ? (
-                                                    updatingId === pago.uniqueId ? (
+                                                    updatingId === `method-${pago.uniqueId}` ? (
                                                         <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin"/> Guardando...</span>
                                                     ) : (
                                                         <Select defaultValue={pago.metodo} onValueChange={(val) => handleUpdateIncomeMethod(pago, val)}>
@@ -378,17 +454,18 @@ export function PaymentAuditView({
                             <EgresosTabTrigger value="diseno" label="Diseño" count={egresosDiseno.length} total={egresosDiseno.reduce((a,b)=>a+b.monto,0)} />
                         </TabsList>
 
+                        {/* Pasamos también onUpdateDate a la tabla interna */}
                         <TabsContent value="insumos">
-                            <AuditTable data={egresosInsumos} color="blue" onUpdate={handleUpdateExpenseMethod} updatingId={updatingId} isEditMode={isEditMode} />
+                            <AuditTable data={egresosInsumos} color="blue" onUpdate={handleUpdateExpenseMethod} onUpdateDate={handleUpdateExpenseDate} updatingId={updatingId} isEditMode={isEditMode} />
                         </TabsContent>
                         <TabsContent value="fijos">
-                            <AuditTable data={egresosFijos} color="orange" onUpdate={handleUpdateExpenseMethod} updatingId={updatingId} isEditMode={isEditMode} />
+                            <AuditTable data={egresosFijos} color="orange" onUpdate={handleUpdateExpenseMethod} onUpdateDate={handleUpdateExpenseDate} updatingId={updatingId} isEditMode={isEditMode} />
                         </TabsContent>
                         <TabsContent value="nomina">
-                            <AuditTable data={egresosNomina} color="indigo" onUpdate={handleUpdateExpenseMethod} updatingId={updatingId} isEditMode={isEditMode} />
+                            <AuditTable data={egresosNomina} color="indigo" onUpdate={handleUpdateExpenseMethod} onUpdateDate={handleUpdateExpenseDate} updatingId={updatingId} isEditMode={isEditMode} />
                         </TabsContent>
                         <TabsContent value="diseno">
-                            <AuditTable data={egresosDiseno} color="purple" onUpdate={handleUpdateExpenseMethod} updatingId={updatingId} isEditMode={isEditMode} />
+                            <AuditTable data={egresosDiseno} color="purple" onUpdate={handleUpdateExpenseMethod} onUpdateDate={handleUpdateExpenseDate} updatingId={updatingId} isEditMode={isEditMode} />
                         </TabsContent>
                     </Tabs>
                 </TabsContent>
@@ -397,7 +474,6 @@ export function PaymentAuditView({
             {/* MODAL IMAGEN CORREGIDO */}
             <Dialog open={!!previewImage} onOpenChange={(open) => !open && setPreviewImage(null)}>
                 <DialogContent className="max-w-4xl p-0 bg-transparent border-none shadow-none flex justify-center items-center pointer-events-none">
-                    {/* Título oculto para accesibilidad (Fix del error) */}
                     <DialogTitle className="sr-only">Vista previa del comprobante</DialogTitle>
                     
                     <div className="relative group max-h-[90vh] w-auto pointer-events-auto">
@@ -430,13 +506,13 @@ function EgresosTabTrigger({ value, label, count, total }: any) {
     )
 }
 
-function AuditTable({ data, color, onUpdate, updatingId, isEditMode }: any) {
+function AuditTable({ data, color, onUpdate, onUpdateDate, updatingId, isEditMode }: any) {
     const total = data.reduce((sum: number, item: any) => sum + item.monto, 0);
     const colorClasses: any = {
-        blue: "text-blue-600 bg-blue-50 border-blue-100",
-        orange: "text-orange-600 bg-orange-50 border-orange-100",
-        indigo: "text-indigo-600 bg-indigo-50 border-indigo-100",
-        purple: "text-purple-600 bg-purple-50 border-purple-100"
+        blue: "text-blue-600 bg-blue-50 border-blue-100 dark:bg-blue-900/20 dark:border-blue-800/30",
+        orange: "text-orange-600 bg-orange-50 border-orange-100 dark:bg-orange-900/20 dark:border-orange-800/30",
+        indigo: "text-indigo-600 bg-indigo-50 border-indigo-100 dark:bg-indigo-900/20 dark:border-indigo-800/30",
+        purple: "text-purple-600 bg-purple-50 border-purple-100 dark:bg-purple-900/20 dark:border-purple-800/30"
     };
 
     return (
@@ -446,7 +522,9 @@ function AuditTable({ data, color, onUpdate, updatingId, isEditMode }: any) {
                     <table className="w-full text-left border-collapse">
                         <thead className="sticky top-0 bg-white dark:bg-[#1c1c1e] z-10">
                             <tr>
-                                <th className="p-4 text-[9px] font-black uppercase text-slate-400">Fecha</th>
+                                <th className="p-4 text-[9px] font-black uppercase text-slate-400">
+                                    {isEditMode ? "Ajustar Fecha" : "Fecha"}
+                                </th>
                                 <th className="p-4 text-[9px] font-black uppercase text-slate-400">Beneficiario / Concepto</th>
                                 <th className="p-4 text-[9px] font-black uppercase text-slate-400 text-right">Monto</th>
                                 <th className="p-4 text-[9px] font-black uppercase text-slate-400 w-[200px]">
@@ -458,14 +536,28 @@ function AuditTable({ data, color, onUpdate, updatingId, isEditMode }: any) {
                             {data.length > 0 ? data.map((item: any, idx: number) => (
                                 <tr key={item.id || idx} className="hover:bg-slate-50 dark:hover:bg-white/5">
                                     <td className="p-4">
-                                        <div className="flex flex-col">
-                                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                                                {item.fecha ? new Date(item.fecha).toLocaleDateString('es-VE') : '---'}
-                                            </span>
-                                            <span className="text-[9px] font-bold text-slate-400">
-                                                {item.fecha ? new Date(item.fecha).getFullYear() : ''}
-                                            </span>
-                                        </div>
+                                        {/* CONDICIONAL DE FECHA EGRESOS */}
+                                        {isEditMode ? (
+                                            updatingId === `date-${item.id}` ? (
+                                                <span className="text-[9px] font-bold text-blue-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin"/> ...</span>
+                                            ) : (
+                                                <Input 
+                                                    type="date" 
+                                                    defaultValue={item.fecha ? format(new Date(item.fecha), 'yyyy-MM-dd') : ''}
+                                                    onChange={(e) => onUpdateDate(item, e.target.value, item.type)}
+                                                    className={cn("h-8 text-[11px] font-black uppercase border-none rounded-lg w-[130px] cursor-pointer", colorClasses[color])}
+                                                />
+                                            )
+                                        ) : (
+                                            <div className="flex flex-col">
+                                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                                                    {item.fecha ? new Date(item.fecha).toLocaleDateString('es-VE') : '---'}
+                                                </span>
+                                                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                                                    {item.fecha ? new Date(item.fecha).getFullYear() : ''}
+                                                </span>
+                                            </div>
+                                        )}
                                     </td>
                                     <td className="p-4">
                                         <p className="text-xs font-black text-slate-800 dark:text-white uppercase truncate max-w-[200px]">{item.beneficiario}</p>
@@ -475,9 +567,9 @@ function AuditTable({ data, color, onUpdate, updatingId, isEditMode }: any) {
                                         <span className="text-sm font-black text-slate-900 dark:text-white">${item.monto.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                                     </td>
                                     <td className="p-4">
-                                        {/* CONDICIONAL MODO EDICIÓN */}
+                                        {/* CONDICIONAL MÉTODOS DE PAGO */}
                                         {isEditMode ? (
-                                            updatingId === item.id ? (
+                                            updatingId === `method-${item.id}` ? (
                                                 <span className="text-[9px] font-bold text-blue-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin"/> Actualizando...</span>
                                             ) : (
                                                 <Select defaultValue={item.metodo} onValueChange={(val) => onUpdate(item, val, item.type)}>

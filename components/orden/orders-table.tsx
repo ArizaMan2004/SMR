@@ -53,12 +53,30 @@ interface OrdersTableProps {
   onSyncStatus?: () => Promise<{ success: boolean; message: string }>;
 }
 
+// COMPONENTE DE ESTATUS CON CORRECCIÓN DE PRECISIÓN
 function PaymentStatusBadge({ total, abonado }: { total: number, abonado: number }) {
-    const isPagado = abonado >= total && total > 0;
-    const isAbonado = abonado > 0 && abonado < total;
-    if (isPagado) return <Badge className="bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border-none px-3 py-1 rounded-full font-black text-[10px] uppercase flex items-center gap-1.5 shadow-sm"><CheckCircle2 className="w-3 h-3" /> Pagado Total</Badge>;
-    if (isAbonado) return <Badge className="bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400 border-none px-3 py-1 rounded-full font-black text-[10px] uppercase flex items-center gap-1.5 shadow-sm"><Wallet className="w-3 h-3" /> Abonado</Badge>;
-    return <Badge className="bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500 border-none px-3 py-1 rounded-full font-black text-[10px] uppercase flex items-center gap-1.5"><Clock className="w-3 h-3" /> Pago Pendiente</Badge>;
+    const saldoPendiente = total - abonado;
+    // Si la deuda es menor a 0.01 USD, se considera pagado
+    const isPagado = saldoPendiente <= 0.01 && total > 0;
+    const isAbonado = abonado > 0.01 && !isPagado;
+
+    if (isPagado) return (
+        <Badge className="bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border-none px-3 py-1 rounded-full font-black text-[10px] uppercase flex items-center gap-1.5 shadow-sm">
+            <CheckCircle2 className="w-3 h-3" /> Pagado Total
+        </Badge>
+    );
+    
+    if (isAbonado) return (
+        <Badge className="bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400 border-none px-3 py-1 rounded-full font-black text-[10px] uppercase flex items-center gap-1.5 shadow-sm">
+            <Wallet className="w-3 h-3" /> Abonado
+        </Badge>
+    );
+
+    return (
+        <Badge className="bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500 border-none px-3 py-1 rounded-full font-black text-[10px] uppercase flex items-center gap-1.5">
+            <Clock className="w-3 h-3" /> Pago Pendiente
+        </Badge>
+    );
 }
 
 export function OrdersTable({ 
@@ -76,6 +94,7 @@ export function OrdersTable({
   const [showUnpaid, setShowUnpaid] = useState(true)
   const [showPaid, setShowPaid] = useState(false)
 
+  // FILTRADO CON CORRECCIÓN DE PRECISIÓN
   const { unpaidOrders, paidOrders } = useMemo(() => {
     const unpaid: OrdenServicio[] = [];
     const paid: OrdenServicio[] = [];
@@ -83,7 +102,14 @@ export function OrdersTable({
     ordenes.forEach(o => {
         const total = o.totalUSD || 0;
         const abonado = o.montoPagadoUSD || 0;
-        if (abonado >= total && total > 0) paid.push(o); else unpaid.push(o);
+        const saldoPendiente = total - abonado;
+        
+        // Si el saldo pendiente es prácticamente cero, mover a pagados
+        if (saldoPendiente <= 0.01 && total > 0) {
+            paid.push(o);
+        } else {
+            unpaid.push(o);
+        }
     });
     return { unpaidOrders: unpaid, paidOrders: paid };
   }, [ordenes]);
@@ -117,7 +143,6 @@ export function OrdersTable({
 
   return (
     <div className="space-y-10 pb-24">
-      {/* BOTÓN DE ACCIÓN MINIMALISTA */}
       <div className="flex justify-end px-6 -mb-6">
           <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -141,7 +166,6 @@ export function OrdersTable({
           </AlertDialog>
       </div>
 
-      {/* SECCIÓN 1: CUENTAS POR COBRAR */}
       <section className="space-y-4 px-2 sm:px-4">
         <button onClick={() => setShowUnpaid(!showUnpaid)} className="group flex items-center justify-between w-full p-4 bg-white dark:bg-zinc-900 rounded-[2rem] border border-black/5 dark:border-white/10 shadow-sm transition-all outline-none">
             <div className="flex items-center gap-5">
@@ -171,7 +195,6 @@ export function OrdersTable({
         </AnimatePresence>
       </section>
 
-      {/* SECCIÓN 2: HISTORIAL PAGADO */}
       <section className="space-y-4 px-2 sm:px-4">
         <button onClick={() => setShowPaid(!showPaid)} className="group flex items-center justify-between w-full p-4 bg-slate-50 dark:bg-zinc-900/50 rounded-[2rem] border border-black/5 dark:border-white/5 transition-all outline-none">
             <div className="flex items-center gap-5 opacity-70">
@@ -201,7 +224,6 @@ export function OrdersTable({
         </AnimatePresence>
       </section>
 
-      {/* MODALES LOCALES */}
       {selectedOrden && (
         <OrderDetailModal orden={selectedOrden} open={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} rates={rates} />
       )}
@@ -227,15 +249,11 @@ export function OrdersTable({
   )
 }
 
-// --- SUB-TABLA CON ORDENAMIENTO (SORTING) CORREGIDO ---
 function OrdersSubTable({ data, actions, rates }: any) {
     const [page, setPage] = useState(1);
     const pageSize = 10;
-    
-    // Por defecto ordenamos por número de forma descendente (nuevas primero)
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'ordenNumero', direction: 'desc' });
 
-    // Lógica de Ordenamiento CORREGIDA PARA NÚMEROS
     const sortedData = useMemo(() => {
         let sortableItems = [...data];
         if (sortConfig.key) {
@@ -243,8 +261,6 @@ function OrdersSubTable({ data, actions, rates }: any) {
                 let aVal = a[sortConfig.key];
                 let bVal = b[sortConfig.key];
 
-                // 1. CORRECCIÓN: Si ordenamos por número de orden, convertimos a Number para comparar matemáticamente.
-                // Esto arregla el bug donde "99" > "100" (alfabéticamente).
                 if (sortConfig.key === 'ordenNumero') {
                     const numA = Number(aVal);
                     const numB = Number(bVal);
@@ -252,14 +268,10 @@ function OrdersSubTable({ data, actions, rates }: any) {
                         return sortConfig.direction === 'asc' ? numA - numB : numB - numA;
                     }
                 }
-
-                // 2. Caso especial: Nombre de cliente (está anidado)
                 if (sortConfig.key === 'cliente') {
                     aVal = a.cliente?.nombreRazonSocial || '';
                     bVal = b.cliente?.nombreRazonSocial || '';
                 }
-                
-                // 3. Comparación estándar para texto o fallback
                 if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
                 if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
                 return 0;
@@ -271,7 +283,6 @@ function OrdersSubTable({ data, actions, rates }: any) {
     const totalPages = Math.ceil(sortedData.length / pageSize);
     const paginated = sortedData.slice((page - 1) * pageSize, page * pageSize);
 
-    // Función para cambiar el orden al hacer clic en header
     const requestSort = (key: string) => {
         let direction: 'asc' | 'desc' = 'asc';
         if (sortConfig.key === key && sortConfig.direction === 'asc') {
@@ -280,7 +291,6 @@ function OrdersSubTable({ data, actions, rates }: any) {
         setSortConfig({ key, direction });
     };
 
-    // Icono dinámico según estado
     const getSortIcon = (columnKey: string) => {
         if (sortConfig.key !== columnKey) return <ArrowUpDown className="w-3 h-3 ml-1 opacity-30" />;
         return sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3 ml-1 text-blue-500" /> : <ArrowDown className="w-3 h-3 ml-1 text-blue-500" />;
@@ -294,28 +304,16 @@ function OrdersSubTable({ data, actions, rates }: any) {
                 <Table>
                     <TableHeader className="bg-slate-50/50 dark:bg-zinc-800/50">
                         <TableRow className="border-b border-slate-100 dark:border-white/5">
-                            <TableHead 
-                                className="py-6 px-8 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 w-[180px] cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors select-none"
-                                onClick={() => requestSort('ordenNumero')}
-                            >
+                            <TableHead className="py-6 px-8 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 w-[180px] cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors select-none" onClick={() => requestSort('ordenNumero')}>
                                 <div className="flex items-center">N° Orden / Fecha {getSortIcon('ordenNumero')}</div>
                             </TableHead>
-                            <TableHead 
-                                className="py-6 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors select-none"
-                                onClick={() => requestSort('cliente')}
-                            >
+                            <TableHead className="py-6 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors select-none" onClick={() => requestSort('cliente')}>
                                 <div className="flex items-center">Cliente {getSortIcon('cliente')}</div>
                             </TableHead>
-                            <TableHead 
-                                className="py-6 text-right text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors select-none"
-                                onClick={() => requestSort('totalUSD')}
-                            >
+                            <TableHead className="py-6 text-right text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors select-none" onClick={() => requestSort('totalUSD')}>
                                 <div className="flex items-center justify-end">Total Factura {getSortIcon('totalUSD')}</div>
                             </TableHead>
-                            <TableHead 
-                                className="py-6 text-center text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors select-none"
-                                onClick={() => requestSort('estadoPago')}
-                            >
+                            <TableHead className="py-6 text-center text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors select-none" onClick={() => requestSort('estadoPago')}>
                                 <div className="flex items-center justify-center">Estatus Pago {getSortIcon('estadoPago')}</div>
                             </TableHead>
                             <TableHead className="py-6 pr-8 text-center text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Acciones</TableHead>
@@ -352,7 +350,8 @@ function OrdersSubTable({ data, actions, rates }: any) {
                                         <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1 rounded-xl border border-emerald-100 dark:border-emerald-500/20 shadow-sm">
                                             {formatCurrency(o.totalUSD)}
                                         </span>
-                                        {o.montoPagadoUSD > 0 && o.montoPagadoUSD < o.totalUSD && (
+                                        {/* CORRECCIÓN DE PRECISIÓN EN TEXTO DE ABONADO */}
+                                        {o.montoPagadoUSD > 0.01 && (o.totalUSD - o.montoPagadoUSD) > 0.01 && (
                                             <span className="text-[9px] font-black text-amber-600 dark:text-amber-500 uppercase italic leading-none">Abonado: {formatCurrency(o.montoPagadoUSD)}</span>
                                         )}
                                     </div>
@@ -392,7 +391,12 @@ function OrdersSubTable({ data, actions, rates }: any) {
                                         </DropdownMenu>
 
                                         <ActionButton icon={<History />} color="indigo" onClick={() => actions.handleOpenHistory(o)} label="Historial" />
-                                        {(o.totalUSD - (o.montoPagadoUSD || 0)) > 0.01 && (<ActionButton icon={<Wallet />} color="green" onClick={() => actions.handleOpenPayment(o)} label="Abonar" />)}
+                                        
+                                        {/* CORRECCIÓN DE PRECISIÓN EN BOTÓN ABONAR */}
+                                        {(o.totalUSD - (o.montoPagadoUSD || 0)) > 0.01 && (
+                                            <ActionButton icon={<Wallet />} color="green" onClick={() => actions.handleOpenPayment(o)} label="Abonar" />
+                                        )}
+
                                         <ActionButton icon={<Pencil />} color="orange" onClick={() => actions.onEdit(o)} label="Editar" />
                                         <ActionButton icon={<Trash2 />} color="rose" onClick={() => { if (confirm(`¿Borrar orden #${o.ordenNumero}?`)) actions.onDelete(o.id); }} label="Borrar" />
                                     </div>
@@ -402,7 +406,6 @@ function OrdersSubTable({ data, actions, rates }: any) {
                     </TableBody>
                 </Table>
             </div>
-            {/* PAGINACIÓN */}
             {totalPages > 1 && (
                 <div className="p-4 bg-slate-50/50 dark:bg-zinc-800/30 border-t dark:border-white/5 flex justify-between items-center">
                     <span className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest px-4">Página {page} de {totalPages}</span>
