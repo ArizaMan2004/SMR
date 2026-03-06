@@ -29,11 +29,13 @@ import { CurrencyToast } from "@/components/dashboard/CurrencyToast"
 import { WalletsView } from "@/components/dashboard/WalletsView"
 import { PaymentEditModal } from "@/components/dashboard/PaymentEditModal"
 import { PaymentAuditView } from "@/components/dashboard/PaymentAuditView"
+import { NewsBar, type NewsAction } from "@/components/dashboard/news-bar" // <--- ACTUALIZADO
+import { OrderDetailModal } from "@/components/orden/order-detail-modal" 
 
 // --- IMPORTACIONES DE HERRAMIENTAS IA Y DISEÑO ---
 import { BackgroundRemoverView } from "@/components/dashboard/BackgroundRemoverView" 
 import { UpscaleView } from "@/components/dashboard/UpscaleView"
-import { FormatConverterView } from "@/components/dashboard/FormatConverterView" // <--- NUEVA VISTA
+import { FormatConverterView } from "@/components/dashboard/FormatConverterView" 
 
 // Componentes Administrativos
 import { GastosFijosView } from "@/components/dashboard/gastos-fijos-view"
@@ -50,7 +52,7 @@ import { startTour } from "@/components/dashboard/TutorialController"
 import { 
     Plus, CheckCircle, Calculator, LayoutDashboard, FileSpreadsheet, Clock, 
     Building2, Bell, CheckCircle2, ChevronLeft, Menu, DollarSign, Euro, Coins, 
-    Wallet, Search, HelpCircle, FileStack 
+    Wallet, Search, HelpCircle, AlertCircle 
 } from "lucide-react" 
 
 // Servicios
@@ -101,6 +103,14 @@ export default function Dashboard() {
     // ESTADOS PARA EL MODAL DE PAGO (CENTRALIZADO)
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
     const [selectedOrdenForPayment, setSelectedOrdenForPayment] = useState<OrdenServicio | null>(null)
+
+    // ESTADOS PARA EL MODAL DE LAS TARJETAS ESTADÍSTICAS
+    const [cardModalState, setCardModalState] = useState<{ isOpen: boolean, type: 'total' | 'sinPagar' | 'abonadas' | 'pagadas' | null }>({ isOpen: false, type: null })
+    const [cardSortBy, setCardSortBy] = useState<'reciente' | 'mayor_deuda' | 'mayor_abono' | 'numero_orden' | 'cliente'>('reciente')
+
+    // ESTADOS PARA EL MODAL DE DETALLES DE ORDEN
+    const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
+    const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<OrdenServicio | null>(null)
 
     // NOTIFICACIONES Y PANELES
     const [isNotiOpen, setIsNotiOpen] = useState(false)
@@ -167,7 +177,7 @@ export default function Dashboard() {
                 { id: 'old_calculator', label: 'Calculadora de Producción' }, 
                 { id: 'ai_background', label: 'IA Quita Fondos' }, 
                 { id: 'ai_upscale', label: 'IA Upscale (HD)' },
-                { id: 'format_converter', label: 'Convertidor Formatos' }, // <--- NUEVA OPCIÓN
+                { id: 'format_converter', label: 'Convertidor Formatos' },
             ]
         },
     ], []);
@@ -178,6 +188,20 @@ export default function Dashboard() {
         setSelectedOrdenForPayment(orden);
         setIsPaymentModalOpen(true);
     }, []);
+
+    const handleOpenOrderDetails = useCallback((orden: OrdenServicio) => {
+        setSelectedOrderForDetails(orden);
+        setIsDetailModalOpen(true);
+    }, []);
+
+    // --- NUEVO: MANEJADOR DE CLICS DEL NEWS-BAR ---
+    const handleNewsAction = useCallback((action: NewsAction) => {
+        if (action.type === 'NAVIGATE') {
+            setActiveView(action.payload);
+        } else if (action.type === 'OPEN_ORDER') {
+            handleOpenPaymentModal(action.payload);
+        }
+    }, [handleOpenPaymentModal]);
 
     const handleSendCalcToOrder = (calc: any, type: 'area' | 'laser') => {
         const mappedItems = type === 'area' 
@@ -427,10 +451,51 @@ export default function Dashboard() {
 
     const billingStats = useMemo(() => {
         const total = ordenes.length;
-        const pagadas = ordenes.filter(o => (o.montoPagadoUSD || 0) >= (o.totalUSD || 0) && o.totalUSD > 0).length;
-        const pendientes = ordenes.filter(o => (o.montoPagadoUSD || 0) < (o.totalUSD || 0)).length;
-        return { total, pagadas, pendientes };
+        const sinPagar = ordenes.filter(o => !o.montoPagadoUSD || o.montoPagadoUSD === 0).length;
+        const abonadas = ordenes.filter(o => (o.montoPagadoUSD || 0) > 0 && (o.montoPagadoUSD || 0) < (o.totalUSD || 0)).length;
+        const pagadas = ordenes.filter(o => (o.montoPagadoUSD || 0) >= (o.totalUSD || 0) && (o.totalUSD || 0) > 0).length;
+        
+        return { total, sinPagar, abonadas, pagadas };
     }, [ordenes]);
+
+    // LÓGICA PARA EL MODAL DE TARJETAS
+    const cardModalFilteredOrders = useMemo(() => {
+        if (!cardModalState.type) return [];
+
+        let result = [...ordenes];
+        
+        // 1. Filtrar por categoría
+        if (cardModalState.type === 'sinPagar') {
+            result = result.filter(o => !o.montoPagadoUSD || o.montoPagadoUSD === 0);
+        } else if (cardModalState.type === 'abonadas') {
+            result = result.filter(o => (o.montoPagadoUSD || 0) > 0 && (o.montoPagadoUSD || 0) < (o.totalUSD || 0));
+        } else if (cardModalState.type === 'pagadas') {
+            result = result.filter(o => (o.montoPagadoUSD || 0) >= (o.totalUSD || 0) && (o.totalUSD || 0) > 0);
+        }
+
+        // 2. Ordenar
+        result.sort((a, b) => {
+            const deudaA = (a.totalUSD || 0) - (a.montoPagadoUSD || 0);
+            const deudaB = (b.totalUSD || 0) - (b.montoPagadoUSD || 0);
+
+            switch (cardSortBy) {
+                case 'mayor_deuda': return deudaB - deudaA;
+                case 'mayor_abono': return (b.montoPagadoUSD || 0) - (a.montoPagadoUSD || 0);
+                case 'numero_orden': return (b.ordenNumero || 0) - (a.ordenNumero || 0);
+                case 'cliente':
+                    const clienteA = (a.cliente?.nombreRazonSocial || '').toLowerCase();
+                    const clienteB = (b.cliente?.nombreRazonSocial || '').toLowerCase();
+                    return clienteA.localeCompare(clienteB);
+                case 'reciente':
+                default:
+                    const dateA = a.fecha ? new Date(a.fecha).getTime() : 0;
+                    const dateB = b.fecha ? new Date(b.fecha).getTime() : 0;
+                    return dateB - dateA; // Orden descendente (más recientes primero)
+            }
+        });
+
+        return result;
+    }, [ordenes, cardModalState.type, cardSortBy]);
 
     return (
       <div className="flex h-screen bg-[#f2f2f7] dark:bg-black overflow-hidden relative font-sans text-slate-900 dark:text-white">
@@ -511,21 +576,34 @@ export default function Dashboard() {
               <motion.div key={activeView} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={springConfig} className="h-full">
                 
                 {activeView === "orders" && (
-                    <div className="max-w-7xl mx-auto space-y-6 md:space-y-8">
-                        <div id="stats-grid" className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6 w-full">
-                            <StatCard label="Total Órdenes" value={billingStats.total} icon={<FileSpreadsheet />} color="blue" subtext="Histórico" />
-                            <StatCard label="Cuentas por Cobrar" value={billingStats.pendientes} icon={<Wallet />} color="orange" subtext="Saldo pendiente" />
-                            <StatCard label="Pagadas Total" value={billingStats.pagadas} icon={<CheckCircle2 />} color="green" subtext="Liquidadas" className="col-span-2 md:col-span-1" />
-                        </div>
+                    <motion.div layout className="max-w-7xl mx-auto space-y-6 md:space-y-8">
+                        
+                        <NewsBar 
+                            rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} 
+                            gastosFijos={gastosFijos} 
+                            empleados={empleados} 
+                            ordenes={ordenes} 
+                            designers={designers}
+                            gastos={gastos}
+                            onAction={handleNewsAction}
+                        />
 
-                        <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between bg-white/40 dark:bg-white/5 p-4 rounded-[2rem] border border-black/5 shadow-sm">
+                        <motion.div layout id="stats-grid" className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 w-full">
+                            <motion.div layout><StatCard label="Órdenes Totales" value={billingStats.total} icon={<FileSpreadsheet />} color="blue" subtext="Histórico" onClick={() => setCardModalState({ isOpen: true, type: 'total' })} /></motion.div>
+                            <motion.div layout><StatCard label="Sin Pagar" value={billingStats.sinPagar} icon={<AlertCircle />} color="red" subtext="Cero abonos" onClick={() => setCardModalState({ isOpen: true, type: 'sinPagar' })} /></motion.div>
+                            <motion.div layout><StatCard label="Abonadas" value={billingStats.abonadas} icon={<Clock />} color="orange" subtext="Saldo pendiente" onClick={() => setCardModalState({ isOpen: true, type: 'abonadas' })} /></motion.div>
+                            <motion.div layout><StatCard label="Pagadas" value={billingStats.pagadas} icon={<CheckCircle2 />} color="green" subtext="Liquidadas" onClick={() => setCardModalState({ isOpen: true, type: 'pagadas' })} /></motion.div>
+                        </motion.div>
+
+                        <motion.div layout className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between bg-white/40 dark:bg-white/5 p-4 rounded-[2rem] border border-black/5 shadow-sm">
                             <div className="relative w-full sm:max-w-md">
                                 <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 opacity-20" />
                                 <input type="text" placeholder="Buscar orden o cliente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-6 py-3 bg-white dark:bg-black/20 border border-black/5 rounded-[1.8rem] text-sm outline-none" />
                             </div>
                             <Button id="btn-new-order" onClick={() => { setEditingOrder(null); setIsWizardOpen(true); }} className="px-8 py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-[1.8rem] font-bold text-sm gap-3 shrink-0"><Plus /> NUEVA ORDEN</Button>
-                        </div>
-                        <div className="bg-white dark:bg-[#1c1c1e] rounded-[2rem] border border-black/5 shadow-2xl overflow-hidden">
+                        </motion.div>
+
+                        <motion.div layout className="bg-white dark:bg-[#1c1c1e] rounded-[2rem] border border-black/5 shadow-2xl overflow-hidden">
                             <OrdersTable 
                                 ordenes={filteredOrdenes} 
                                 onDelete={deleteOrden} 
@@ -541,8 +619,8 @@ export default function Dashboard() {
                                 selloBase64={assets.sello}
                                 onSyncStatus={syncAllOrdersClientStatus}
                             />
-                        </div>
-                    </div>
+                        </motion.div>
+                    </motion.div>
                 )}
 
                 {activeView === "fixed_expenses" && (
@@ -724,6 +802,90 @@ export default function Dashboard() {
                 currentUserId={currentUserId || ""}
             />
         )}
+
+        {/* MODAL DE DESGLOSE PARA LAS TARJETAS ESTADÍSTICAS */}
+        <Dialog open={cardModalState.isOpen} onOpenChange={(open) => !open && setCardModalState({ isOpen: false, type: null })}>
+            <DialogContent className="w-[95vw] max-w-3xl max-h-[85vh] flex flex-col overflow-hidden bg-white/95 dark:bg-[#1c1c1e]/95 backdrop-blur-xl border border-black/10 dark:border-white/10 rounded-[2rem] p-0 shadow-2xl">
+                <div className="p-6 pb-0 flex flex-col gap-4">
+                    <DialogTitle className="text-xl sm:text-2xl font-bold tracking-tight">
+                        {cardModalState.type === 'total' && "Todas las Órdenes"}
+                        {cardModalState.type === 'sinPagar' && "Órdenes Sin Pagar"}
+                        {cardModalState.type === 'abonadas' && "Órdenes Abonadas"}
+                        {cardModalState.type === 'pagadas' && "Órdenes Pagadas"}
+                    </DialogTitle>
+
+                    {/* Controles de Filtro */}
+                    <div className="flex items-center gap-3 pb-4 border-b border-black/5 dark:border-white/5 overflow-x-auto custom-scrollbar">
+                        <span className="text-sm font-semibold opacity-50 shrink-0">Ordenar por:</span>
+                        <select
+                            value={cardSortBy}
+                            onChange={(e) => setCardSortBy(e.target.value as any)}
+                            className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 text-sm rounded-xl px-4 py-2 outline-none font-medium cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                        >
+                            <option value="reciente">Más reciente</option>
+                            <option value="mayor_deuda">Mayor deuda</option>
+                            <option value="mayor_abono">Mayor pago / abono</option>
+                            <option value="numero_orden">Número de orden</option>
+                            <option value="cliente">Cliente (A-Z)</option>
+                        </select>
+                    </div>
+                </div>
+
+                {/* Lista de ordenes */}
+                <div className="flex-1 overflow-y-auto p-6 pt-4 space-y-3 custom-scrollbar">
+                    {cardModalFilteredOrders.length === 0 ? (
+                        <div className="text-center py-16 flex flex-col items-center justify-center opacity-50">
+                            <AlertCircle className="w-12 h-12 mb-4" />
+                            <p className="font-semibold text-lg">No hay órdenes en esta categoría.</p>
+                        </div>
+                    ) : (
+                        cardModalFilteredOrders.map(o => {
+                            const deuda = (o.totalUSD || 0) - (o.montoPagadoUSD || 0);
+                            return (
+                                <div 
+                                    key={o.id} 
+                                    onClick={() => handleOpenOrderDetails(o)}
+                                    className="cursor-pointer flex flex-col sm:flex-row justify-between sm:items-center p-4 bg-white dark:bg-black/40 border border-black/5 dark:border-white/5 shadow-sm rounded-2xl gap-4 hover:border-blue-500 hover:shadow-md transition-all"
+                                >
+                                    <div className="min-w-0">
+                                        <div className="font-bold text-sm truncate text-blue-600 dark:text-blue-400">#{o.ordenNumero} - {o.cliente?.nombreRazonSocial || "Cliente S/N"}</div>
+                                        <div className="text-xs font-semibold opacity-60 mt-1">
+                                            {o.fecha ? (typeof o.fecha === 'string' ? new Date(o.fecha).toLocaleDateString() : (o.fecha as any).toDate?.().toLocaleDateString() || 'Sin fecha') : 'Sin fecha'}
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-4 sm:gap-6 text-sm sm:text-right shrink-0">
+                                        <div>
+                                            <div className="text-[10px] uppercase font-bold opacity-50">Total</div>
+                                            <div className="font-bold">${(o.totalUSD || 0).toFixed(2)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-[10px] uppercase font-bold opacity-50">Pagado</div>
+                                            <div className="font-bold text-emerald-600">${(o.montoPagadoUSD || 0).toFixed(2)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-[10px] uppercase font-bold opacity-50">Deuda</div>
+                                            <div className={cn("font-bold", deuda > 0.01 ? "text-red-500" : "text-slate-500")}>${deuda > 0.01 ? deuda.toFixed(2) : '0.00'}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+            </DialogContent>
+        </Dialog>
+
+        {/* MODAL PARA MOSTRAR LOS DETALLES DE LA ORDEN */}
+        <OrderDetailModal 
+            open={isDetailModalOpen} 
+            onClose={() => {
+                setIsDetailModalOpen(false);
+                setTimeout(() => setSelectedOrderForDetails(null), 300);
+            }} 
+            orden={selectedOrderForDetails} 
+            rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} 
+        />
+
       </div>
     )
 }
@@ -742,11 +904,23 @@ function TasaHeaderBadge({ label, value, icon, color, onClick }: any) {
     )
 }
 
-function StatCard({ label, value, icon, subtext, color, className }: any) {
-    const theme: any = { blue: "bg-blue-500/10 text-blue-600 border-blue-500/20", orange: "bg-orange-500/10 text-orange-600 border-orange-500/20", green: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" }
+function StatCard({ label, value, icon, subtext, color, className, onClick }: any) {
+    const theme: any = { 
+        blue: "bg-blue-500/10 text-blue-600 border-blue-500/20", 
+        orange: "bg-orange-500/10 text-orange-600 border-orange-500/20", 
+        green: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+        red: "bg-red-500/10 text-red-600 border-red-500/20"
+    }
     
     return (
-        <Card className={cn("border shadow-sm rounded-3xl overflow-hidden bg-white dark:bg-[#1c1c1e] transition-all w-full", className)}>
+        <Card 
+            onClick={onClick}
+            className={cn(
+                "border shadow-sm rounded-3xl overflow-hidden bg-white dark:bg-[#1c1c1e] transition-all w-full", 
+                onClick && "cursor-pointer hover:shadow-lg hover:-translate-y-1 duration-300 hover:border-black/10 dark:hover:border-white/10",
+                className
+            )}
+        >
             <CardContent className="p-4 sm:p-6 flex items-center gap-5">
                 <div className={cn("p-4 rounded-[1.8rem] shadow-inner shrink-0", theme[color])}>
                     {icon && React.cloneElement(icon as any, { className: "w-8 h-8" })}

@@ -91,26 +91,29 @@ interface EstadisticasDashboardProps {
 type ViewMode = 'GENERAL' | 'IMPRESION' | 'CORTE';
 type DetailType = 'INGRESOS' | 'EGRESOS' | 'UTILIDAD' | 'DEUDA' | 'MATERIALES' | null;
 
-// --- HELPERS ---
+// --- FUNCION IDENTIFICAR SERVICIO CORREGIDA ---
 const identificarServicio = (item: any) => {
     const tipo = (item.tipoServicio || '').toUpperCase();
     const nombre = (item.nombre || item.descripcion || '').toLowerCase();
 
-    if (tipo === 'DISENO' || tipo === 'DISEÑO') return 'DISENO'; 
-
-    // PRIORIDAD ABSOLUTA: Si tiene estas palabras, ES IMPRESIÓN (ignora la palabra "corte" si está combinada)
-    const keywordsPrintFuerte = ['vinil', 'vinilo', 'sticker', 'calcomania', 'impresion', 'impresión', 'banner', 'lona', 'microperforado', 'etiqueta', 'dtf', 'clear', 'esmerilado', 'tornasol'];
-    if (item.materialImpresion || keywordsPrintFuerte.some(k => nombre.includes(k))) return 'IMPRESION';
-
-    if (tipo === 'IMPRESION') return 'IMPRESION';
+    // 1. PRIORIDAD ABSOLUTA: Respetar la selección explícita del Formulario
+    if (tipo === 'DISENO' || tipo === 'DISEÑO') return 'DISENO';
     if (tipo === 'CORTE' || tipo === 'CORTE_LASER') return 'CORTE';
+    if (tipo === 'IMPRESION') return 'IMPRESION';
+
+    // 2. MODO "LEGACY": Solo si el tipo es 'OTROS' o viene vacío (órdenes viejas), intentamos adivinar
+    const keywordsPrintFuerte = ['vinil', 'vinilo', 'sticker', 'calcomania', 'impresion', 'impresión', 'banner', 'lona', 'microperforado', 'etiqueta', 'dtf', 'clear', 'esmerilado', 'tornasol'];
+    
+    // Validamos materialImpresion solo si no es explícitamente un corte
+    if (item.materialImpresion && tipo !== 'CORTE') return 'IMPRESION';
+    if (keywordsPrintFuerte.some(k => nombre.includes(k))) return 'IMPRESION';
 
     const keywordsLaser = [
         'laser', 'láser', 'grabado', 'marcado', 'mdf', 'acrilico', 'acrílico', 
         'madera', 'plywood', 'cuero', 'piel', 'balsa', 'carton', 'reconocimiento', 
         'trofeo', 'medalla', 'galardon', 'placa', 'boligrafo', 'llavero', 'identificador', 
         'chapa', 'pin', 'topper', 'letras', 'corporeo', 'señaletica', 'buzon', 'rompecabezas',
-        'cartulina', 'corte' // "corte" se queda como fallback si no es vinil/sticker
+        'cartulina', 'corte'
     ];
 
     const keywordsPrint = [
