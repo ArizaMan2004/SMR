@@ -29,7 +29,7 @@ import { CurrencyToast } from "@/components/dashboard/CurrencyToast"
 import { WalletsView } from "@/components/dashboard/WalletsView"
 import { PaymentEditModal } from "@/components/dashboard/PaymentEditModal"
 import { PaymentAuditView } from "@/components/dashboard/PaymentAuditView"
-import { NewsBar, type NewsAction } from "@/components/dashboard/news-bar" // <--- ACTUALIZADO
+import { NewsBar, type NewsAction } from "@/components/dashboard/news-bar" 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal" 
 
 // --- IMPORTACIONES DE HERRAMIENTAS IA Y DISEÑO ---
@@ -194,14 +194,16 @@ export default function Dashboard() {
         setIsDetailModalOpen(true);
     }, []);
 
-    // --- NUEVO: MANEJADOR DE CLICS DEL NEWS-BAR ---
+    // --- MANEJADOR DE CLICS DEL NEWS-BAR CORREGIDO ---
     const handleNewsAction = useCallback((action: NewsAction) => {
         if (action.type === 'NAVIGATE') {
             setActiveView(action.payload);
         } else if (action.type === 'OPEN_ORDER') {
             handleOpenPaymentModal(action.payload);
+        } else if (action.type === 'VIEW_ORDER_DETAILS') {
+            handleOpenOrderDetails(action.payload); // AHORA RECONOCE LA ACCIÓN Y ABRE EL MODAL
         }
-    }, [handleOpenPaymentModal]);
+    }, [handleOpenPaymentModal, handleOpenOrderDetails]);
 
     const handleSendCalcToOrder = (calc: any, type: 'area' | 'laser') => {
         const mappedItems = type === 'area' 
