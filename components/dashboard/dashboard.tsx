@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth-context"
 
 // --- IMPORTACIONES PARA FIREBASE ---
 import { db } from "@/lib/firebase"
-import { doc, updateDoc, arrayUnion } from "firebase/firestore"
+import { doc, updateDoc, arrayUnion, collection, onSnapshot } from "firebase/firestore"
 
 // UI - Shadcn
 import { Button } from "@/components/ui/button"
@@ -135,6 +135,7 @@ export default function Dashboard() {
     const [empleados, setEmpleados] = useState<Empleado[]>([])
     const [pagos, setPagos] = useState<PagoEmpleado[]>([]) 
     const [clientes, setClientes] = useState<any[]>([])
+    const [movimientosCaja, setMovimientosCaja] = useState<any[]>([]) // <--- NUEVO ESTADO PARA CUADRES
 
     // --- 3. NAV ITEMS ---
     const navItems = useMemo(() => [
@@ -201,7 +202,7 @@ export default function Dashboard() {
         } else if (action.type === 'OPEN_ORDER') {
             handleOpenPaymentModal(action.payload);
         } else if (action.type === 'VIEW_ORDER_DETAILS') {
-            handleOpenOrderDetails(action.payload); // AHORA RECONOCE LA ACCIÓN Y ABRE EL MODAL
+            handleOpenOrderDetails(action.payload);
         }
     }, [handleOpenPaymentModal, handleOpenOrderDetails]);
 
@@ -396,6 +397,12 @@ export default function Dashboard() {
         const unsubPagos = subscribeToPagos((data) => setPagos(data)); 
         const unsubClientes = subscribeToClients((data) => setClientes(data));
         
+        // --- NUEVO: SUSCRIPCIÓN A MOVIMIENTOS DE CAJA (CUADRES) ---
+        const unsubMovimientosCaja = onSnapshot(collection(db, "movimientos_caja"), (snapshot) => {
+            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setMovimientosCaja(data);
+        });
+
         const unsubNotis = subscribeToNotifications((data) => {
             setSystemEvents(data.filter(n => n.category !== 'expense'));
             setExpenseEvents(data.filter(n => n.category === 'expense') as any);
@@ -404,7 +411,7 @@ export default function Dashboard() {
         return () => { 
             unsubOrdenes(); unsubDesigners(); unsubGastos(); 
             unsubGastosFijos(); unsubEmpleados(); unsubPagos(); 
-            unsubNotis(); unsubClientes();
+            unsubNotis(); unsubClientes(); unsubMovimientosCaja(); // Añadido a la limpieza
         };
     }, []);
 
@@ -686,6 +693,7 @@ export default function Dashboard() {
                         gastosFijos={gastosFijos}
                         pagosEmpleados={pagos}
                         rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
+                        movimientosManuales={movimientosCaja} // <--- SE PASAN LOS DATOS AQUÍ
                     />
                 )}
 

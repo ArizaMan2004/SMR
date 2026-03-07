@@ -21,14 +21,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils"
 import { formatCurrency } from "@/lib/utils/order-utils"
 
+// --- IMPORTACIONES DE FIREBASE ---
+import { collection, addDoc } from "firebase/firestore"
+import { db } from "@/lib/firebase"
+
 // --- TIPOS ---
 interface WalletsViewProps {
     ordenes: any[]
     gastos: any[]
     pagosEmpleados: any[]
     rates: { usd: number, eur: number, usdt: number }
-    yesterdayRate?: number // Tasa de cierre anterior (opcional para cálculo de tendencia)
+    yesterdayRate?: number
     initialBalancesData?: { cash_usd: number, bank_bs: number, zelle: number, usdt: number }
+    movimientosManuales?: any[] // Añadimos esto para recibir los ajustes
 }
 
 const WALLETS_CONFIG = [
@@ -38,7 +43,7 @@ const WALLETS_CONFIG = [
     { id: 'usdt', label: 'Binance / USDT', currency: 'USDT', icon: <Coins className="w-6 h-6"/>, color: 'orange', bg: 'bg-orange-500' },
 ]
 
-// --- COMPONENTE DE TUTORIAL (Burbuja Flotante) ---
+// --- COMPONENTE DE TUTORIAL ---
 const TutorialTip = ({ text, position = "top" }: { text: string, position?: "top" | "bottom" | "left" | "right" }) => (
     <motion.div 
         initial={{ opacity: 0, scale: 0.8, y: 10 }}
@@ -64,7 +69,7 @@ const TutorialTip = ({ text, position = "top" }: { text: string, position?: "top
     </motion.div>
 )
 
-export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayRate = 0, initialBalancesData }: WalletsViewProps) {
+export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayRate = 0, initialBalancesData, movimientosManuales = [] }: WalletsViewProps) {
     
     // --- ESTADOS ---
     const [selectedWallet, setSelectedWallet] = useState<string>('cash_usd')
@@ -75,7 +80,6 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
     const [isManualModalOpen, setIsManualModalOpen] = useState(false)
     const [isExchangeModalOpen, setIsExchangeModalOpen] = useState(false)
 
-    // Simulación de tasa ayer si no viene por props (para demo visual)
     const prevRate = yesterdayRate || (rates.usd * 0.98); 
 
     // Estado Saldos Iniciales
@@ -87,7 +91,7 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
     })
     const [tempInitialBalances, setTempInitialBalances] = useState(initialBalances)
 
-    // Formulario de Cambio (Compra Divisas)
+    // Formulario de Cambio
     const [exchangeForm, setExchangeForm] = useState({ 
         origen: 'bank_bs', 
         destino: 'cash_usd', 
@@ -101,6 +105,10 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
     const [manualForm, setManualForm] = useState({ 
         mode: 'SIMPLE', tipo: 'INGRESO', billetera: 'cash_usd', monto: '', montoReal: '', descripcion: '', fecha: new Date().toISOString().split('T')[0] 
     })
+
+    // ESTADOS PARA EL CUADRE MULTIPLE
+    const [unlockedWallets, setUnlockedWallets] = useState<Record<string, boolean>>({})
+    const [cuadreData, setCuadreData] = useState<Record<string, string>>({})
 
     useEffect(() => {
         if(initialBalancesData) {
@@ -129,7 +137,7 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
             }
         });
 
-        // 1. Ingresos (CORREGIDO: key única con index)
+        // 1. Ingresos
         ordenes.forEach(o => {
             (o.registroPagos || []).forEach((p: any, index: number) => {
                 const metodo = (p.metodo || p.paymentMethod || '').toLowerCase();
@@ -146,7 +154,6 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
 
                 balances[targetWallet] += originalCurrencyAmount;
                 
-                // FIX: Usamos index para asegurar ID único
                 movements.push({ 
                     id: `in-${o.id}-${index}`, 
                     type: 'INGRESO', wallet: targetWallet, amount: originalCurrencyAmount, 
@@ -176,31 +183,125 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
             movements.push({ id: `nom-${p.id}`, type: 'EGRESO', wallet: 'cash_usd', amount: Number(p.totalUSD), description: `Nómina: ${p.nombre}`, date: new Date(p.fechaPago), category: 'Nómina' });
         });
 
+        // 4. Movimientos Manuales y Ajustes de Cuadre
+        (movimientosManuales || []).forEach((m: any) => {
+            const targetWallet = m.billetera || 'cash_usd';
+            const amount = Number(m.monto) || 0;
+            
+            if (m.tipo === 'INGRESO') {
+                balances[targetWallet] += amount;
+            } else {
+                balances[targetWallet] -= amount;
+            }
+            
+            movements.push({ 
+                id: `man-${m.id || Math.random()}`, 
+                type: m.tipo, 
+                wallet: targetWallet, 
+                amount: amount, 
+                description: m.descripcion, 
+                date: m.fecha ? new Date(m.fecha) : new Date(), 
+                category: m.categoria || 'Ajuste' 
+            });
+        });
+
         movements.sort((a, b) => b.date.getTime() - a.date.getTime());
         return { balances, movements };
-    }, [ordenes, gastos, pagosEmpleados, rates, initialBalances]);
+    }, [ordenes, gastos, pagosEmpleados, rates, initialBalances, movimientosManuales]);
 
     // --- INTELIGENCIA FINANCIERA ---
     const rateAnalysis = useMemo(() => {
         const diff = rates.usd - prevRate;
         const percentChange = prevRate > 0 ? ((diff / prevRate) * 100) : 0;
-        const isRisk = percentChange > 2; // Alerta si sube más del 2%
+        const isRisk = percentChange > 2; 
         
         return { diff, percentChange, isRisk, trend: diff > 0 ? 'UP' : diff < 0 ? 'DOWN' : 'EQUAL' }
     }, [rates.usd, prevRate]);
 
-    // --- LÓGICA CUADRE DE CAJA ---
     const getWalletBalance = (walletId: string) => walletBalances.balances[walletId] || 0;
-    const calculatedDiff = useMemo(() => {
-        if (manualForm.mode !== 'CUADRE' || !manualForm.montoReal) return 0;
-        return parseFloat(manualForm.montoReal) - getWalletBalance(manualForm.billetera);
-    }, [manualForm.montoReal, manualForm.billetera, walletBalances]);
-
+    
     // --- HANDLERS ---
     const activeMovements = walletBalances.movements.filter((m:any) => m.wallet === selectedWallet);
     const handleSaveInit = () => { setInitialBalances(tempInitialBalances); setIsConfigModalOpen(false); }
-    const handleManual = () => { setIsManualModalOpen(false); alert("Ajuste Manual Guardado (Conectar a Firebase)"); }
-    const handleEx = () => { setIsExchangeModalOpen(false); alert("Compra de Divisas Registrada (Conectar a Firebase)"); }
+    
+    // Ajuste simple manual
+    const handleManual = async () => { 
+        if (!manualForm.monto || parseFloat(manualForm.monto) <= 0) return alert("Ingrese un monto válido");
+        
+        const ajuste = {
+            billetera: manualForm.billetera,
+            tipo: manualForm.tipo,
+            monto: parseFloat(manualForm.monto),
+            descripcion: manualForm.descripcion || `Movimiento manual (${manualForm.tipo})`,
+            fecha: new Date().toISOString(),
+            categoria: 'Ajuste'
+        };
+
+        try {
+            await addDoc(collection(db, "movimientos_caja"), ajuste);
+            alert("¡Movimiento guardado exitosamente!");
+            setIsManualModalOpen(false);
+            setManualForm({...manualForm, monto: '', descripcion: ''});
+            window.location.reload();
+        } catch (error) {
+            console.error("Error:", error);
+            alert("Error al guardar el movimiento");
+        }
+    }
+    
+    const handleEx = () => { setIsExchangeModalOpen(false); alert("Compra de Divisas Registrada (Conectar a Base de Datos)"); }
+
+    // --- HANDLERS DE CUADRE ---
+    const handleUnlockWallet = (walletId: string, walletLabel: string) => {
+        const confirmacion = window.confirm(`¿Estás seguro que deseas realizar un cuadre en ${walletLabel}? Esto te permitirá registrar la cantidad física real y el sistema creará un ajuste por la diferencia.`);
+        if (confirmacion) {
+            setUnlockedWallets(prev => ({ ...prev, [walletId]: true }));
+            setCuadreData(prev => ({ ...prev, [walletId]: getWalletBalance(walletId).toString() }));
+        }
+    }
+
+    const handleSaveCuadre = async () => {
+        const ajustes = Object.keys(unlockedWallets).map(walletId => {
+            const saldoSistema = getWalletBalance(walletId);
+            const saldoReal = parseFloat(cuadreData[walletId] || '0');
+            const diferencia = saldoReal - saldoSistema;
+
+            if (diferencia !== 0) {
+                return {
+                    billetera: walletId,
+                    tipo: diferencia > 0 ? 'INGRESO' : 'EGRESO',
+                    monto: Math.abs(diferencia),
+                    descripcion: `Ajuste por Cuadre de Caja (${diferencia > 0 ? 'Sobrante' : 'Faltante'})`,
+                    fecha: new Date().toISOString(),
+                    categoria: 'Ajuste'
+                };
+            }
+            return null;
+        }).filter(Boolean);
+
+        if (ajustes.length === 0) {
+            alert("No hay diferencias detectadas para guardar o los saldos son idénticos al sistema.");
+            return;
+        }
+
+        try {
+            for (const ajuste of ajustes) {
+                await addDoc(collection(db, "movimientos_caja"), ajuste);
+            }
+
+            alert("¡Cuadre guardado exitosamente en Firebase!");
+            
+            setUnlockedWallets({});
+            setCuadreData({});
+            setIsManualModalOpen(false);
+            
+            window.location.reload(); 
+
+        } catch (error) {
+            console.error("Error al guardar en Firebase:", error);
+            alert("Hubo un error al guardar el ajuste.");
+        }
+    }
 
     return (
         <div className="space-y-6 p-2 font-sans pb-24 text-slate-800 dark:text-slate-100 animate-in fade-in duration-500 relative">
@@ -256,7 +357,6 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 overflow-x-auto pb-4">
                     {WALLETS_CONFIG.map(wallet => {
                         const balance = walletBalances.balances[wallet.id];
-                        // Conversión automática para Bs a USD
                         const secondaryValue = wallet.id === 'bank_bs' ? (balance / rates.usd) : null;
                         return (
                             <WalletCard 
@@ -326,54 +426,115 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
             </Dialog>
             
             {/* --- MODAL AJUSTE / CUADRE --- */}
-             <Dialog open={isManualModalOpen} onOpenChange={setIsManualModalOpen}>
-                <DialogContent className="max-w-md rounded-[2.5rem] p-8 border-none bg-white dark:bg-[#1c1c1e] shadow-2xl">
+            <Dialog open={isManualModalOpen} onOpenChange={(open) => {
+                setIsManualModalOpen(open);
+                if (!open) { setUnlockedWallets({}); setCuadreData({}); }
+            }}>
+                <DialogContent className="max-w-md rounded-[2.5rem] p-8 border-none bg-white dark:bg-[#1c1c1e] shadow-2xl custom-scrollbar max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="text-2xl font-black uppercase italic tracking-tighter flex items-center gap-3">
-                            {manualForm.mode === 'SIMPLE' ? 'Ajuste Manual' : 'Cuadre de Caja'}
+                            {manualForm.mode === 'SIMPLE' ? 'Ajuste Manual' : 'Cuadre de Cajas'}
                         </DialogTitle>
                     </DialogHeader>
 
                     {/* TABS */}
                     <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl mb-2">
                         <button onClick={() => setManualForm({...manualForm, mode: 'SIMPLE', monto: '', montoReal: ''})}
-                            className={cn("flex-1 py-2 rounded-xl text-xs font-black uppercase transition-all", manualForm.mode === 'SIMPLE' ? "bg-white dark:bg-slate-700 shadow-sm text-slate-800 dark:text-white" : "text-slate-400 hover:text-slate-600")}>Movimiento</button>
+                            className={cn("flex-1 py-2 rounded-xl text-xs font-black uppercase transition-all", manualForm.mode === 'SIMPLE' ? "bg-white dark:bg-slate-700 shadow-sm text-slate-800 dark:text-white" : "text-slate-400 hover:text-slate-600")}>Movimiento Único</button>
                         <button onClick={() => setManualForm({...manualForm, mode: 'CUADRE', monto: '', montoReal: ''})}
                             className={cn("flex-1 py-2 rounded-xl text-xs font-black uppercase transition-all flex items-center justify-center gap-2", manualForm.mode === 'CUADRE' ? "bg-white dark:bg-slate-700 shadow-sm text-indigo-600" : "text-slate-400 hover:text-slate-600")}><Calculator className="w-3 h-3"/> Cuadre Total</button>
                     </div>
 
                     <div className="space-y-4 py-2">
-                        <Select value={manualForm.billetera} onValueChange={(v) => setManualForm({...manualForm, billetera: v})}>
-                            <SelectTrigger className="h-12 bg-slate-50 border-none rounded-xl"><SelectValue/></SelectTrigger>
-                            <SelectContent>{WALLETS_CONFIG.map(w => <SelectItem key={w.id} value={w.id}>{w.label}</SelectItem>)}</SelectContent>
-                        </Select>
-
                         {manualForm.mode === 'SIMPLE' ? (
                             <>
+                                <Select value={manualForm.billetera} onValueChange={(v) => setManualForm({...manualForm, billetera: v})}>
+                                    <SelectTrigger className="h-12 bg-slate-50 border-none rounded-xl font-bold"><SelectValue/></SelectTrigger>
+                                    <SelectContent>{WALLETS_CONFIG.map(w => <SelectItem key={w.id} value={w.id}>{w.label}</SelectItem>)}</SelectContent>
+                                </Select>
+
                                 <div className="grid grid-cols-2 gap-4">
                                     <Button variant={manualForm.tipo === 'INGRESO' ? 'default' : 'outline'} onClick={() => setManualForm({...manualForm, tipo: 'INGRESO'})} className={cn("rounded-xl font-black", manualForm.tipo === 'INGRESO' && "bg-emerald-600 text-white")}>Ingreso</Button>
                                     <Button variant={manualForm.tipo === 'EGRESO' ? 'default' : 'outline'} onClick={() => setManualForm({...manualForm, tipo: 'EGRESO'})} className={cn("rounded-xl font-black", manualForm.tipo === 'EGRESO' && "bg-rose-600 text-white")}>Egreso</Button>
                                 </div>
                                 <Input type="number" placeholder="Monto" className="h-12 bg-slate-50 border-none rounded-xl font-bold" value={manualForm.monto} onChange={e => setManualForm({...manualForm, monto: e.target.value})} />
+                                <Input placeholder="Descripción (Ej: Pago proveedor)" className="h-12 bg-slate-50 border-none rounded-xl" value={manualForm.descripcion} onChange={e => setManualForm({...manualForm, descripcion: e.target.value})} />
+                                <Button onClick={handleManual} className="w-full h-12 bg-slate-900 text-white rounded-xl uppercase font-black">Guardar Movimiento</Button>
                             </>
                         ) : (
-                            <div className="bg-indigo-50 p-4 rounded-2xl space-y-3">
-                                <div className="flex justify-between text-xs font-bold text-slate-500"><span>Saldo Sistema:</span><span>{formatCurrency(getWalletBalance(manualForm.billetera))}</span></div>
-                                <Input type="number" placeholder="Saldo Real (Lo que tienes)" className="h-12 bg-white border-none rounded-xl font-black text-indigo-600" value={manualForm.montoReal} onChange={e => setManualForm({...manualForm, montoReal: e.target.value})} />
-                                {manualForm.montoReal && (
-                                    <div className={cn("p-2 rounded-lg text-center text-xs font-black", calculatedDiff < 0 ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700")}>
-                                        {calculatedDiff < 0 ? "Faltante (Crear Egreso)" : "Sobrante (Crear Ingreso)"}: {formatCurrency(Math.abs(calculatedDiff))}
-                                    </div>
-                                )}
+                            // MODO CUADRE TOTAL
+                            <div className="space-y-4">
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider text-center mb-4">
+                                    Desbloquea la cuenta que deseas cuadrar. Se creará un ajuste automático por la diferencia.
+                                </p>
+                                
+                                {WALLETS_CONFIG.map(w => {
+                                    const sysBal = getWalletBalance(w.id);
+                                    const isUnlocked = unlockedWallets[w.id];
+                                    const realVal = cuadreData[w.id];
+                                    const diff = (realVal !== undefined && realVal !== '') ? parseFloat(realVal) - sysBal : 0;
+
+                                    return (
+                                        <div key={w.id} className={cn("p-4 rounded-2xl border transition-all", isUnlocked ? "bg-indigo-50 border-indigo-100" : "bg-slate-50 border-slate-100 opacity-80")}>
+                                            <div className="flex justify-between items-center mb-3">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="p-1.5 rounded-lg bg-white shadow-sm text-slate-700">{w.icon}</span>
+                                                    <span className="font-black text-sm uppercase text-slate-700">{w.label}</span>
+                                                </div>
+                                                {!isUnlocked ? (
+                                                    <Button size="sm" variant="outline" className="h-7 text-[10px] uppercase font-bold rounded-lg" onClick={() => handleUnlockWallet(w.id, w.label)}>Ajustar</Button>
+                                                ) : (
+                                                    <Badge className="bg-indigo-600 hover:bg-indigo-600">Editando</Badge>
+                                                )}
+                                            </div>
+                                            
+                                            <div className="flex gap-3 items-end">
+                                                <div className="flex-1">
+                                                    <Label className="text-[9px] font-bold uppercase text-slate-400">Saldo Sistema</Label>
+                                                    <div className="font-black text-slate-600">{formatCurrency(sysBal)}</div>
+                                                </div>
+                                                <div className="flex-[2]">
+                                                    <Label className="text-[9px] font-bold uppercase text-indigo-600">Saldo Real (Físico/Banco)</Label>
+                                                    <Input
+                                                        disabled={!isUnlocked}
+                                                        type="number"
+                                                        placeholder="0.00"
+                                                        value={cuadreData[w.id] ?? ''}
+                                                        onChange={(e) => setCuadreData(prev => ({...prev, [w.id]: e.target.value}))}
+                                                        className={cn("h-10 border-none font-black text-right", isUnlocked ? "bg-white text-indigo-700 shadow-sm" : "bg-slate-200/50 text-slate-400")}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {/* Indicador de Diferencia */}
+                                            {isUnlocked && realVal !== '' && diff !== 0 && (
+                                                <div className={cn("mt-3 p-2 rounded-xl text-center text-xs font-black uppercase tracking-wide", diff > 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
+                                                    {diff > 0 ? "Sobrante" : "Faltante"}: {formatCurrency(Math.abs(diff))}
+                                                    <span className="block text-[8px] opacity-70 mt-0.5">Se creará un movimiento automático</span>
+                                                </div>
+                                            )}
+                                            {isUnlocked && realVal !== '' && diff === 0 && (
+                                                <div className="mt-3 p-2 rounded-xl text-center text-xs font-black uppercase tracking-wide bg-slate-200 text-slate-600">
+                                                    Cuadre Exacto (Sin diferencias)
+                                                </div>
+                                            )}
+                                        </div>
+                                    )
+                                })}
+
+                                <Button 
+                                    onClick={handleSaveCuadre} 
+                                    disabled={Object.keys(unlockedWallets).length === 0}
+                                    className="w-full h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl uppercase font-black tracking-widest shadow-xl mt-4">
+                                    Aplicar Ajustes
+                                </Button>
                             </div>
                         )}
-                        <Input placeholder="Descripción" className="h-12 bg-slate-50 border-none rounded-xl" value={manualForm.descripcion} onChange={e => setManualForm({...manualForm, descripcion: e.target.value})} />
-                        <Button onClick={handleManual} className="w-full h-12 bg-slate-900 text-white rounded-xl uppercase font-black">Guardar</Button>
                     </div>
                 </DialogContent>
             </Dialog>
 
-            {/* --- MODAL CAMBIO DIVISAS: CALCULADORA REACTIVA --- */}
+            {/* --- MODAL CAMBIO DIVISAS --- */}
             <Dialog open={isExchangeModalOpen} onOpenChange={setIsExchangeModalOpen}>
                 <DialogContent className="max-w-md rounded-[2.5rem] bg-white dark:bg-[#1c1c1e] shadow-2xl overflow-hidden">
                     <DialogHeader>
@@ -384,7 +545,6 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
                     </DialogHeader>
                     
                     <div className="py-4 space-y-5">
-                        {/* 1. SELECTOR DE DESTINO */}
                         <div className="bg-slate-50 p-1 rounded-2xl flex items-center border border-slate-100">
                             <div className="pl-4 pr-2 text-[10px] font-black uppercase text-slate-400">Destino:</div>
                             <Select value={exchangeForm.destino} onValueChange={(v) => setExchangeForm({...exchangeForm, destino: v})}>
@@ -400,7 +560,6 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
-                            {/* 2. PRECIO DEL DÓLAR (TASA) */}
                             <div className="space-y-1">
                                 <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Precio Compra (Tasa)</Label>
                                 <Input 
@@ -417,7 +576,6 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
                                 />
                             </div>
 
-                            {/* 3. DÓLARES OBTENIDOS (USD) */}
                             <div className="space-y-1">
                                 <Label className="text-[9px] font-black uppercase text-emerald-600 ml-2">Dólares a Recibir ($)</Label>
                                 <Input 
@@ -435,13 +593,11 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
                             </div>
                         </div>
 
-                        {/* FLECHA INDICADORA */}
                         <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-slate-400 uppercase">
                             <span>Total a Pagar</span>
                             <ArrowDownLeft className="w-3 h-3" />
                         </div>
 
-                        {/* 4. MONTO PAGADO (BS) */}
                         <div className="space-y-1">
                             <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Monto Salida (Bolívares)</Label>
                             <Input 
@@ -458,7 +614,6 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
                             />
                         </div>
 
-                        {/* 5. NOTA O REFERENCIA */}
                         <div className="space-y-1 pt-2">
                             <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Nota / Referencia</Label>
                             <Input 
@@ -483,8 +638,6 @@ export function WalletsView({ ordenes, gastos, pagosEmpleados, rates, yesterdayR
         </div>
     )
 }
-
-// --- SUBCOMPONENTES ---
 
 function WalletCard({ config, balance, isActive, onClick, secondaryValue, rateAnalysis }: any) {
     return (
