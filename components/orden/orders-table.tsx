@@ -29,7 +29,7 @@ import {
     Trash2, Eye, Pencil, ChevronLeft, ChevronRight, 
     ChevronDown, CheckCircle2, Wallet, Landmark,
     History, X, Clock, Download, RefreshCw, Loader2, Sparkles, Banknote,
-    ArrowUpDown, ArrowUp, ArrowDown
+    ArrowUpDown, ArrowUp, ArrowDown, Wrench
 } from "lucide-react"
 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
@@ -51,6 +51,7 @@ interface OrdersTableProps {
   firmaBase64?: string
   selloBase64?: string
   onSyncStatus?: () => Promise<{ success: boolean; message: string }>;
+  onFixPayments?: () => Promise<{ success: boolean; message: string }>; // <--- NUEVA FUNCIÓN
 }
 
 // COMPONENTE DE ESTATUS CON CORRECCIÓN DE PRECISIÓN
@@ -81,7 +82,7 @@ function PaymentStatusBadge({ total, abonado }: { total: number, abonado: number
 
 export function OrdersTable({ 
     ordenes, onDelete, onEdit, onRegisterPayment, 
-    currentUserId, rates, pdfLogoBase64, firmaBase64, selloBase64, onSyncStatus 
+    currentUserId, rates, pdfLogoBase64, firmaBase64, selloBase64, onSyncStatus, onFixPayments 
 }: OrdersTableProps) {
   
   const [selectedOrden, setSelectedOrden] = useState<OrdenServicio | null>(null)
@@ -90,6 +91,7 @@ export function OrdersTable({
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
   const [orderForHistory, setOrderForHistory] = useState<OrdenServicio | null>(null)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [isFixing, setIsFixing] = useState(false) // <--- NUEVO ESTADO PARA EL SPINNER
 
   const [showUnpaid, setShowUnpaid] = useState(true)
   const [showPaid, setShowPaid] = useState(false)
@@ -141,19 +143,59 @@ export function OrdersTable({
     }
   };
 
+  // --- MANEJADOR DEL NUEVO BOTÓN ---
+  const handleFixPayments = async () => {
+    if (!onFixPayments) return toast.error("Función de reparación no configurada en el dashboard");
+    setIsFixing(true);
+    try {
+        const result = await onFixPayments();
+        if (result.success) toast.success(result.message, { icon: <Sparkles className="text-emerald-500" /> });
+    } catch (error) {
+        toast.error("Error al reparar estatus de pago");
+    } finally {
+        setIsFixing(false);
+    }
+  };
+
   return (
     <div className="space-y-10 pb-24">
-      <div className="flex justify-end px-6 -mb-6">
+      <div className="flex justify-end gap-2 px-6 -mb-6">
+          
+          {/* 🔹 NUEVO BOTÓN DE REPARACIÓN DE SALDOS */}
           <AlertDialog>
               <AlertDialogTrigger asChild>
-                  <Button variant="ghost" disabled={isSyncing} className={cn("h-8 px-3 rounded-xl font-bold text-[9px] uppercase tracking-tight transition-all gap-2", "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-white/5", isSyncing && "opacity-50")}>
-                    {isSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3 opacity-50" />}
-                    {isSyncing ? "Sincronizando..." : "Sincronizar Estatus"}
+                  <Button variant="ghost" disabled={isFixing} className={cn("h-8 px-3 rounded-xl font-bold text-[9px] uppercase tracking-tight transition-all gap-2", "text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10", isFixing && "opacity-50")}>
+                    {isFixing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wrench className="w-3 h-3" />}
+                    {isFixing ? "Reparando..." : "Reparar Estatus de Pago"}
                   </Button>
               </AlertDialogTrigger>
               <AlertDialogContent className="rounded-[2rem] max-w-[400px]">
                   <AlertDialogHeader>
-                      <AlertDialogTitle className="text-lg font-black uppercase tracking-tight">Mantenimiento de Datos</AlertDialogTitle>
+                      <AlertDialogTitle className="text-lg font-black uppercase tracking-tight">Reparar Estatus de Pago</AlertDialogTitle>
+                      <AlertDialogDescription className="text-xs font-medium text-slate-500">
+                          Esta acción escaneará todas las facturas en tu base de datos y corregirá la etiqueta (Pagado, Abonado, Pendiente) basándose en el cálculo matemático real de lo que el cliente ha pagado. 
+                          <br/><br/>
+                          Úsalo solo si los números del Dashboard no cuadran.
+                      </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter className="gap-2">
+                      <AlertDialogCancel className="rounded-xl font-bold uppercase text-[9px] h-9">Cancelar</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleFixPayments} className="bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black uppercase text-[9px] h-9">Confirmar Reparación</AlertDialogAction>
+                  </AlertDialogFooter>
+              </AlertDialogContent>
+          </AlertDialog>
+
+          {/* BOTÓN DE SINCRONIZAR (ORIGINAL) */}
+          <AlertDialog>
+              <AlertDialogTrigger asChild>
+                  <Button variant="ghost" disabled={isSyncing} className={cn("h-8 px-3 rounded-xl font-bold text-[9px] uppercase tracking-tight transition-all gap-2", "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-white/5", isSyncing && "opacity-50")}>
+                    {isSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3 opacity-50" />}
+                    {isSyncing ? "Sincronizando..." : "Sincronizar Estatus Cliente"}
+                  </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent className="rounded-[2rem] max-w-[400px]">
+                  <AlertDialogHeader>
+                      <AlertDialogTitle className="text-lg font-black uppercase tracking-tight">Sincronizar Clientes</AlertDialogTitle>
                       <AlertDialogDescription className="text-xs font-medium text-slate-500">
                           Esta acción actualizará el estatus de Aliado/Regular en todas las órdenes según tu base de datos de clientes actual.
                       </AlertDialogDescription>

@@ -1,7 +1,7 @@
 // @/components/orden/estadisticas-dashboard.tsx
 "use client"
 
-import React, { useMemo, useState, useRef } from "react"
+import React, { useMemo, useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Card } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -24,14 +24,16 @@ import {
 import { toPng } from 'html-to-image'
 import jsPDF from 'jspdf'
 
+// --- IMPORTACIONES DE FIREBASE PARA BÚSQUEDA AUTÓNOMA ---
+import { db } from "@/lib/firebase"
+import { collection, query, where, getDocs, Timestamp } from "firebase/firestore"
+
 import type { GastoInsumo, GastoFijo, Empleado, PagoEmpleado, Cobranza } from "@/lib/types/gastos"
 import { type OrdenServicio } from "@/lib/types/orden"
 import { cn } from "@/lib/utils"
 
-// IMPORTAMOS EL MODAL DE DETALLE
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
 
-// --- CONSTANTES DE DETECCIÓN (INTELIGENCIA DE MATERIALES) ---
 const MATERIALES_CORTE_KEYS: any = {
     'Acrilico': ['acrilico', 'acr', 'acrylic', 'plastico'],
     'MDF': ['mdf', 'm.d.f', 'madera', 'fibro', 'mdf crudo'],
@@ -52,29 +54,9 @@ const COLORES_KEYS: any = {
     'Amarillo': ['amarillo', 'yellow']
 };
 
-// --- VARIANTES DE ANIMACIÓN ---
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: { 
-    opacity: 1,
-    transition: { staggerChildren: 0.05 }
-  }
-};
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 10 },
-  visible: { 
-    opacity: 1, 
-    y: 0,
-    transition: { type: "spring", stiffness: 100, damping: 15 }
-  }
-};
-
-const hoverEffect = {
-  y: -2,
-  transition: { type: "spring", stiffness: 300, damping: 15 }
-};
-
+const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.05 } } };
+const itemVariants = { hidden: { opacity: 0, y: 10 }, visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 100, damping: 15 } } };
+const hoverEffect = { y: -2, transition: { type: "spring", stiffness: 300, damping: 15 } };
 const tapEffect = { scale: 0.98 };
 
 interface EstadisticasDashboardProps {
@@ -91,55 +73,36 @@ interface EstadisticasDashboardProps {
 type ViewMode = 'GENERAL' | 'IMPRESION' | 'CORTE';
 type DetailType = 'INGRESOS' | 'EGRESOS' | 'UTILIDAD' | 'DEUDA' | 'MATERIALES' | null;
 
-// --- FUNCION IDENTIFICAR SERVICIO CORREGIDA ---
 const identificarServicio = (item: any) => {
     const tipo = (item.tipoServicio || '').toUpperCase();
     const nombre = (item.nombre || item.descripcion || '').toLowerCase();
-
-    // 1. PRIORIDAD ABSOLUTA: Respetar la selección explícita del Formulario
     if (tipo === 'DISENO' || tipo === 'DISEÑO') return 'DISENO';
     if (tipo === 'CORTE' || tipo === 'CORTE_LASER') return 'CORTE';
     if (tipo === 'IMPRESION') return 'IMPRESION';
 
-    // 2. MODO "LEGACY": Solo si el tipo es 'OTROS' o viene vacío (órdenes viejas), intentamos adivinar
     const keywordsPrintFuerte = ['vinil', 'vinilo', 'sticker', 'calcomania', 'impresion', 'impresión', 'banner', 'lona', 'microperforado', 'etiqueta', 'dtf', 'clear', 'esmerilado', 'tornasol'];
-    
-    // Validamos materialImpresion solo si no es explícitamente un corte
     if (item.materialImpresion && tipo !== 'CORTE') return 'IMPRESION';
     if (keywordsPrintFuerte.some(k => nombre.includes(k))) return 'IMPRESION';
 
-    const keywordsLaser = [
-        'laser', 'láser', 'grabado', 'marcado', 'mdf', 'acrilico', 'acrílico', 
-        'madera', 'plywood', 'cuero', 'piel', 'balsa', 'carton', 'reconocimiento', 
-        'trofeo', 'medalla', 'galardon', 'placa', 'boligrafo', 'llavero', 'identificador', 
-        'chapa', 'pin', 'topper', 'letras', 'corporeo', 'señaletica', 'buzon', 'rompecabezas',
-        'cartulina', 'corte'
-    ];
-
-    const keywordsPrint = [
-        'print', 'plotter', 'tinta', 'mesh', 'papel', 'bond', 'glasé', 'fotografico', 
-        'lienzo', 'canvas', 'back light', 'backlight', 'laminacion', 'laminado', 'matte', 
-        'brillante', 'troquelado', 'pendon', 'valla', 'gigantografia', 
-        'rotulado', 'floor graphic', 'poster', 'tarjeta'
-    ];
+    const keywordsLaser = [ 'laser', 'láser', 'grabado', 'marcado', 'mdf', 'acrilico', 'acrílico', 'madera', 'plywood', 'cuero', 'piel', 'balsa', 'carton', 'reconocimiento', 'trofeo', 'medalla', 'galardon', 'placa', 'boligrafo', 'llavero', 'identificador', 'chapa', 'pin', 'topper', 'letras', 'corporeo', 'señaletica', 'buzon', 'rompecabezas', 'cartulina', 'corte' ];
+    const keywordsPrint = [ 'print', 'plotter', 'tinta', 'mesh', 'papel', 'bond', 'glasé', 'fotografico', 'lienzo', 'canvas', 'back light', 'backlight', 'laminacion', 'laminado', 'matte', 'brillante', 'troquelado', 'pendon', 'valla', 'gigantografia', 'rotulado', 'floor graphic', 'poster', 'tarjeta' ];
     
     if (keywordsLaser.some(k => nombre.includes(k))) return 'CORTE';
     if (keywordsPrint.some(k => nombre.includes(k))) return 'IMPRESION';
-    
     return 'OTROS';
 };
 
 const detectarCategoria = (texto: string, diccionario: any, fallback: string = 'Otros') => {
     const t = texto.toLowerCase();
     for (const [key, keywords] of Object.entries(diccionario)) {
-        if (key.toLowerCase() === t) return key; // Coincidencia exacta
-        if ((keywords as string[]).some(k => t.includes(k))) return key; // Coincidencia parcial
+        if (key.toLowerCase() === t) return key;
+        if ((keywords as string[]).some(k => t.includes(k))) return key;
     }
     return fallback;
 };
 
 export function EstadisticasDashboard({
-  gastosInsumos, gastosFijos, empleados, pagosEmpleados, cobranzas, clientes, ordenes, rates
+  gastosFijos, empleados, cobranzas, clientes, rates
 }: EstadisticasDashboardProps) {
 
   const [viewMode, setViewMode] = useState<ViewMode>('GENERAL');
@@ -147,46 +110,95 @@ export function EstadisticasDashboard({
   const [selectedDetail, setSelectedDetail] = useState<DetailType>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const dashboardRef = useRef<HTMLDivElement>(null);
-
-  // ESTADO PARA FILTRO DE SEMANA
   const [selectedWeek, setSelectedWeek] = useState<string>('TODAS');
-
-  // ESTADO PARA LOS MODALES
+  
   const [selectedOrder, setSelectedOrder] = useState<OrdenServicio | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedClientDebt, setSelectedClientDebt] = useState<any | null>(null);
   const [dayDetail, setDayDetail] = useState<{ date: Date; ingresos: any[]; egresos: any[] } | null>(null);
-  
-  // ESTADO PARA DETALLE DE MATERIAL
   const [selectedMaterialDetail, setSelectedMaterialDetail] = useState<any | null>(null);
-
-  // NUEVO ESTADO PARA EL FILTRO DE PAGO EN MATERIALES
   const [filtroPagoMateriales, setFiltroPagoMateriales] = useState<'TODOS' | 'PAGADO' | 'ABONADO' | 'SIN_PAGAR'>('TODOS');
 
-  // --- HELPER PARA FECHAS DE PAGO (VERSIÓN BLINDADA) ---
+  // --- ESTADOS LOCALES PARA DATOS DEL MES ---
+  const [localOrdenes, setLocalOrdenes] = useState<any[]>([]);
+  const [localGastos, setLocalGastos] = useState<any[]>([]);
+  const [localPagos, setLocalPagos] = useState<any[]>([]);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
+
+  // --- OBTENCIÓN DE DATOS AUTÓNOMA POR MES ---
+  useEffect(() => {
+    const fetchMonthlyData = async () => {
+        setIsLoadingStats(true);
+        try {
+            const year = fechaReferencia.getFullYear();
+            const month = fechaReferencia.getMonth();
+            
+            // Ventana: El mes actual y 2 meses atrás (para agarrar facturas viejas que se pagaron este mes)
+            const ventanaInicio = new Date(year, month - 2, 1);
+            const fin = new Date(year, month + 1, 0, 23, 59, 59, 999);
+
+            // 1. Fetch Órdenes
+            const qOrdenes = query(
+                collection(db, "ordenes"),
+                where("fecha", ">=", ventanaInicio.toISOString()),
+                where("fecha", "<=", fin.toISOString())
+            );
+            const snapOrdenes = await getDocs(qOrdenes);
+            const fetchedOrdenes = snapOrdenes.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            // 2. Fetch Gastos
+            const startTs = Timestamp.fromDate(ventanaInicio);
+            const endTs = Timestamp.fromDate(fin);
+            
+            const qGastos = query(
+                collection(db, "gastos_insumos"),
+                where("fecha", ">=", startTs),
+                where("fecha", "<=", endTs)
+            );
+            const snapGastos = await getDocs(qGastos);
+            const fetchedGastos = snapGastos.docs.map(doc => {
+                const data = doc.data();
+                return { ...data, id: doc.id, fecha: data.fecha?.toDate() || new Date() };
+            });
+
+            // 3. Fetch Pagos Nómina
+            const qPagos = query(
+                collection(db, "pagos"),
+                where("fecha", ">=", startTs),
+                where("fecha", "<=", endTs)
+            );
+            const snapPagos = await getDocs(qPagos);
+            const fetchedPagos = snapPagos.docs.map(doc => {
+                const data = doc.data();
+                return { ...data, id: doc.id, fecha: data.fecha?.toDate() || new Date() };
+            });
+
+            setLocalOrdenes(fetchedOrdenes);
+            setLocalGastos(fetchedGastos);
+            setLocalPagos(fetchedPagos);
+        } catch (error) {
+            console.error("Error al descargar estadísticas:", error);
+        } finally {
+            setIsLoadingStats(false);
+        }
+    };
+
+    fetchMonthlyData();
+  }, [fechaReferencia]);
+
   const getFechaRealPago = (c: any) => {
       const raw = c.fecha || c.fechaRegistro || c.fechaPago || c.timestamp;
-      
-      if (raw && typeof raw.toDate === 'function') {
-          return raw.toDate();
-      }
-      
+      if (raw && typeof raw.toDate === 'function') return raw.toDate();
       if (raw) return new Date(raw);
-
       return new Date(0); 
   };
 
-  // --- PDF ---
   const handleDownloadPDF = async () => {
     if (!dashboardRef.current) return;
     setIsGeneratingPdf(true);
     try {
       const element = dashboardRef.current;
-      const canvas = await toPng(element, { 
-        cacheBust: true, 
-        pixelRatio: 2, 
-        backgroundColor: '#ffffff'
-      });
+      const canvas = await toPng(element, { cacheBust: true, pixelRatio: 2, backgroundColor: '#ffffff' });
       const pdf = new jsPDF('p', 'mm', 'a4');
       const imgProps = pdf.getImageProperties(canvas);
       const pdfWidth = pdf.internal.pageSize.getWidth();
@@ -200,15 +212,14 @@ export function EstadisticasDashboard({
     }
   };
 
-  // --- DATOS ---
   const fechas = useMemo(() => {
       const year = fechaReferencia.getFullYear();
       const month = fechaReferencia.getMonth();
       return {
           inicio: new Date(year, month, 1),
-          fin: new Date(year, month + 1, 0),
+          fin: new Date(year, month + 1, 0, 23, 59, 59, 999),
           inicioPrev: new Date(year, month - 1, 1),
-          finPrev: new Date(year, month, 0)
+          finPrev: new Date(year, month, 0, 23, 59, 59, 999)
       };
   }, [fechaReferencia]);
 
@@ -220,16 +231,16 @@ export function EstadisticasDashboard({
 
   const clientFrequencyMap = useMemo(() => {
       const counts = new Map<string, number>();
-      ordenes.forEach(o => {
+      localOrdenes.forEach(o => {
           const name = o.cliente?.nombreRazonSocial || "Desconocido";
           counts.set(name, (counts.get(name) || 0) + 1);
       });
       return counts;
-  }, [ordenes]);
+  }, [localOrdenes]);
 
   const orderBreakdown = useMemo(() => {
     const map = new Map<string, { pctImp: number, pctCorte: number, pctOtros: number }>();
-    ordenes.forEach(o => {
+    localOrdenes.forEach(o => {
         let totalImp = 0, totalCorte = 0, totalOtros = 0;
         (o.items || []).forEach((item: any) => {
             const sub = Number(item.subtotal) || 0;
@@ -254,15 +265,12 @@ export function EstadisticasDashboard({
         map.set(o.id, { pctImp: finalImp / totalFinal, pctCorte: finalCorte / totalFinal, pctOtros: 0 });
     });
     return map;
-  }, [ordenes]);
+  }, [localOrdenes]);
 
-  // --- TRANSACCIONES REALES ---
   const transaccionesReales = useMemo(() => {
       const list: any[] = [];
-      
-      ordenes.forEach(orden => {
+      localOrdenes.forEach(orden => {
           if (orden.estado === 'ANULADO') return;
-
           const historial = (orden as any).registroPagos || (orden as any).historial || (orden as any).pagos || (orden as any).historialPagos || [];
 
           if (Array.isArray(historial) && historial.length > 0) {
@@ -297,8 +305,7 @@ export function EstadisticasDashboard({
           }
       });
       return list;
-  }, [ordenes, cobranzas]);
-
+  }, [localOrdenes, cobranzas]);
 
   const productionMetrics = useMemo(() => {
       const calcularStats = (inicio: Date, fin: Date) => {
@@ -349,11 +356,10 @@ export function EstadisticasDashboard({
           const matCorte: Record<string, { label: string, count: number, revenue: number, details: any[] }> = {};
           const colCorte: Record<string, { label: string, count: number, revenue: number, details: any[] }> = {};
 
-          ordenes.filter(o => {
+          localOrdenes.filter(o => {
               const f = new Date(o.fecha);
               if (f < inicio || f > fin || o.estado === 'ANULADO') return false;
 
-              // FILTRO DE PESTAÑAS DE PAGO
               const total = Number(o.totalUSD) || 0;
               const pagado = Number(o.montoPagadoUSD) || 0;
               const deuda = Math.max(0, total - pagado);
@@ -361,7 +367,7 @@ export function EstadisticasDashboard({
               let estadoPago = 'SIN_PAGAR';
               if (pagado >= total && total > 0) estadoPago = 'PAGADO';
               else if (pagado > 0 && deuda > 0) estadoPago = 'ABONADO';
-              else if (total <= 0) estadoPago = 'PAGADO'; // Gratis o bonificado cuenta como pagado
+              else if (total <= 0) estadoPago = 'PAGADO';
 
               if (filtroPagoMateriales === 'PAGADO' && estadoPago !== 'PAGADO') return false;
               if (filtroPagoMateriales === 'ABONADO' && estadoPago !== 'ABONADO') return false;
@@ -384,7 +390,6 @@ export function EstadisticasDashboard({
                       
                       const matName = (item.materialImpresion || item.nombre || '').toLowerCase();
                       
-                      // 1. EXTRAER COSTO DE LAMINADO
                       let revLaminado = 0;
                       if (item.impresionLaminado) {
                           const pLin = parseFloat(item.precioLaminadoLineal) || 0;
@@ -399,7 +404,6 @@ export function EstadisticasDashboard({
                           }
                       }
 
-                      // 2. EXTRAER COSTO DE SUSTATO RÍGIDO
                       let revRigido = 0;
                       if (item.impresionPegado && item.proveedorPegado === 'taller' && item.precioPegado > 0) {
                           revRigido = parseFloat(item.precioPegado) * qty;
@@ -408,7 +412,6 @@ export function EstadisticasDashboard({
                           }
                       }
 
-                      // 3. ASIGNAR EL RESTO AL MATERIAL BASE
                       const baseSubtotal = Math.max(0, totalSubtotal - revLaminado - revRigido);
 
                       if (matName.includes('microperforado')) {
@@ -469,9 +472,8 @@ export function EstadisticasDashboard({
       
       return { actual, anterior, variacionM2, variacionMinutos };
       
-  }, [ordenes, fechas, filtroPagoMateriales]); 
+  }, [localOrdenes, fechas, filtroPagoMateriales]); 
 
-  // --- CÁLCULO DE MÉTRICAS ---
   const metricas = useMemo(() => {
     const calcularRango = (inicio: Date, fin: Date) => {
         let ingresos = 0; let egresosDirectos = 0; let ordenesCount = 0;
@@ -487,7 +489,7 @@ export function EstadisticasDashboard({
             else if (viewMode === 'CORTE') ingresos += monto * props.pctCorte;
         });
 
-        ordenes.filter(o => {
+        localOrdenes.filter(o => {
             const f = new Date(o.fecha);
             return f >= inicio && f <= fin && o.estado !== 'ANULADO';
         }).forEach(o => {
@@ -497,7 +499,7 @@ export function EstadisticasDashboard({
             else if (viewMode === 'CORTE' && (props?.pctCorte || 0) > 0.01) ordenesCount++;
         });
 
-        (gastosInsumos || []).filter(g => {
+        (localGastos || []).filter(g => {
             const f = new Date(g.fecha);
             return f >= inicio && f <= fin;
         }).forEach(g => {
@@ -532,7 +534,7 @@ export function EstadisticasDashboard({
 
         let gastosDiseno = 0;
         if (viewMode === 'GENERAL') { 
-             ordenes.forEach(o => {
+             localOrdenes.forEach(o => {
                 (o.items || []).forEach((item: any) => {
                     const tipo = identificarServicio(item);
                     const isPaid = (item.designPaymentStatus === 'PAGADO' || !!item.paymentReference);
@@ -557,7 +559,7 @@ export function EstadisticasDashboard({
 
     const fijosAplicables = actual.gastosFijosPagados; 
 
-    const nominaFiltrada = (pagosEmpleados || []).filter(p => {
+    const nominaFiltrada = (localPagos || []).filter(p => {
         const f = new Date(p.fecha || p.fechaPago || '');
         const enFecha = f >= fechas.inicio && f <= fechas.fin;
         if (!enFecha) return false;
@@ -600,9 +602,8 @@ export function EstadisticasDashboard({
         puntoEquilibrioPct, 
         variacionIngreso: anterior.ingresos > 0 ? ((actual.ingresos - anterior.ingresos) / anterior.ingresos) * 100 : 0 
     };
-  }, [fechaReferencia, viewMode, transaccionesReales, ordenes, gastosInsumos, gastosFijos, pagosEmpleados, empRoleMap, orderBreakdown, fechas, empleados]);
+  }, [fechaReferencia, viewMode, transaccionesReales, localOrdenes, localGastos, gastosFijos, localPagos, empRoleMap, orderBreakdown, fechas, empleados]);
 
-  // --- 6. ANÁLISIS DE DEUDA ---
   const analisisDeuda = useMemo(() => {
       let deudaCorriente = 0; let deudaCritica = 0; let totalDeuda = 0;
       const hoy = new Date();
@@ -613,7 +614,7 @@ export function EstadisticasDashboard({
           ordenes: any[]
       }>();
 
-      ordenes.forEach(o => {
+      localOrdenes.forEach(o => {
           if (o.estado === 'ANULADO') return;
           const deudaReal = Math.max(0, (o.totalUSD || 0) - (o.montoPagadoUSD || 0));
           if (deudaReal <= 0.01) return;
@@ -655,9 +656,8 @@ export function EstadisticasDashboard({
           .slice(0, 10);
 
       return { totalDeuda, deudaCorriente, deudaCritica, topClientesDeuda };
-  }, [ordenes, viewMode, orderBreakdown]);
+  }, [localOrdenes, viewMode, orderBreakdown]);
 
-  // --- 7. GRÁFICOS ---
   const chartData = useMemo(() => {
     const map = new Map();
     const year = fechaReferencia.getFullYear();
@@ -700,7 +700,7 @@ export function EstadisticasDashboard({
         }
     });
 
-    (gastosInsumos || []).filter(g => {
+    (localGastos || []).filter(g => {
         const f = new Date(g.fecha);
         return f >= fechas.inicio && f <= fechas.fin;
     }).forEach(g => {
@@ -729,7 +729,7 @@ export function EstadisticasDashboard({
         }
     });
 
-    (pagosEmpleados || []).filter(p => {
+    (localPagos || []).filter(p => {
         const f = new Date(p.fecha || p.fechaPago || '');
         const enFecha = f >= fechas.inicio && f <= fechas.fin;
         if (!enFecha) return false;
@@ -745,7 +745,7 @@ export function EstadisticasDashboard({
     });
 
     if (viewMode === 'GENERAL') { 
-         ordenes.forEach(o => {
+         localOrdenes.forEach(o => {
             (o.items || []).forEach((item: any) => {
                 const tipo = identificarServicio(item);
                 const isPaid = (item.designPaymentStatus === 'PAGADO' || !!item.paymentReference);
@@ -770,7 +770,7 @@ export function EstadisticasDashboard({
     }
 
     return Array.from(map.values());
-  }, [fechas, viewMode, transaccionesReales, gastosInsumos, orderBreakdown, pagosEmpleados, empRoleMap, ordenes, selectedWeek]);
+  }, [fechas, viewMode, transaccionesReales, localGastos, orderBreakdown, localPagos, empRoleMap, localOrdenes, selectedWeek]);
 
   const cambiarMes = (dir: 'prev' | 'next') => {
       const nueva = new Date(fechaReferencia);
@@ -804,7 +804,7 @@ export function EstadisticasDashboard({
 
       const egresosDelDia: any[] = [];
 
-      (gastosInsumos || []).forEach(g => {
+      (localGastos || []).forEach(g => {
           const f = new Date(g.fecha);
           if (f.getDate() === day && f.getMonth() === fechaReferencia.getMonth() && f.getFullYear() === fechaReferencia.getFullYear()) {
                 const areaExplicita = (g as any).area; 
@@ -834,7 +834,7 @@ export function EstadisticasDashboard({
           }
       });
 
-      (pagosEmpleados || []).forEach(p => {
+      (localPagos || []).forEach(p => {
           const f = new Date(p.fecha || p.fechaPago);
           if (f.getDate() === day && f.getMonth() === fechaReferencia.getMonth() && f.getFullYear() === fechaReferencia.getFullYear()) {
                 const cargo = empRoleMap.get(p.empleadoId) || '';
@@ -855,7 +855,7 @@ export function EstadisticasDashboard({
       });
 
       if (viewMode === 'GENERAL') {
-          ordenes.forEach(o => {
+          localOrdenes.forEach(o => {
             (o.items || []).forEach((item: any) => {
                 const tipo = identificarServicio(item);
                 const isPaid = (item.designPaymentStatus === 'PAGADO' || !!item.paymentReference);
@@ -896,7 +896,7 @@ export function EstadisticasDashboard({
           const keywordsImp = ['tinta', 'vinil', 'lona', 'banner', 'papel', 'impresion', 'microperforado', 'ojales', 'laminacion', 'laminado', 'esmerilado', 'dtf', 'clear', 'tornasol', 'pvc', 'rigido'];
           const keywordsCorte = ['mdf', 'acrilico', 'acr', 'madera', 'laser', 'corte', 'pintura', 'thinner', 'balsa', 'plywood'];
           
-          const insumos = (gastosInsumos || []).filter(g => {
+          const insumos = (localGastos || []).filter(g => {
               if(!filtroFecha(g.fecha)) return false;
               const cat = (g.categoria || "").toLowerCase();
               if (cat === 'gasto fijo' || cat === 'servicios' || cat === 'alquiler') return false; 
@@ -909,7 +909,7 @@ export function EstadisticasDashboard({
               return false;
           });
 
-          const fijos = (gastosInsumos || []).filter(g => {
+          const fijos = (localGastos || []).filter(g => {
              if(!filtroFecha(g.fecha)) return false;
              const cat = (g.categoria || "").toLowerCase();
              return (cat === 'gasto fijo' || cat === 'servicios' || cat === 'alquiler');
@@ -918,7 +918,7 @@ export function EstadisticasDashboard({
               monto: Number(g.monto) || Number(g.montoUSD) || 0 
           }));
 
-          const nomina = (pagosEmpleados || []).filter(p => filtroFecha(p.fecha || p.fechaPago || '') && (
+          const nomina = (localPagos || []).filter(p => filtroFecha(p.fecha || p.fechaPago || '') && (
               viewMode === 'GENERAL' ||
               (viewMode === 'IMPRESION' && (empRoleMap.get(p.empleadoId)||'').includes('empleado')) ||
               (viewMode === 'CORTE' && (empRoleMap.get(p.empleadoId)||'').includes('laser'))
@@ -926,7 +926,7 @@ export function EstadisticasDashboard({
           
           const disenoItems: any[] = [];
           if (viewMode === 'GENERAL') {
-               ordenes.forEach(o => {
+               localOrdenes.forEach(o => {
                   (o.items || []).forEach((item: any) => {
                       const tipo = identificarServicio(item);
                       const isPaid = (item.designPaymentStatus === 'PAGADO' || !!item.paymentReference);
@@ -968,18 +968,27 @@ export function EstadisticasDashboard({
               }).filter(c => (c.montoRelevante || 0) > 0);
       }
       return null;
-  }, [selectedDetail, fechas, gastosInsumos, pagosEmpleados, gastosFijos, transaccionesReales, viewMode, empRoleMap, orderBreakdown, ordenes, clientFrequencyMap]);
+  }, [selectedDetail, fechas, localGastos, localPagos, gastosFijos, transaccionesReales, viewMode, empRoleMap, orderBreakdown, localOrdenes, clientFrequencyMap]);
 
   return (
     <motion.div 
       initial="hidden"
       animate="visible"
       variants={containerVariants}
-      className="space-y-6 sm:space-y-8 p-4 sm:p-6 font-sans pb-24 text-slate-800 dark:text-slate-100"
+      className="space-y-6 sm:space-y-8 p-4 sm:p-6 font-sans pb-24 text-slate-800 dark:text-slate-100 relative"
       ref={dashboardRef}
     >
+      {/* PANTALLA DE CARGA MIENTRAS BUSCA EN FIREBASE */}
+      {isLoadingStats && (
+          <div className="absolute inset-0 z-50 bg-white/50 dark:bg-black/50 backdrop-blur-sm flex items-center justify-center rounded-[2.5rem]">
+              <div className="flex flex-col items-center gap-3 p-6 bg-white dark:bg-[#1c1c1e] rounded-3xl shadow-2xl border border-black/10">
+                  <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-500">Calculando Periodo...</p>
+              </div>
+          </div>
+      )}
       
-      {/* HEADER DE CONTROL (ID AGREGADO) */}
+      {/* HEADER DE CONTROL */}
       <motion.div id="stats-header" variants={itemVariants} className="flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4 sm:gap-6 bg-white dark:bg-[#1c1c1e] p-4 sm:p-5 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-black/5 hover:shadow-lg transition-shadow">
         <div className="flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
             <motion.div whileHover={{ rotate: 360, transition: { duration: 0.5 } }} className="p-3 bg-slate-100 dark:bg-white/5 rounded-2xl hidden sm:block">
@@ -1206,7 +1215,7 @@ export function EstadisticasDashboard({
         )}
       </AnimatePresence>
 
-      {/* KPI PRINCIPALES (ID AGREGADO) */}
+      {/* KPI PRINCIPALES */}
       <motion.div id="financial-kpis" variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         <StatCard 
             label="Ingresos Totales" 
@@ -1293,7 +1302,7 @@ export function EstadisticasDashboard({
             </Card>
           </motion.div>
 
-          {/* GRÁFICO PRINCIPAL (ID AGREGADO) */}
+          {/* GRÁFICO PRINCIPAL */}
           <motion.div id="main-chart-section" variants={itemVariants} className="lg:col-span-2">
             <Card className="p-6 sm:p-8 rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm relative overflow-hidden h-full">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
@@ -1860,7 +1869,7 @@ export function EstadisticasDashboard({
         )}
       </AnimatePresence>
 
-      {/* --- MODAL DETALLE DE ORDEN (EXISTENTE) --- */}
+      {/* --- MODAL DETALLE DE ORDEN --- */}
       <OrderDetailModal 
         open={isDetailModalOpen} 
         onClose={() => setIsDetailModalOpen(false)} 

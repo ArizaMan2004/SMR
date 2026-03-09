@@ -1,18 +1,21 @@
+// @/lib/auth-context.tsx
 "use client"
 
 import type React from "react"
 import { createContext, useContext, useEffect, useState } from "react"
 import { type User, onAuthStateChanged, signOut } from "firebase/auth"
 import { auth, db } from "./firebase"
-import { doc, getDoc } from "firebase/firestore"
+import { doc, onSnapshot } from "firebase/firestore"
 
-interface UserData {
+export interface UserData {
+  uid: string
   email: string
-  businessName: string
-  plan: "trial" | "complete"
-  trialEndDate: Date | null
+  nombre: string
+  apellido: string
+  // ✨ NUEVO ROL: PRODUCCION EN LUGAR DE INSTALADOR
+  rol: 'ADMIN' | 'VENDEDOR' | 'DISENADOR' | 'IMPRESOR' | 'OPERADOR_LASER' | 'PRODUCCION' | 'EMPLEADO'
   isActive: boolean
-  exclusiveCode?: string
+  registroCodigo?: string
 }
 
 interface AuthContextType {
@@ -20,7 +23,6 @@ interface AuthContextType {
   userData: UserData | null
   loading: boolean
   logout: () => Promise<void>
-  isTrialExpired: boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -29,39 +31,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [userData, setUserData] = useState<UserData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [isTrialExpired, setIsTrialExpired] = useState(false)
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    let unsubscribeDoc: () => void;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser)
 
       if (currentUser) {
         try {
           const userDocRef = doc(db, "usuarios", currentUser.uid)
-          const userDocSnap = await getDoc(userDocRef)
-
-          if (userDocSnap.exists()) {
-            const data = userDocSnap.data() as UserData
-            setUserData(data)
-
-            if (data.plan === "trial" && data.trialEndDate) {
-              const trialEnd = new Date(data.trialEndDate)
-              const now = new Date()
-              setIsTrialExpired(now > trialEnd)
+          unsubscribeDoc = onSnapshot(userDocRef, async (userDocSnap) => {
+            if (userDocSnap.exists()) {
+              const data = userDocSnap.data() as UserData
+              if (!data.isActive) {
+                await signOut(auth);
+                setUser(null);
+                setUserData(null);
+              } else {
+                setUserData(data);
+              }
+            } else {
+              setUserData(null);
             }
-          }
+            setLoading(false);
+          }, (error) => {
+            console.error("Error al leer datos del usuario:", error);
+            setLoading(false);
+          });
+          
         } catch (error) {
-          console.error("Error fetching user data:", error)
+          console.error("Error configurando la sesión:", error);
+          setLoading(false);
         }
       } else {
-        setUserData(null)
-        setIsTrialExpired(false)
+        setUserData(null);
+        setLoading(false);
+        if (unsubscribeDoc) unsubscribeDoc();
       }
-
-      setLoading(false)
     })
 
-    return unsubscribe
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeDoc) unsubscribeDoc();
+    }
   }, [])
 
   const logout = async () => {
@@ -69,14 +82,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, userData, loading, logout, isTrialExpired }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, userData, loading, logout }}>
+        {children}
+    </AuthContext.Provider>
   )
 }
 
 export function useAuth() {
   const context = useContext(AuthContext)
   if (context === undefined) {
-    throw new Error("useAuth must be used within AuthProvider")
+    throw new Error("useAuth debe usarse dentro de un AuthProvider")
   }
   return context
 }

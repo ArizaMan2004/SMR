@@ -1,5 +1,5 @@
 // @/lib/services/maintenance-service.ts
-import { db } from "@/lib/firebase"; // Corregido: ruta según dashboard.tsx
+import { db } from "@/lib/firebase"; 
 import { collection, getDocs, writeBatch } from "firebase/firestore";
 
 export const syncAllOrdersClientStatus = async () => {
@@ -38,12 +38,50 @@ export const syncAllOrdersClientStatus = async () => {
 
     if (count > 0) {
       await batch.commit();
-      return { success: true, message: `Se actualizaron ${count} órdenes correctamente.` };
+      return { success: true, message: `Se actualizaron ${count} órdenes (Status Cliente) correctamente.` };
     } else {
       return { success: true, message: "Todas las órdenes ya están sincronizadas." };
     }
   } catch (error) {
     console.error("Error en sincronización:", error);
+    throw error;
+  }
+};
+
+// 🔹 NUEVA FUNCIÓN: Arregla los estados de pago rotos o vacíos en Firebase
+export const fixAllOrdersPaymentStatus = async () => {
+  const batch = writeBatch(db);
+  
+  try {
+    const ordersSnap = await getDocs(collection(db, "ordenes"));
+    let count = 0;
+
+    ordersSnap.forEach(orderDoc => {
+      const data = orderDoc.data();
+      const total = Number(data.totalUSD) || 0;
+      const pagado = Number(data.montoPagadoUSD) || 0;
+      const deuda = Math.max(0, total - pagado);
+
+      let estadoReal = "PENDIENTE";
+      if (pagado >= total && total > 0) estadoReal = "PAGADO";
+      else if (pagado > 0 && deuda > 0) estadoReal = "ABONADO";
+      else if (total <= 0) estadoReal = "PAGADO"; // Si es 0 (gratis), cuenta como pagado
+
+      // Si el estado en Firebase no coincide con el estado matemático real, lo actualizamos
+      if (data.estadoPago !== estadoReal) {
+        batch.update(orderDoc.ref, { estadoPago: estadoReal });
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      await batch.commit();
+      return { success: true, message: `¡Éxito! Se repararon ${count} facturas desconfiguradas.` };
+    } else {
+      return { success: true, message: "Todas las facturas tienen su estado de pago correcto." };
+    }
+  } catch (error) {
+    console.error("Error reparando estados de pago:", error);
     throw error;
   }
 };

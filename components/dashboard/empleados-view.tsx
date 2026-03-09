@@ -1,13 +1,13 @@
 // @/components/dashboard/empleados-view.tsx
 "use client"
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import { 
   Users, CheckCircle2, Clock, TrendingUp, Plus, DollarSign, 
   Calendar, ArrowRightLeft, Trash2, Edit3, X, Briefcase, 
   Wallet, ReceiptText, Search, Filter, AlertCircle, ChevronRight,
-  CreditCard, Banknote, Repeat 
+  CreditCard, Banknote, Repeat, Link2, UserCheck, Layers
 } from 'lucide-react';
 
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { db } from "@/lib/firebase"; 
 import { 
   collection, addDoc, updateDoc, 
-  deleteDoc, doc, serverTimestamp 
+  deleteDoc, doc, serverTimestamp, onSnapshot
 } from "firebase/firestore";
 import { formatBs } from "@/lib/services/bcv-service";
 
@@ -63,22 +63,20 @@ const calcularDiasRestantes = (emp: any) => {
     const hoy = new Date();
     
     if (emp.frecuenciaPago === 'Semanal') {
-        const targetDay = parseInt(emp.diaPago) || 1; // 0-6
+        const targetDay = parseInt(emp.diaPago) || 1; 
         const todayDay = hoy.getDay();
         let diff = targetDay - todayDay;
         if (diff < 0) diff += 7;
         
-        // Verificar si se le pagó hace menos de 6 días
         if (emp.ultimoPagoIso) {
             const lastP = new Date(emp.ultimoPagoIso);
             const diffSinceLastPayment = Math.floor((hoy.getTime() - lastP.getTime()) / (1000 * 60 * 60 * 24));
             if (diffSinceLastPayment < 6 && diff === 0) {
-                return 7; // Ya cobró hoy o ayer, le toca la próxima semana
+                return 7; 
             }
         }
         return diff === 0 ? "Hoy" : diff;
     } else {
-        // Mensual o Quincenal
         const diaPago = parseInt(emp.diaPago) || 15;
         let fechaPago = new Date(hoy.getFullYear(), hoy.getMonth(), diaPago);
         if (hoy.getDate() > diaPago) {
@@ -106,49 +104,51 @@ interface EmpleadosViewProps {
 export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
   const [view, setView] = useState<'control' | 'registro' | 'historial'>('control');
   const [editTarget, setEditTarget] = useState<any>(null);
-  
-  // Estados para filtros de historial
+  const [usuariosApp, setUsuariosApp] = useState<any[]>([]);
   const [filtroHistorial, setFiltroHistorial] = useState("todos");
   const [selectedMonthHist, setSelectedMonthHist] = useState<string>(new Date().toISOString().slice(0, 7));
-
-  // Estados para el Modal de Pago
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<any>(null);
+  
   const [paymentConfig, setPaymentConfig] = useState({
       metodo: "Efectivo USD",
       intervalo: "1ra Quincena",
+      area: "IMPRESION",
       nota: ""
   });
 
-  // Formulario Registro 
   const [form, setForm] = useState({ 
       nombre: "", 
       cargo: "", 
       sueldo: "", 
       dia: "15", 
-      frecuencia: "Mensual" 
+      frecuencia: "Mensual",
+      usuarioId: "none" 
   });
 
-  // --- 1. ACCIONES ---
+  useEffect(() => {
+      const unsub = onSnapshot(collection(db, "usuarios"), (snap) => {
+          setUsuariosApp(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+      return () => unsub();
+  }, []);
+
   const handleRegistrar = async () => {
     if (!form.nombre || !form.sueldo) return alert("Nombre y sueldo son obligatorios");
-    
-    // Si es semanal y no cambió el día (que es 15 por defecto), lo forzamos al Lunes (1)
-    const diaFinal = form.frecuencia === 'Semanal' && parseInt(form.dia) > 6 ? "1" : form.dia;
-
     try {
       await addDoc(collection(db, "empleados"), {
         nombre: form.nombre,
         cargo: form.cargo || "Empleado",
         montoSueldo: parseFloat(form.sueldo),
-        diaPago: parseInt(diaFinal),
+        diaPago: parseInt(form.dia),
         frecuenciaPago: form.frecuencia, 
         comisiones: [],
         ultimoPagoMes: "",
-        ultimoPagoIso: null, // Nuevo campo de precisión
+        ultimoPagoIso: null, 
+        usuarioId: form.usuarioId === "none" ? null : form.usuarioId,
         fechaRegistro: serverTimestamp()
       });
-      setForm({ nombre: "", cargo: "", sueldo: "", dia: "15", frecuencia: "Mensual" });
+      setForm({ nombre: "", cargo: "", sueldo: "", dia: "15", frecuencia: "Mensual", usuarioId: "none" });
       setView('control');
     } catch (error) {
       console.error("Error al registrar:", error);
@@ -161,9 +161,16 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
       if (emp.frecuenciaPago === "Quincenal") defaultInterval = "1ra Quincena";
       if (emp.frecuenciaPago === "Semanal") defaultInterval = "Semana";
 
+      const cargo = (emp.cargo || "").toUpperCase();
+      let areaSugerida = "IMPRESION";
+      if (cargo.includes("LASER") || cargo.includes("CORTE") || cargo.includes("PRODUCCION")) {
+          areaSugerida = "CORTE";
+      }
+
       setPaymentConfig({
           metodo: "Efectivo USD",
           intervalo: defaultInterval,
+          area: areaSugerida,
           nota: ""
       });
       setPaymentModalOpen(true);
@@ -171,29 +178,26 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
 
   const confirmPayment = async () => {
     if (!selectedEmployee || !rates?.usd) return;
-    
     const emp = selectedEmployee;
     const mesActual = new Date().toISOString().slice(0, 7);
     const hoyIso = new Date().toISOString();
-    
     const esSemanal = emp.frecuenciaPago === 'Semanal';
     let sueldo = emp.montoSueldo;
     
-    // Lógica dinámica para saber si le toca sueldo base o no
     if (esSemanal) {
         if (emp.ultimoPagoIso) {
             const diffDays = Math.floor((new Date().getTime() - new Date(emp.ultimoPagoIso).getTime()) / 86400000);
-            if (diffDays < 6) sueldo = 0; // Ya cobró su semana recientemente
+            if (diffDays < 6) sueldo = 0; 
         }
     } else {
-        if (emp.ultimoPagoMes === mesActual) sueldo = 0; // Ya cobró su mes completo
+        if (emp.ultimoPagoMes === mesActual) sueldo = 0; 
     }
 
     const tCom = emp.comisiones?.reduce((a: number, c: any) => a + c.monto, 0) || 0;
     const totalUSD = sueldo + tCom;
 
     if (totalUSD <= 0) {
-        alert("No hay montos pendientes para transferir.");
+        alert("No hay montos pendientes.");
         return;
     }
 
@@ -209,16 +213,15 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
         totalVES: totalUSD * rates.usd,
         tasaBCV: rates.usd,
         metodoPago: paymentConfig.metodo,
+        areaAsignada: paymentConfig.area, // <--- CAMBIO CLAVE PARA BALANCE
         notaAdicional: paymentConfig.nota,
         fecha: hoyIso,
-        mesRelativo: mesActual
+        mesRelativo: mesActual,
+        usuarioId: emp.usuarioId || null
       });
 
       await updateDoc(doc(db, "empleados", emp.id), {
-        ...(sueldo > 0 ? { 
-            ultimoPagoMes: mesActual,
-            ultimoPagoIso: hoyIso 
-        } : {}),
+        ...(sueldo > 0 ? { ultimoPagoMes: mesActual, ultimoPagoIso: hoyIso } : {}),
         comisiones: []
       });
 
@@ -226,17 +229,14 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
       setSelectedEmployee(null);
     } catch (error) {
       console.error("Error en el pago:", error);
-      alert("Error al procesar pago");
     }
   };
 
-  // --- 2. ESTADÍSTICAS DEL MES ACTUAL (Dashboard Header) ---
   const stats = useMemo(() => {
     const mesActual = new Date().toISOString().slice(0, 7);
     let pend = 0;
     empleados.forEach(e => {
       const com = e.comisiones?.reduce((a: any, c: any) => a + c.monto, 0) || 0;
-      
       let sueldo = e.montoSueldo;
       if (e.frecuenciaPago === 'Semanal') {
           if (e.ultimoPagoIso) {
@@ -246,15 +246,12 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
       } else {
           if (e.ultimoPagoMes === mesActual) sueldo = 0;
       }
-
       pend += sueldo + com;
     });
     const pagado = pagos.filter(p => p.mesRelativo === mesActual).reduce((a, p) => a + p.totalUSD, 0);
     return { pend, pagado };
   }, [empleados, pagos]);
 
-
-  // --- 3. LÓGICA DE HISTORIAL (Filtros y Totales) ---
   const availableMonths = useMemo(() => {
       const months = new Set(pagos.map(p => p.mesRelativo || (p.fecha ? p.fecha.slice(0,7) : '')).filter(Boolean));
       months.add(new Date().toISOString().slice(0, 7)); 
@@ -270,43 +267,35 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
       }).sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
   }, [pagos, filtroHistorial, selectedMonthHist]);
 
-  const totalFiltradoUSD = useMemo(() => {
-      return pagosFiltrados.reduce((sum, p) => sum + (Number(p.totalUSD) || 0), 0);
-  }, [pagosFiltrados]);
-
-
   return (
-    <div className="max-w-7xl mx-auto p-4 md:p-8 min-h-screen bg-[#F2F2F7] text-slate-900 font-sans selection:bg-blue-100">
-      
-      {/* HEADER */}
+    <div className="max-w-7xl mx-auto p-4 md:p-8 min-h-screen bg-[#F2F2F7] dark:bg-black text-slate-900 font-sans pb-24">
       <header className="mb-10">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-8">
           <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
-            <h1 className="text-6xl font-black tracking-tighter text-slate-900 italic uppercase">Personal</h1>
-            <p className="text-slate-400 font-bold ml-1 uppercase text-[10px] tracking-widest">Gestión de nómina global compartida</p>
+            <h1 className="text-6xl font-black tracking-tighter text-slate-900 dark:text-white italic uppercase">Personal</h1>
+            <p className="text-slate-400 font-bold ml-1 uppercase text-[10px] tracking-widest">Gestión de nómina global</p>
           </motion.div>
           
-          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-white px-8 py-4 rounded-[2.5rem] shadow-xl shadow-gray-200/50 flex items-center gap-5 border border-white">
-            <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-lg shadow-blue-200"><ArrowRightLeft size={20}/></div>
-            <div>
-              <p className="text-[10px] font-black text-blue-600 uppercase leading-none mb-1 tracking-widest">Tasa BCV Oficial</p>
-              <p className="font-black text-2xl text-slate-800">
-                {rates?.usd ? `Bs. ${Number(rates.usd).toFixed(2)}` : "---"}
-              </p>
+          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-white dark:bg-[#1c1c1e] px-8 py-4 rounded-[2.5rem] shadow-xl border border-black/5 dark:border-white/5">
+            <div className="flex items-center gap-5">
+                <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-lg"><ArrowRightLeft size={20}/></div>
+                <div>
+                  <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest leading-none mb-1">Tasa BCV</p>
+                  <p className="font-black text-2xl dark:text-white">{rates?.usd ? `Bs. ${Number(rates.usd).toFixed(2)}` : "---"}</p>
+                </div>
             </div>
           </motion.div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <StatCard label="Por Pagar (Nómina)" value={`$${stats.pend.toLocaleString()}`} sub={rates?.usd ? formatBs(stats.pend, rates.usd) : ""} icon={<Clock/>} color="bg-orange-500" />
-          <StatCard label="Pagado (Este mes)" value={`$${stats.pagado.toLocaleString()}`} sub={rates?.usd ? formatBs(stats.pagado, rates.usd) : ""} icon={<CheckCircle2/>} color="bg-green-500" />
+          <StatCard label="Por Pagar" value={`$${stats.pend.toLocaleString()}`} sub={rates?.usd ? formatBs(stats.pend, rates.usd) : ""} icon={<Clock/>} color="bg-orange-500" />
+          <StatCard label="Pagado (Mes)" value={`$${stats.pagado.toLocaleString()}`} sub={rates?.usd ? formatBs(stats.pagado, rates.usd) : ""} icon={<CheckCircle2/>} color="bg-emerald-500" />
         </div>
       </header>
 
-      {/* NAVEGACIÓN */}
-      <div className="flex bg-gray-200/50 p-1.5 rounded-[2.5rem] mb-10 w-fit backdrop-blur-xl border border-gray-200/20 mx-auto md:mx-0 shadow-inner">
+      <div className="flex bg-white/40 dark:bg-white/5 p-1.5 rounded-[2.5rem] mb-10 w-fit border border-black/5 mx-auto md:mx-0 shadow-sm">
         <TabBtn active={view === 'control'} onClick={() => setView('control')} label="Nómina" icon={<Users size={18}/>} />
-        <TabBtn active={view === 'registro'} onClick={() => setView('registro')} label="Nuevo Empleado" icon={<Plus size={18}/>} />
+        <TabBtn active={view === 'registro'} onClick={() => setView('registro')} label="Nuevo" icon={<Plus size={18}/>} />
         <TabBtn active={view === 'historial'} onClick={() => setView('historial')} label="Historial" icon={<ReceiptText size={18}/>} />
       </div>
 
@@ -315,53 +304,52 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
           {view === 'control' && (
             <motion.div key="c" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-6">
               <LayoutGroup>
-                {empleados.length > 0 ? empleados.map(emp => (
+                {empleados.map(emp => (
                   <EmpleadoCard 
-                    key={emp.id} 
-                    emp={emp} 
-                    rates={rates} 
+                    key={emp.id} emp={emp} rates={rates} 
                     onPagar={() => preparePayment(emp)} 
-                    onEdit={() => setEditTarget(emp)}
-                    onDelete={async () => { if(confirm("¿Eliminar empleado permanentemente?")) await deleteDoc(doc(db, "empleados", emp.id)) }}
+                    onEdit={() => setEditTarget({...emp, usuarioId: emp.usuarioId || "none"})}
+                    onDelete={async () => { if(confirm("¿Eliminar?")) await deleteDoc(doc(db, "empleados", emp.id)) }}
                     onAddCom={async (m:any, d:any) => {
-                      await updateDoc(doc(db, "empleados", emp.id), {
-                        comisiones: [...(emp.comisiones || []), { id: Date.now().toString(), monto: m, desc: d }]
-                      });
+                      await updateDoc(doc(db, "empleados", emp.id), { comisiones: [...(emp.comisiones || []), { id: Date.now().toString(), monto: m, desc: d }] });
                     }}
                   />
-                )) : (
-                  <div className="bg-white rounded-[3rem] p-20 text-center border-2 border-dashed border-gray-200">
-                    <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest">No hay personal registrado en la base de datos.</p>
-                  </div>
-                )}
+                ))}
               </LayoutGroup>
             </motion.div>
           )}
 
           {view === 'registro' && (
-            <motion.div key="r" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="max-w-xl mx-auto bg-white p-12 rounded-[4rem] shadow-2xl border border-white">
-              <div className="mb-10">
-                 <h2 className="text-4xl font-black mb-2 tracking-tight italic uppercase">Nuevo Ingreso</h2>
-                 <p className="text-gray-400 font-medium text-[10px] uppercase tracking-widest">Registrar trabajador al sistema global.</p>
-              </div>
-              <div className="space-y-5">
-                <Field label="Nombre Completo" value={form.nombre} onChange={(v: string) => setForm({...form, nombre: v})} placeholder="Ej. Juan Pérez" />
-                <Field label="Cargo u Oficio" value={form.cargo} onChange={(v: string) => setForm({...form, cargo: v})} placeholder="Ej. Administrador" />
+            <motion.div key="r" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="max-w-xl mx-auto bg-white dark:bg-[#1c1c1e] p-8 md:p-12 rounded-[4rem] shadow-2xl border border-black/5 dark:border-white/5">
+              <h2 className="text-4xl font-black mb-8 italic uppercase dark:text-white">Nuevo Ingreso</h2>
+              <div className="space-y-6">
+                <div className="p-4 bg-blue-50 dark:bg-blue-500/10 border border-blue-100 rounded-[2rem] space-y-3">
+                    <Label className="text-[10px] font-black text-blue-600 uppercase tracking-widest ml-2 flex items-center gap-1"><Link2 size={12}/> Vincular Cuenta App</Label>
+                    <Select value={form.usuarioId} onValueChange={(v) => setForm({...form, usuarioId: v})}>
+                        <SelectTrigger className="rounded-[1.5rem] h-14 bg-white dark:bg-black/20 border-none px-6 font-bold">
+                            <SelectValue placeholder="Seleccionar..." />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-2xl">
+                            <SelectItem value="none" className="font-bold text-xs">Ninguna / Registro Físico</SelectItem>
+                            {usuariosApp.map(u => <SelectItem key={u.id} value={u.id} className="font-bold text-xs uppercase">{u.nombre} {u.apellido}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+
+                <Field label="Nombre Completo" value={form.nombre} onChange={(v: string) => setForm({...form, nombre: v})} />
+                <Field label="Cargo" value={form.cargo} onChange={(v: string) => setForm({...form, cargo: v})} />
                 
                 <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase ml-6 tracking-widest">Frecuencia de Pago</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-6 tracking-widest">Frecuencia de Pago</label>
                     <Select value={form.frecuencia} onValueChange={(v) => {
-                        // Al cambiar la frecuencia, resetear el día para evitar fallos (ej: Día 15 en semanal)
-                        const resetDay = v === 'Semanal' ? "1" : "15";
-                        setForm({...form, frecuencia: v, dia: resetDay});
+                        const defaultDay = v === 'Semanal' ? "1" : "15";
+                        setForm({...form, frecuencia: v, dia: defaultDay});
                     }}>
-                        <SelectTrigger className="rounded-[1.8rem] h-16 bg-gray-50 border-none px-8 font-black text-lg shadow-inner">
-                            <SelectValue placeholder="Seleccione frecuencia" />
+                        <SelectTrigger className="rounded-[1.8rem] h-16 bg-slate-50 dark:bg-white/5 border-none px-8 font-black text-lg shadow-inner">
+                            <SelectValue />
                         </SelectTrigger>
-                        <SelectContent>
-                            {FREQUENCY_OPTIONS.map(opt => (
-                                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                            ))}
+                        <SelectContent className="rounded-2xl">
+                            {FREQUENCY_OPTIONS.map(opt => <SelectItem key={opt.value} value={opt.value} className="font-bold uppercase text-xs">{opt.label}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>
@@ -369,250 +357,151 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Sueldo Base ($)" value={form.sueldo} onChange={(v: string) => setForm({...form, sueldo: v})} type="number" />
                   
-                  {/* SELECTOR CONDICIONAL DE DÍA SEGÚN LA FRECUENCIA */}
                   {form.frecuencia === 'Semanal' ? (
-                      <div className="space-y-2">
-                          <label className="text-[10px] font-black text-gray-400 uppercase ml-6 tracking-widest">Día de Cobro</label>
-                          <Select value={["0","1","2","3","4","5","6"].includes(form.dia.toString()) ? form.dia.toString() : "1"} onValueChange={(v) => setForm({...form, dia: v})}>
-                              <SelectTrigger className="rounded-[1.8rem] h-16 bg-gray-50 border-none px-8 font-black text-lg shadow-inner">
-                                  <SelectValue placeholder="Día" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                  {DAYS_OF_WEEK.map(opt => (
-                                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                                  ))}
-                              </SelectContent>
-                          </Select>
-                      </div>
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase ml-6 tracking-widest">Día de Cobro</label>
+                        <Select value={form.dia} onValueChange={(v) => setForm({...form, dia: v})}>
+                            <SelectTrigger className="rounded-[1.8rem] h-16 bg-slate-50 dark:bg-white/5 border-none px-8 font-black text-lg shadow-inner">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="rounded-2xl">
+                                {DAYS_OF_WEEK.map(d => <SelectItem key={d.value} value={d.value} className="font-bold uppercase text-xs">{d.label}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
                   ) : (
-                      <Field label="Día del Mes" value={form.dia} onChange={(v: string) => setForm({...form, dia: v})} type="number" />
+                    <Field label="Día del Mes" value={form.dia} onChange={(v: string) => setForm({...form, dia: v})} type="number" placeholder="Ej. 15" />
                   )}
                 </div>
-                <Button onClick={handleRegistrar} className="w-full bg-blue-600 hover:bg-blue-700 h-20 rounded-[2.5rem] font-black text-xl mt-6 shadow-2xl shadow-blue-200 transition-all active:scale-95">
-                  Confirmar Registro
-                </Button>
+
+                <Button onClick={handleRegistrar} className="w-full bg-blue-600 hover:bg-blue-700 h-20 rounded-[2.5rem] font-black text-xl mt-6 shadow-2xl text-white">Registrar Trabajador</Button>
               </div>
             </motion.div>
           )}
 
           {view === 'historial' && (
             <motion.div key="h" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-              
-              {/* FILTROS Y TOTALES DE HISTORIAL */}
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-[2rem] shadow-sm border border-gray-100">
-                  
-                  <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0 w-full md:w-auto custom-scrollbar">
-                     <button onClick={() => setFiltroHistorial('todos')} className={`px-6 py-2 rounded-full text-[10px] font-black transition-all whitespace-nowrap uppercase tracking-widest ${filtroHistorial === 'todos' ? 'bg-slate-900 text-white shadow-md' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}>Todos</button>
-                     {empleados.map(e => (
-                       <button key={e.id} onClick={() => setFiltroHistorial(e.id)} className={`px-6 py-2 rounded-full text-[10px] font-black transition-all whitespace-nowrap uppercase tracking-widest ${filtroHistorial === e.id ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}>{e.nombre.split(" ")[0]}</button>
-                     ))}
-                  </div>
-
-                  <div className="flex items-center gap-4 w-full md:w-auto border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-4">
-                     <Select value={selectedMonthHist} onValueChange={setSelectedMonthHist}>
-                         <SelectTrigger className="w-[160px] rounded-xl bg-gray-50 border-none font-black text-xs uppercase tracking-widest h-12">
-                             <SelectValue />
-                         </SelectTrigger>
-                         <SelectContent className="rounded-xl">
-                             <SelectItem value="todos" className="font-bold text-xs uppercase">Todos los meses</SelectItem>
-                             {availableMonths.map(m => (
-                                 <SelectItem key={m} value={m} className="font-bold text-xs uppercase">{formatearMes(m)}</SelectItem>
-                             ))}
-                         </SelectContent>
-                     </Select>
-                     
-                     <div className="bg-emerald-500 text-white px-5 py-2 rounded-2xl shadow-lg shadow-emerald-500/20 flex flex-col items-end min-w-[120px]">
-                         <span className="text-[8px] uppercase tracking-widest font-black text-emerald-100">Total Filtrado</span>
-                         <span className="font-black text-xl italic leading-none">${totalFiltradoUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
-                     </div>
-                  </div>
-              </div>
-
-              <div className="grid gap-4">
-                {pagosFiltrados.length > 0 ? pagosFiltrados.map(pago => (
-                  <Recibo pago={pago} rates={rates} key={pago.id} />
-                )) : (
-                    <div className="text-center py-10 bg-white rounded-[2rem] border border-gray-100">
-                        <p className="text-gray-400 font-black text-xs uppercase tracking-widest">No hay pagos registrados para este filtro.</p>
-                    </div>
-                )}
-              </div>
-
+                <div className="grid gap-4">
+                    {pagosFiltrados.map(pago => <Recibo pago={pago} rates={rates} key={pago.id} />)}
+                </div>
             </motion.div>
           )}
         </AnimatePresence>
       </main>
 
-      {/* --- MODAL DE LIQUIDACIÓN DE PAGO --- */}
+      {/* --- MODAL PAGO CON ASIGNACIÓN DE ÁREA --- */}
       <Dialog open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
         <DialogContent className="max-w-md rounded-[2.5rem] p-8 border-none bg-white dark:bg-slate-950 shadow-2xl">
-            <DialogHeader>
-                <DialogTitle className="text-2xl font-black uppercase italic tracking-tighter flex items-center gap-3">
-                    <Wallet className="text-blue-600" /> Liquidar Nómina
-                </DialogTitle>
-            </DialogHeader>
-            
+            <DialogHeader><DialogTitle className="text-2xl font-black uppercase italic italic flex items-center gap-3"><Wallet className="text-blue-600" /> Liquidar Nómina</DialogTitle></DialogHeader>
             {selectedEmployee && (() => {
                 const mesActual = new Date().toISOString().slice(0, 7);
                 const comisiones = selectedEmployee.comisiones?.reduce((a:number,c:any)=>a+c.monto,0) || 0;
-                
-                // MISMA LÓGICA DE VISUALIZACIÓN QUE EN LA TARJETA
-                let sueldoBase = selectedEmployee.montoSueldo;
+                let sBase = selectedEmployee.montoSueldo;
                 if (selectedEmployee.frecuenciaPago === 'Semanal') {
                     if (selectedEmployee.ultimoPagoIso) {
                         const diffDays = Math.floor((new Date().getTime() - new Date(selectedEmployee.ultimoPagoIso).getTime()) / 86400000);
-                        if (diffDays < 6) sueldoBase = 0;
+                        if (diffDays < 6) sBase = 0;
                     }
-                } else {
-                    if (selectedEmployee.ultimoPagoMes === mesActual) sueldoBase = 0;
-                }
-
-                const total = sueldoBase + comisiones;
-                const totalBs = total * (rates?.usd || 0);
+                } else { if (selectedEmployee.ultimoPagoMes === mesActual) sBase = 0; }
+                const total = sBase + comisiones;
 
                 return (
                     <div className="space-y-6">
-                        <div className="bg-slate-50 dark:bg-white/5 p-6 rounded-[2rem] text-center border border-slate-100">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monto a Transferir</p>
-                            <h2 className="text-5xl font-black text-slate-900 dark:text-white tracking-tighter">${total}</h2>
-                            <p className="text-sm font-bold text-blue-600 mt-1">Bs. {totalBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}</p>
+                        <div className="bg-slate-50 dark:bg-white/5 p-6 rounded-[2rem] text-center border border-black/5">
+                            <h2 className="text-5xl font-black tracking-tighter dark:text-white">${total}</h2>
+                            <p className="text-sm font-bold text-blue-600">Bs. {(total * rates?.usd).toLocaleString()}</p>
                         </div>
-
                         <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="p-3 bg-white border border-slate-100 rounded-2xl shadow-sm">
-                                    <span className="text-[9px] font-black uppercase text-slate-400 block mb-1">Sueldo Base</span>
-                                    <span className="text-lg font-black text-slate-800">${sueldoBase}</span>
-                                </div>
-                                <div className="p-3 bg-white border border-slate-100 rounded-2xl shadow-sm">
-                                    <span className="text-[9px] font-black uppercase text-slate-400 block mb-1">Comisiones</span>
-                                    <span className="text-lg font-black text-emerald-600">${comisiones}</span>
-                                </div>
-                            </div>
-
                             <div className="space-y-1.5">
-                                <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Cuenta de Salida</Label>
-                                <Select value={paymentConfig.metodo} onValueChange={(v) => setPaymentConfig({...paymentConfig, metodo: v})}>
-                                    <SelectTrigger className="h-12 rounded-2xl bg-slate-100 border-none font-bold text-xs">
-                                        <div className="flex items-center gap-2">
-                                            <CreditCard size={14} className="text-slate-500"/>
-                                            <SelectValue />
-                                        </div>
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {PAYMENT_METHODS.map(m => (
-                                            <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                                        ))}
+                                <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Asignar a Área:</Label>
+                                <Select value={paymentConfig.area} onValueChange={(v) => setPaymentConfig({...paymentConfig, area: v})}>
+                                    <SelectTrigger className="h-12 rounded-2xl bg-slate-100 dark:bg-white/5 border-none font-bold text-xs shadow-sm"><SelectValue /></SelectTrigger>
+                                    <SelectContent className="rounded-2xl">
+                                        <SelectItem value="IMPRESION" className="font-bold text-xs">IMPRESIÓN</SelectItem>
+                                        <SelectItem value="CORTE" className="font-bold text-xs">CORTE / LÁSER</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
-
-                            {sueldoBase > 0 && (
-                                <div className="space-y-1.5">
-                                    <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Concepto / Intervalo</Label>
-                                    <Select value={paymentConfig.intervalo} onValueChange={(v) => setPaymentConfig({...paymentConfig, intervalo: v})}>
-                                        <SelectTrigger className="h-12 rounded-2xl bg-slate-100 border-none font-bold text-xs">
-                                            <div className="flex items-center gap-2">
-                                                <Calendar size={14} className="text-slate-500"/>
-                                                <SelectValue />
-                                            </div>
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {PERIOD_OPTIONS.map(p => (
-                                                <SelectItem key={p} value={p}>{p}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            )}
-
                             <div className="space-y-1.5">
-                                <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Nota Adicional</Label>
-                                <Input 
-                                    value={paymentConfig.nota}
-                                    onChange={(e) => setPaymentConfig({...paymentConfig, nota: e.target.value})}
-                                    placeholder="Detalles extra..."
-                                    className="h-12 rounded-2xl bg-slate-100 border-none font-bold text-xs placeholder:font-normal"
-                                />
+                                <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Método de Pago:</Label>
+                                <Select value={paymentConfig.metodo} onValueChange={(v) => setPaymentConfig({...paymentConfig, metodo: v})}>
+                                    <SelectTrigger className="h-12 rounded-2xl bg-slate-100 dark:bg-white/5 border-none font-bold text-xs shadow-sm"><SelectValue /></SelectTrigger>
+                                    <SelectContent className="rounded-2xl">{PAYMENT_METHODS.map(m => <SelectItem key={m.value} value={m.value} className="font-bold text-xs">{m.label}</SelectItem>)}</SelectContent>
+                                </Select>
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Nota Adicional:</Label>
+                                <Input value={paymentConfig.nota} onChange={e=>setPaymentConfig({...paymentConfig, nota: e.target.value})} placeholder="Detalles..." className="h-12 rounded-2xl bg-slate-100 dark:bg-white/5 border-none font-bold text-xs" />
                             </div>
                         </div>
-
-                        <DialogFooter>
-                            <Button onClick={confirmPayment} className="w-full h-14 rounded-2xl bg-slate-900 text-white font-black uppercase tracking-widest shadow-xl hover:bg-black">
-                                Confirmar Egreso
-                            </Button>
-                        </DialogFooter>
+                        <Button onClick={confirmPayment} className="w-full h-14 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-black font-black uppercase tracking-widest shadow-xl">Confirmar Egreso</Button>
                     </div>
-                )
+                );
             })()}
         </DialogContent>
       </Dialog>
 
-      {/* MODAL EDICIÓN PERFIL (CON DÍAS SEMANALES) */}
+      {/* --- MODAL EDICIÓN CORREGIDO Y DINÁMICO --- */}
       <AnimatePresence>
         {editTarget && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xl z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }} className="bg-white w-full max-w-md rounded-[3.5rem] p-12 shadow-2xl relative">
-              <button onClick={() => setEditTarget(null)} className="absolute right-8 top-8 bg-gray-100 p-3 rounded-full hover:bg-red-50 hover:text-red-500 transition-colors"><X size={20}/></button>
-              <h2 className="text-3xl font-black mb-8 tracking-tighter italic uppercase">Editar Perfil</h2>
+            <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white dark:bg-[#1c1c1e] w-full max-w-md rounded-[3.5rem] p-8 md:p-12 shadow-2xl relative border border-white/5">
+              <button onClick={() => setEditTarget(null)} className="absolute right-8 top-8 bg-slate-100 dark:bg-white/10 p-3 rounded-full hover:bg-red-50 hover:text-red-500 transition-colors"><X size={20}/></button>
+              <h2 className="text-3xl font-black mb-8 italic uppercase dark:text-white">Editar Perfil</h2>
               <div className="space-y-5">
+                <div className="p-3 bg-blue-50 dark:bg-blue-500/10 border border-blue-100 rounded-3xl space-y-2">
+                    <Label className="text-[10px] font-black text-blue-600 uppercase ml-2 flex items-center gap-1"><Link2 size={12}/> Vincular App</Label>
+                    <Select value={editTarget.usuarioId || "none"} onValueChange={(v) => setEditTarget({...editTarget, usuarioId: v})}>
+                        <SelectTrigger className="rounded-2xl h-12 bg-white dark:bg-black/20 border-none px-4 font-bold text-xs shadow-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent className="rounded-2xl">
+                            <SelectItem value="none" className="font-bold text-xs">Desvincular</SelectItem>
+                            {usuariosApp.map(u => <SelectItem key={u.id} value={u.id} className="font-bold text-xs uppercase">{u.nombre} {u.apellido}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+
                 <Field label="Nombre" value={editTarget.nombre} onChange={(v: string) => setEditTarget({...editTarget, nombre: v})} />
                 <Field label="Cargo" value={editTarget.cargo} onChange={(v: string) => setEditTarget({...editTarget, cargo: v})} />
                 
                 <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase ml-6 tracking-widest">Frecuencia</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-6 tracking-widest">Frecuencia</label>
                     <Select value={editTarget.frecuenciaPago || "Mensual"} onValueChange={(v) => {
-                        const resetDay = v === 'Semanal' ? "1" : "15";
-                        setEditTarget({...editTarget, frecuenciaPago: v, diaPago: resetDay});
+                        const defaultDay = v === 'Semanal' ? "1" : "15";
+                        setEditTarget({...editTarget, frecuenciaPago: v, diaPago: defaultDay});
                     }}>
-                        <SelectTrigger className="rounded-[1.8rem] h-16 bg-gray-50 border-none px-8 font-black text-lg shadow-inner">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {FREQUENCY_OPTIONS.map(opt => (
-                                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                            ))}
+                        <SelectTrigger className="rounded-[1.8rem] h-16 bg-slate-50 dark:bg-white/5 border-none px-8 font-black text-lg shadow-inner"><SelectValue /></SelectTrigger>
+                        <SelectContent className="rounded-2xl">
+                            {FREQUENCY_OPTIONS.map(opt => <SelectItem key={opt.value} value={opt.value} className="font-bold text-xs uppercase">{opt.label}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <Field label="Sueldo" value={editTarget.montoSueldo} onChange={(v: string) => setEditTarget({...editTarget, montoSueldo: v})} type="number" />
-                  
-                  {/* SELECTOR CONDICIONAL PARA EDICIÓN */}
-                  {editTarget.frecuenciaPago === 'Semanal' ? (
-                      <div className="space-y-2">
-                          <label className="text-[10px] font-black text-gray-400 uppercase ml-6 tracking-widest">Día Cobro</label>
-                          <Select value={["0","1","2","3","4","5","6"].includes(editTarget.diaPago?.toString()) ? editTarget.diaPago?.toString() : "1"} onValueChange={(v) => setEditTarget({...editTarget, diaPago: v})}>
-                              <SelectTrigger className="rounded-[1.8rem] h-16 bg-gray-50 border-none px-8 font-black text-lg shadow-inner">
-                                  <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                  {DAYS_OF_WEEK.map(opt => (
-                                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                                  ))}
-                              </SelectContent>
-                          </Select>
-                      </div>
-                  ) : (
-                      <Field label="Día del mes" value={editTarget.diaPago} onChange={(v: string) => setEditTarget({...editTarget, diaPago: v})} type="number" />
-                  )}
+                    <Field label="Sueldo" value={editTarget.montoSueldo} onChange={(v: string) => setEditTarget({...editTarget, montoSueldo: v})} type="number" />
+                    
+                    {/* ✨ CAMPO DINÁMICO EN EDICIÓN ✨ */}
+                    {editTarget.frecuenciaPago === 'Semanal' ? (
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase ml-6 tracking-widest">Día Cobro</label>
+                            <Select value={editTarget.diaPago?.toString()} onValueChange={(v) => setEditTarget({...editTarget, diaPago: v})}>
+                                <SelectTrigger className="rounded-[1.8rem] h-16 bg-slate-50 dark:bg-white/5 border-none px-8 font-black text-lg shadow-inner"><SelectValue /></SelectTrigger>
+                                <SelectContent className="rounded-2xl">
+                                    {DAYS_OF_WEEK.map(d => <SelectItem key={d.value} value={d.value} className="font-bold text-xs uppercase">{d.label}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    ) : (
+                        <Field label="Día Mes" value={editTarget.diaPago} onChange={(v: string) => setEditTarget({...editTarget, diaPago: v})} type="number" />
+                    )}
                 </div>
-                <Button 
-                  onClick={async () => {
+                <Button onClick={async () => {
                     const { id, ...cleanData } = editTarget;
                     await updateDoc(doc(db, "empleados", id), {
-                      ...cleanData, 
-                      montoSueldo: parseFloat(editTarget.montoSueldo),
-                      diaPago: parseInt(editTarget.diaPago),
-                      frecuenciaPago: editTarget.frecuenciaPago || "Mensual"
+                      ...cleanData, montoSueldo: parseFloat(editTarget.montoSueldo), diaPago: parseInt(editTarget.diaPago), 
+                      usuarioId: editTarget.usuarioId === "none" ? null : editTarget.usuarioId
                     });
                     setEditTarget(null);
-                  }} 
-                  className="w-full bg-slate-900 text-white h-16 rounded-[2rem] font-black mt-4 shadow-xl active:scale-95 transition-transform"
-                >
-                  Guardar Cambios
-                </Button>
+                  }} className="w-full bg-blue-600 hover:bg-blue-700 text-white h-16 rounded-[2rem] font-black mt-4 shadow-xl active:scale-95 transition-transform">Guardar Cambios</Button>
               </div>
             </motion.div>
           </div>
@@ -622,121 +511,52 @@ export function EmpleadosView({ empleados, pagos, rates }: EmpleadosViewProps) {
   );
 }
 
-// --- SUB-COMPONENTES AUXILIARES ---
-
+// Sub-componentes visuales
 function EmpleadoCard({ emp, rates, onPagar, onEdit, onDelete, onAddCom }: any) {
   const mesActual = new Date().toISOString().slice(0, 7);
   const esSemanal = emp.frecuenciaPago === 'Semanal';
   const dias = calcularDiasRestantes(emp);
-  
   const tCom = emp.comisiones?.reduce((a:any, c:any) => a + c.monto, 0) || 0;
-  
-  // VERIFICAR SI LE TOCA EL SUELDO SEGÚN SU FRECUENCIA
   let sPend = emp.montoSueldo;
-  if (esSemanal) {
-      if (emp.ultimoPagoIso) {
-          const diffDays = Math.floor((new Date().getTime() - new Date(emp.ultimoPagoIso).getTime()) / 86400000);
-          if (diffDays < 6) sPend = 0;
-      }
-  } else {
-      if (emp.ultimoPagoMes === mesActual) sPend = 0;
-  }
-
+  if (esSemanal) { if (emp.ultimoPagoIso) { const diff = Math.floor((new Date().getTime() - new Date(emp.ultimoPagoIso).getTime()) / 86400000); if (diff < 6) sPend = 0; }
+  } else { if (emp.ultimoPagoMes === mesActual) sPend = 0; }
   const total = tCom + sPend;
-
-  // Lógica de visualización del texto de Cobro
-  let textoCobro = "";
-  if (dias === 'Hoy') {
-      textoCobro = "Toca Pagar Hoy";
-  } else if (esSemanal) {
-      const nombreDia = DAYS_OF_WEEK.find(d => d.value === emp.diaPago?.toString())?.label || "Día";
-      textoCobro = `Cobro los ${nombreDia}`;
-  } else {
-      textoCobro = `Cobro en ${dias} días`;
-  }
+  let tCobro = dias === 'Hoy' ? "Toca Pagar Hoy" : (esSemanal ? `Cobro los ${DAYS_OF_WEEK.find(d => d.value === emp.diaPago?.toString())?.label || "Día"}` : `Día ${emp.diaPago} (en ${dias} d)`);
 
   const [m, setM] = useState("");
   const [d, setD] = useState("");
 
   return (
-    <motion.div layout className="bg-white rounded-[3.5rem] p-10 shadow-sm border border-gray-50 group hover:shadow-2xl hover:shadow-blue-900/5 transition-all duration-500">
+    <motion.div layout className="bg-white dark:bg-[#1c1c1e] rounded-[3.5rem] p-8 md:p-10 shadow-sm border border-black/5 dark:border-white/5 group hover:shadow-2xl transition-all duration-500">
       <div className="flex flex-col lg:flex-row justify-between items-center gap-10">
-        <div className="flex items-center gap-8 w-full lg:w-auto">
-          <div className="h-24 w-24 bg-gradient-to-br from-slate-800 to-slate-900 text-white rounded-[2.5rem] flex items-center justify-center font-black text-3xl shadow-2xl relative overflow-hidden group-hover:scale-105 transition-transform italic">
-            {emp.nombre.charAt(0)}
-          </div>
-          <div>
+        <div className="flex items-center gap-6 w-full lg:w-auto">
+          <div className="h-24 w-24 bg-gradient-to-br from-slate-800 to-slate-900 dark:from-blue-600 text-white rounded-[2.5rem] flex items-center justify-center font-black text-3xl italic shrink-0 shadow-lg">{emp.nombre.charAt(0)}</div>
+          <div className="min-w-0">
             <div className="flex items-center gap-4">
-              <h3 className="font-black text-3xl tracking-tighter text-slate-900 italic uppercase">{emp.nombre}</h3>
-              <div className="flex bg-gray-50 rounded-full p-1 border border-gray-100 shadow-inner">
-                <button onClick={onEdit} className="p-2 text-gray-400 hover:text-blue-600 transition-colors"><Edit3 size={18}/></button>
-                <button onClick={onDelete} className="p-2 text-gray-400 hover:text-red-600 transition-colors"><Trash2 size={18}/></button>
+              <h3 className="font-black text-2xl tracking-tighter dark:text-white italic uppercase truncate leading-tight">{emp.nombre}</h3>
+              <div className="flex bg-slate-50 dark:bg-white/5 rounded-full p-1 border border-black/5 shrink-0">
+                <button onClick={onEdit} className="p-2 text-slate-400 hover:text-blue-600 transition-colors"><Edit3 size={18}/></button>
+                <button onClick={onDelete} className="p-2 text-slate-400 hover:text-red-600 transition-colors"><Trash2 size={18}/></button>
               </div>
             </div>
-            <div className="flex flex-wrap gap-3 mt-3">
-              <span className="bg-gray-100 text-gray-500 text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest flex items-center gap-2 shadow-sm italic">
-                <Briefcase size={12}/> {emp.cargo}
-              </span>
-              <span className="bg-indigo-50 text-indigo-600 text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest flex items-center gap-2 shadow-sm italic">
-                <Repeat size={12}/> {emp.frecuenciaPago || "Mensual"}
-              </span>
-              <span className={`text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest shadow-sm flex items-center gap-2 italic ${dias === 'Hoy' ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-50 text-blue-600'}`}>
-                <Calendar size={12}/> {textoCobro}
-              </span>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <span className="bg-slate-100 dark:bg-white/5 text-slate-500 text-[10px] font-black px-3 py-1.5 rounded-full uppercase italic border border-black/5 shadow-sm"><Briefcase size={12} className="inline mr-1"/> {emp.cargo}</span>
+              <span className={`text-[10px] font-black px-3 py-1.5 rounded-full uppercase italic shadow-sm border border-black/5 ${dias === 'Hoy' ? 'bg-red-500 text-white animate-pulse border-none' : 'bg-blue-50 dark:bg-blue-500/10 text-blue-600'}`}><Calendar size={12} className="inline mr-1"/> {tCobro}</span>
+              {emp.usuarioId && <span className="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 text-[10px] font-black px-3 py-1.5 rounded-full uppercase italic border border-emerald-100 dark:border-emerald-500/20 shadow-sm"><UserCheck size={12} className="inline mr-1"/> Vinculado</span>}
             </div>
           </div>
         </div>
-
-        <div className="flex-1 w-full bg-[#F8F9FB] rounded-[3rem] p-8 flex flex-col md:flex-row justify-around items-center border border-gray-100 gap-6">
-           <div className="text-center md:text-left">
-              <p className="text-[10px] font-black text-gray-400 uppercase mb-2 tracking-[0.2em]">Pendiente (USD)</p>
-              <p className="text-4xl font-black tracking-tighter text-slate-900 italic">${total.toLocaleString()}</p>
-              <p className="text-[10px] font-bold text-slate-400 mt-1 italic uppercase tracking-widest">Base: ${emp.montoSueldo}</p>
-           </div>
-           <div className="h-10 w-[1px] bg-gray-200 hidden md:block" />
-           <div className="text-center md:text-right">
-              <p className="text-[10px] font-black text-blue-600 uppercase mb-2 tracking-[0.2em]">Equivalente BCV</p>
-              <p className="text-2xl font-black text-slate-700 italic">
-                {rates?.usd ? formatBs(total, rates.usd) : "---"}
-              </p>
-           </div>
+        <div className="flex-1 w-full bg-[#F8F9FB] dark:bg-black/20 rounded-[3rem] p-6 flex flex-col md:flex-row justify-around items-center border border-black/5 gap-6 text-center md:text-left shadow-inner">
+           <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Pendiente</p><p className="text-4xl font-black dark:text-white italic tracking-tighter">${total.toLocaleString()}</p></div>
+           <div className="h-10 w-[1px] bg-slate-200 dark:bg-white/10 hidden md:block" />
+           <div><p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1">BCV</p><p className="text-2xl font-black text-slate-700 dark:text-slate-300 italic">{rates?.usd ? formatBs(total, rates.usd) : "---"}</p></div>
         </div>
-
-        <Button 
-          onClick={onPagar} 
-          disabled={total === 0} 
-          className={`h-24 px-12 rounded-[2.5rem] font-black text-xl shadow-2xl transition-all active:scale-90 italic uppercase ${total > 0 ? 'bg-slate-900 text-white hover:bg-black' : 'bg-gray-100 text-gray-300 cursor-not-allowed shadow-none'}`}
-        >
-          {total > 0 ? "Pagar Nómina" : "Al Día"}
-        </Button>
+        <Button onClick={onPagar} disabled={total === 0} className={`h-24 px-12 rounded-[2.5rem] font-black text-xl shadow-2xl uppercase italic transition-all active:scale-95 ${total > 0 ? 'bg-slate-900 dark:bg-blue-600 text-white hover:bg-black' : 'bg-slate-100 dark:bg-white/5 text-slate-300 dark:text-slate-600 shadow-none'}`}>{total > 0 ? "Pagar" : "Al Día"}</Button>
       </div>
-
-      <div className="mt-10 pt-10 border-t border-gray-100 flex flex-col md:flex-row gap-5 items-center">
-         <div className="relative flex-1 w-full">
-            <Input 
-              placeholder="0.00" 
-              type="number" 
-              value={m} 
-              onChange={e => setM(e.target.value)} 
-              className="rounded-2xl h-14 bg-gray-50 border-none pl-12 font-black text-lg shadow-inner" 
-            />
-            <DollarSign className="absolute left-4 top-4 text-blue-600" size={20}/>
-         </div>
-         <div className="flex-[3] w-full">
-            <Input 
-              placeholder="Descripción de la comisión o bono extra..." 
-              value={d} 
-              onChange={e => setD(e.target.value)} 
-              className="rounded-2xl h-14 bg-gray-50 border-none px-6 font-bold shadow-inner italic" 
-            />
-         </div>
-         <Button 
-            onClick={() => { if(m) onAddCom(parseFloat(m), d); setM(""); setD(""); }} 
-            variant="ghost" 
-            className="h-14 rounded-2xl text-blue-600 font-black hover:bg-blue-50 px-8 transition-colors shrink-0 uppercase text-[10px] tracking-widest"
-         >
-            + Añadir Comisión
-         </Button>
+      <div className="mt-8 pt-8 border-t border-black/5 flex flex-col md:flex-row gap-4 items-center">
+         <div className="relative w-full md:w-48"><Input placeholder="0.00" type="number" value={m} onChange={e=>setM(e.target.value)} className="rounded-2xl h-14 bg-slate-50 dark:bg-black/20 border-none pl-12 font-black text-lg shadow-inner dark:text-white" /><DollarSign className="absolute left-4 top-4 text-blue-600" size={20}/></div>
+         <Input placeholder="Concepto de comisión o bono especial..." value={d} onChange={e=>setD(e.target.value)} className="rounded-2xl h-14 bg-slate-50 dark:bg-black/20 border-none px-6 font-bold flex-1 shadow-inner italic dark:text-white" />
+         <Button onClick={()=>{if(m)onAddCom(parseFloat(m),d);setM("");setD("");}} variant="ghost" className="w-full md:w-auto h-14 rounded-2xl text-blue-600 font-black hover:bg-blue-50 dark:hover:bg-blue-500/10 px-8 transition-colors uppercase text-[10px] tracking-widest">+ Añadir</Button>
       </div>
     </motion.div>
   );
@@ -744,35 +564,30 @@ function EmpleadoCard({ emp, rates, onPagar, onEdit, onDelete, onAddCom }: any) 
 
 function Recibo({ pago, rates }: any) {
   return (
-    <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="bg-white rounded-[3rem] p-8 shadow-sm border border-gray-100 flex flex-col md:flex-row justify-between items-center gap-8 group hover:shadow-md transition-shadow">
-       <div className="flex gap-6 items-center w-full md:w-auto">
-          <div className="bg-green-100 p-5 rounded-[2rem] text-green-700 shadow-inner group-hover:scale-110 transition-transform"><Wallet size={28}/></div>
-          <div>
-            <h4 className="text-2xl font-black tracking-tighter text-slate-900 italic uppercase">{pago.nombre}</h4>
-            <div className="flex items-center gap-2 text-gray-400 italic">
-               <Calendar size={12}/>
-               <p className="text-[10px] font-black uppercase tracking-widest">
-                {new Date(pago.fecha).toLocaleDateString('es-VE', { weekday: 'long', day: 'numeric', month: 'long' })}
-               </p>
-            </div>
+    <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="bg-white dark:bg-[#1c1c1e] rounded-[3rem] p-6 shadow-sm border border-black/5 flex flex-col md:flex-row justify-between items-center gap-6 group hover:shadow-md transition-shadow">
+       <div className="flex gap-4 items-center w-full md:w-auto">
+          <div className="bg-emerald-100 dark:bg-emerald-500/20 p-5 rounded-[2rem] text-emerald-700 dark:text-emerald-400 group-hover:scale-110 transition-transform shadow-inner shrink-0"><Wallet size={24}/></div>
+          <div className="min-w-0">
+            <h4 className="text-2xl font-black dark:text-white italic uppercase truncate tracking-tight leading-none">{pago.nombre}</h4>
+            <p className="text-[10px] font-black text-slate-400 uppercase mt-2">{new Date(pago.fecha).toLocaleDateString('es-VE', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
           </div>
        </div>
-       <div className="bg-gray-50/50 rounded-[2.5rem] px-10 py-6 flex-1 w-full space-y-3 border border-gray-100 shadow-inner">
-          <div className="flex justify-between items-center border-b border-gray-200 pb-2 mb-2">
-             <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest">Método: {pago.metodoPago || "Efectivo"}</span>
-             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{pago.notaAdicional}</span>
+       <div className="bg-slate-50 dark:bg-black/20 rounded-[2.5rem] px-10 py-6 flex-1 w-full space-y-3 shadow-inner border border-black/5">
+          <div className="flex justify-between items-center border-b border-slate-200 dark:border-white/10 pb-2 mb-2">
+             <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest">Área: {pago.areaAsignada || "General"} &bull; Vía {pago.metodoPago}</span>
+             <span className="text-[9px] font-black text-slate-400 uppercase truncate max-w-[150px] italic">{pago.notaAdicional}</span>
           </div>
           {pago.conceptos?.map((c:any, i:number) => (
-             <div key={i} className="flex justify-between items-center">
-                <span className="font-black text-[10px] text-gray-400 uppercase tracking-tighter italic">{c.tipo}: <span className="text-slate-600 ml-2">{c.motivo}</span></span>
-                <span className="font-black text-slate-900 italic">${Number(c.monto).toFixed(2)}</span>
+             <div key={i} className="flex justify-between items-center text-[10px] font-black uppercase italic">
+                <span className="text-slate-400">{c.tipo}: <span className="text-slate-600 dark:text-slate-300 ml-2">{c.motivo}</span></span>
+                <span className="dark:text-white text-base font-black">${Number(c.monto).toFixed(2)}</span>
              </div>
           ))}
        </div>
        <div className="text-center md:text-right min-w-[180px]">
-          <p className="text-[10px] font-black text-gray-400 uppercase mb-1 tracking-widest">Liquidado</p>
-          <p className="text-3xl font-black text-slate-900 tracking-tighter italic">${Number(pago.totalUSD).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-          <p className="text-sm font-bold text-blue-600 mt-1 italic uppercase tracking-widest">Bs. {Number(pago.totalVES).toLocaleString('es-VE', {minimumFractionDigits: 2})}</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase mb-1 tracking-widest">Liquidado</p>
+          <p className="text-3xl font-black dark:text-white italic tracking-tighter">${Number(pago.totalUSD).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+          <p className="text-sm font-bold text-blue-600 uppercase italic mt-1">Bs. {Number(pago.totalVES).toLocaleString('es-VE', { minimumFractionDigits: 2 })}</p>
        </div>
     </motion.div>
   );
@@ -780,13 +595,13 @@ function Recibo({ pago, rates }: any) {
 
 function StatCard({ label, value, sub, icon, color }: any) {
   return (
-    <motion.div whileHover={{ y: -5 }} className="bg-white p-8 rounded-[3rem] shadow-sm border border-gray-100 flex flex-col gap-5 relative overflow-hidden group">
-      <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-150 transition-transform duration-700">{icon}</div>
-      <div className={`${color} w-14 h-14 rounded-[1.5rem] flex items-center justify-center text-white shadow-xl group-hover:rotate-12 transition-transform`}>{icon}</div>
+    <motion.div whileHover={{ y: -5 }} className="bg-white dark:bg-[#1c1c1e] p-8 rounded-[3rem] shadow-sm border border-black/5 flex flex-col gap-5 relative overflow-hidden group hover:shadow-xl transition-all duration-500">
+      <div className="absolute top-0 right-0 p-4 opacity-5 dark:opacity-10 group-hover:scale-150 transition-transform text-slate-900 dark:text-white">{icon}</div>
+      <div className={`${color} w-14 h-14 rounded-[1.5rem] flex items-center justify-center text-white shadow-xl group-hover:rotate-12 transition-transform shadow-blue-500/20`}>{icon}</div>
       <div>
-        <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] leading-none mb-2">{label}</p>
-        <p className="text-4xl font-black text-slate-900 leading-none tracking-tighter italic">{value}</p>
-        {sub && <p className="text-sm font-bold text-blue-600 mt-3 italic uppercase tracking-widest">{sub}</p>}
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-2">{label}</p>
+        <p className="text-4xl font-black dark:text-white leading-none tracking-tighter italic">{value}</p>
+        {sub && <p className="text-sm font-bold text-blue-600 mt-3 uppercase italic tracking-widest">{sub}</p>}
       </div>
     </motion.div>
   );
@@ -794,8 +609,8 @@ function StatCard({ label, value, sub, icon, color }: any) {
 
 function TabBtn({ active, onClick, label, icon }: any) {
   return (
-    <button onClick={onClick} className={`flex items-center gap-3 px-10 py-4 rounded-[2rem] text-[11px] font-black transition-all duration-500 relative uppercase tracking-widest ${active ? 'bg-white text-slate-900 shadow-2xl scale-105 italic' : 'text-gray-500 hover:text-slate-800'}`}>
-      {icon} {label}
+    <button onClick={onClick} className={`flex items-center gap-3 px-10 py-4 rounded-[2rem] text-[11px] font-black transition-all duration-500 uppercase tracking-widest ${active ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-md scale-105 italic border border-black/5' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}>
+      {icon} <span className="hidden sm:inline">{label}</span>
     </button>
   );
 }
@@ -803,14 +618,8 @@ function TabBtn({ active, onClick, label, icon }: any) {
 function Field({ label, value, onChange, type = "text", placeholder }: any) {
   return (
     <div className="space-y-2">
-      <label className="text-[10px] font-black text-gray-400 uppercase ml-6 tracking-widest">{label}</label>
-      <Input 
-        type={type} 
-        value={value} 
-        onChange={e => onChange(e.target.value)} 
-        placeholder={placeholder} 
-        className="rounded-[1.8rem] h-16 bg-gray-50 border-none px-8 font-black text-lg shadow-inner placeholder:text-gray-300 italic" 
-      />
+      <label className="text-[10px] font-black text-slate-400 uppercase ml-6 tracking-widest">{label}</label>
+      <Input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} className="rounded-[1.8rem] h-16 bg-slate-50 dark:bg-white/5 border-none px-8 font-black text-lg shadow-inner italic dark:text-white placeholder:text-slate-300" />
     </div>
   );
 }

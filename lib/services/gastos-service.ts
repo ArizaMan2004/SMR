@@ -9,6 +9,7 @@ import {
   onSnapshot, 
   query, 
   orderBy,
+  limit, // <--- IMPORTADO PARA PROTEGER LA CUOTA
   Timestamp 
 } from "firebase/firestore";
 import { GastoInsumo, GastoFijo, Empleado, PagoEmpleado } from "@/lib/types/gastos";
@@ -79,7 +80,8 @@ export const createGasto = async (gasto: any) => {
 export const subscribeToGastos = (callback: (gastos: GastoInsumo[]) => void) => {
   const q = query(
     collection(db, "gastos_insumos"),
-    orderBy("fecha", "desc")
+    orderBy("fecha", "desc"),
+    limit(100) // <--- OPTIMIZACIÓN: Solo trae los 100 gastos más recientes
   );
   return onSnapshot(q, (snapshot) => {
     const gastos = snapshot.docs.map(mapSnapshot);
@@ -239,7 +241,8 @@ export const createPago = async (pago: any) => {
 export const subscribeToPagos = (callback: (pagos: PagoEmpleado[]) => void) => {
   const q = query(
     collection(db, "pagos"), 
-    orderBy("fecha", "desc")
+    orderBy("fecha", "desc"),
+    limit(100) // <--- OPTIMIZACIÓN: Solo trae los 100 pagos más recientes
   );
   return onSnapshot(q, (snapshot) => {
     const pagos = snapshot.docs.map(mapSnapshot);
@@ -266,7 +269,8 @@ export const createNotification = async (notification: any) => {
 export const subscribeToNotifications = (callback: (notis: any[]) => void) => {
   const q = query(
     collection(db, "notificaciones"),
-    orderBy("timestamp", "desc")
+    orderBy("timestamp", "desc"),
+    limit(50) // <--- OPTIMIZACIÓN: Las notificaciones crecen rápido, limitamos a 50
   );
   return onSnapshot(q, (snapshot) => {
     const notis = snapshot.docs.map(mapSnapshot);

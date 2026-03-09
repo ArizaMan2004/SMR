@@ -15,7 +15,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { toast } from "sonner" 
 
-// Componentes SMR/Siskoven
+// Componentes SMR
 import Sidebar from "@/components/dashboard/sidebar"
 import { OrdersTable } from "@/components/orden/orders-table"
 import { ClientsAndPaymentsView } from "@/components/dashboard/ClientsAndPaymentsView"
@@ -37,13 +37,16 @@ import { BackgroundRemoverView } from "@/components/dashboard/BackgroundRemoverV
 import { UpscaleView } from "@/components/dashboard/UpscaleView"
 import { FormatConverterView } from "@/components/dashboard/FormatConverterView" 
 
-// Componentes Administrativos
+// Componentes Administrativos y de Perfil
 import { GastosFijosView } from "@/components/dashboard/gastos-fijos-view"
 import { InsumosView } from "@/components/dashboard/InsumosView"
 import InventoryView from "@/components/dashboard/inventoryView" 
 import { EmpleadosView } from "@/components/dashboard/empleados-view"
 import { EstadisticasDashboard } from "@/components/dashboard/estadisticas-dashboard"
 import { NotificationCenterExpenses, type NotificationGasto } from "@/components/dashboard/notification-center-expenses"
+import { UsersManagementView } from "@/components/dashboard/UsersManagementView" 
+import { ProfileSettingsView } from "@/components/dashboard/ProfileSettingsView"
+import { EmployeeFinancesView } from "@/components/dashboard/EmployeeFinancesView" // <--- NUEVA VISTA FINANZAS EMPLEADO
 
 // Controlador del Tutorial
 import { startTour } from "@/components/dashboard/TutorialController" 
@@ -52,67 +55,70 @@ import { startTour } from "@/components/dashboard/TutorialController"
 import { 
     Plus, CheckCircle, Calculator, LayoutDashboard, FileSpreadsheet, Clock, 
     Building2, Bell, CheckCircle2, ChevronLeft, Menu, DollarSign, Euro, Coins, 
-    Wallet, Search, HelpCircle, AlertCircle 
+    Wallet, Search, HelpCircle, AlertCircle, Loader2, ShieldCheck 
 } from "lucide-react" 
 
 // Servicios
 import { type OrdenServicio } from "@/lib/types/orden"
-import { subscribeToOrdenes, deleteOrden, createOrden, actualizarOrden } from "@/lib/services/ordenes-service"
+import { 
+    subscribeToOrdenes, deleteOrden, createOrden, actualizarOrden, 
+    getTotalOrdenesCount, buscarOrdenEspecifica, getOrdenesStatsFromServer 
+} from "@/lib/services/ordenes-service"
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
 import { 
-    subscribeToPagos, 
-    subscribeToGastos, 
-    subscribeToGastosFijos, 
-    subscribeToEmpleados, 
-    subscribeToNotifications, 
-    deleteGastoInsumo, 
-    createNotification, 
-    deleteNotification, 
-    updateNotificationStatus, 
-    createGasto 
+    subscribeToPagos, subscribeToGastos, subscribeToGastosFijos, 
+    subscribeToEmpleados, subscribeToNotifications, deleteGastoInsumo, 
+    createNotification, deleteNotification, updateNotificationStatus, createGasto 
 } from "@/lib/services/gastos-service"
 import { subscribeToClients } from "@/lib/services/clientes-service"
 import { syncAllOrdersClientStatus } from "@/lib/services/maintenance-service"
 
 import { fetchBCVRateFromAPI, getBCVRateFromStorage } from "@/lib/services/bcv-service"
 import { 
-    getLogoBase64, setLogoBase64, 
-    getFirmaBase64, setFirmaBase64, 
+    getLogoBase64, setLogoBase64, getFirmaBase64, setFirmaBase64, 
     getSelloBase64, setSelloBase64 
 } from "@/lib/logo-service" 
 import { cn } from "@/lib/utils"
-
-// Tipos adicionales
 import type { GastoFijo, Empleado, PagoEmpleado } from "@/lib/types/gastos"
 
 const springConfig = { type: "spring", stiffness: 300, damping: 30 };
-
 type ActiveView = string; 
 
 export default function Dashboard() {
-    const { user, logout } = useAuth()
+    const { user, userData, logout } = useAuth()
     const currentUserId = user?.uid
 
     // --- 1. ESTADOS DE UI ---
     const [activeView, setActiveView] = useState<ActiveView>("orders") 
     const [isSidebarOpen, setIsSidebarOpen] = useState(true) 
+    
+    // REDIRECCIÓN MÁGICA: Si es empleado, mandarlo al taller por defecto en vez de facturación
+useEffect(() => {
+        if (userData) {
+            const productionRoles = ['DISENADOR', 'IMPRESOR', 'OPERADOR_LASER', 'PRODUCCION', 'EMPLEADO'];
+            if (productionRoles.includes(userData.rol)) {
+                if (activeView === "orders") {
+                    setActiveView("tasks_taller");
+                }
+            }
+        }
+    }, [userData, activeView]);
+    
     const [searchTerm, setSearchTerm] = useState("") 
+    const [isSearchingDeep, setIsSearchingDeep] = useState(false)
+
     const [isWizardOpen, setIsWizardOpen] = useState(false)
     const [editingOrder, setEditingOrder] = useState<OrdenServicio | null>(null)
     
-    // ESTADOS PARA EL MODAL DE PAGO (CENTRALIZADO)
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
     const [selectedOrdenForPayment, setSelectedOrdenForPayment] = useState<OrdenServicio | null>(null)
 
-    // ESTADOS PARA EL MODAL DE LAS TARJETAS ESTADÍSTICAS
     const [cardModalState, setCardModalState] = useState<{ isOpen: boolean, type: 'total' | 'sinPagar' | 'abonadas' | 'pagadas' | null }>({ isOpen: false, type: null })
     const [cardSortBy, setCardSortBy] = useState<'reciente' | 'mayor_deuda' | 'mayor_abono' | 'numero_orden' | 'cliente'>('reciente')
 
-    // ESTADOS PARA EL MODAL DE DETALLES DE ORDEN
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
     const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<OrdenServicio | null>(null)
 
-    // NOTIFICACIONES Y PANELES
     const [isNotiOpen, setIsNotiOpen] = useState(false)
     const [isExpenseNotiOpen, setIsExpenseNotiOpen] = useState(false)
     const [hasUnseenNotifications, setHasUnseenNotifications] = useState(false)
@@ -129,34 +135,42 @@ export default function Dashboard() {
     const [expenseEvents, setExpenseEvents] = useState<NotificationGasto[]>([])
     
     const [ordenes, setOrdenes] = useState<OrdenServicio[]>([]) 
+    const [totalHistoricoOrdenes, setTotalHistoricoOrdenes] = useState<number>(0) 
+    const [realBillingStats, setRealBillingStats] = useState<{sinPagar: number, abonadas: number, pagadas: number} | null>(null)
+
     const [designers, setDesigners] = useState<Designer[]>([]) 
     const [gastos, setGastos] = useState<any[]>([])
     const [gastosFijos, setGastosFijos] = useState<GastoFijo[]>([])
     const [empleados, setEmpleados] = useState<Empleado[]>([])
     const [pagos, setPagos] = useState<PagoEmpleado[]>([]) 
     const [clientes, setClientes] = useState<any[]>([])
-    const [movimientosCaja, setMovimientosCaja] = useState<any[]>([]) // <--- NUEVO ESTADO PARA CUADRES
+    const [movimientosCaja, setMovimientosCaja] = useState<any[]>([]) 
 
-    // --- 3. NAV ITEMS ---
+    // --- 3. NAV ITEMS (CON ROLES INTEGRADADOS Y LIMPIEZA) ---
     const navItems = useMemo(() => [
-        { id: 'orders', label: 'Facturación', icon: <LayoutDashboard className="w-4 h-4" /> }, 
         { 
-            id: 'tasks_group', 
-            label: 'Producción', 
-            icon: <CheckCircle className="w-4 h-4" />,
-            children: [
-                { id: 'tasks_AVISO_CORPOREO', label: 'Producción' },
-                { id: 'tasks_DISENO', label: 'Diseño' },
-                { id: 'tasks_IMPRESION', label: 'Impresión' },
-                { id: 'tasks_CORTE_LASER', label: 'Corte Láser' },
-                { id: 'tasks_ROTULACION', label: 'Rotulación' },
-                { id: 'tasks_INSTALACION', label: 'Instalación' },
-            ]
+            id: 'orders', 
+            label: 'Facturación y Cierre', 
+            icon: <LayoutDashboard className="w-4 h-4" />, 
+            roles: ['ADMIN', 'VENDEDOR'] // Restringido
+        },
+        { 
+            id: 'tasks_taller', 
+            label: 'Taller de Producción', 
+            icon: <CheckCircle className="w-4 h-4" /> 
+            // Libre para todos (El componente TasksView filtra internamente las pestañas)
+        },
+        { 
+            id: 'my_finances', 
+            label: 'Mis Finanzas', 
+            icon: <Wallet className="w-4 h-4" />
+            // Libre para todos. Los empleados verán sus recibos aquí.
         },
         {
             id: 'admin_group',
-            label: 'Administración',
+            label: 'Administración SMR',
             icon: <Building2 className="w-4 h-4" />,
+            roles: ['ADMIN'], // Restringido
             children: [
                 { id: 'wallets', label: 'Billeteras & Caja' },
                 { id: 'payment_audit', label: 'Auditoría de Pagos' },
@@ -170,21 +184,26 @@ export default function Dashboard() {
             ]
         },
         {
+            id: 'users_auth',
+            label: 'Accesos y Roles',
+            icon: <ShieldCheck className="w-4 h-4" />,
+            roles: ['ADMIN'] // Restringido
+        },
+        {
             id: 'tools_group',
             label: 'Herramientas',
-            icon: <Calculator className="w-4 h-4" />,
+            icon: <Calculator className="w-4 h-4" />, 
             children: [
-                { id: 'calculator', label: 'Presupuestos' },
-                { id: 'old_calculator', label: 'Calculadora de Producción' }, 
-                { id: 'ai_background', label: 'IA Quita Fondos' }, 
-                { id: 'ai_upscale', label: 'IA Upscale (HD)' },
-                { id: 'format_converter', label: 'Convertidor Formatos' },
+                { id: 'calculator', label: 'Presupuestos (PDF)', roles: ['ADMIN', 'VENDEDOR'] }, // Restringido
+                { id: 'old_calculator', label: 'Calculadora de Producción' }, // Libre
+                { id: 'ai_background', label: 'IA Quita Fondos' }, // Libre
+                { id: 'ai_upscale', label: 'IA Upscale (HD)' }, // Libre
+                { id: 'format_converter', label: 'Convertidor Formatos' }, // Libre
             ]
         },
     ], []);
 
     // --- 4. MANEJADORES ---
-    
     const handleOpenPaymentModal = useCallback((orden: OrdenServicio) => {
         setSelectedOrdenForPayment(orden);
         setIsPaymentModalOpen(true);
@@ -195,7 +214,6 @@ export default function Dashboard() {
         setIsDetailModalOpen(true);
     }, []);
 
-    // --- MANEJADOR DE CLICS DEL NEWS-BAR CORREGIDO ---
     const handleNewsAction = useCallback((action: NewsAction) => {
         if (action.type === 'NAVIGATE') {
             setActiveView(action.payload);
@@ -294,14 +312,6 @@ export default function Dashboard() {
             setRateToastMessage(msg); setShowRateToast(true);
             setTimeout(() => setShowRateToast(false), 4000);
 
-            await createNotification({
-                title: `Sincronización ${label}`,
-                description: msg,
-                type: 'info',
-                category: 'system'
-            });
-            
-            setHasUnseenNotifications(true);
         } catch (error) { console.error(error); }
     }, [currentUserId]);
 
@@ -371,36 +381,49 @@ export default function Dashboard() {
         }
     };
 
-    // --- 5. CARGA DE DATOS ---
+    const handleDeepSearch = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter' && searchTerm.trim() !== '') {
+            const num = Number(searchTerm.trim());
+            if (!isNaN(num)) {
+                const isAlreadyVisible = ordenes.some(o => String(o.ordenNumero) === searchTerm.trim());
+                if (!isAlreadyVisible) {
+                    setIsSearchingDeep(true);
+                    try {
+                        const ordenEncontrada = await buscarOrdenEspecifica(searchTerm.trim());
+                        if (ordenEncontrada) {
+                            toast.success(`Orden #${searchTerm} recuperada del archivo histórico.`);
+                            handleOpenOrderDetails(ordenEncontrada);
+                        } else {
+                            toast.error(`La orden #${searchTerm} no se encuentra registrada.`);
+                        }
+                    } catch (error) {
+                        toast.error("Error al conectar con la base de datos.");
+                    } finally {
+                        setIsSearchingDeep(false);
+                    }
+                }
+            }
+        }
+    };
+
+    // --- 5. CARGA DE DATOS OPTIMIZADA ---
     useEffect(() => {
         const cached = getBCVRateFromStorage();
-        if (cached.usd > 0) {
-            setCurrentBcvRate(cached.usd);
-            setEurRate(cached.eur || 0);
-        }
+        if (cached.usd > 0) { setCurrentBcvRate(cached.usd); setEurRate(cached.eur || 0); }
 
-        fetchBCVRateFromAPI().then(data => { 
-            setCurrentBcvRate(data.usd); 
-            setEurRate(data.eur || 0); 
-        });
-
+        fetchBCVRateFromAPI().then(data => { setCurrentBcvRate(data.usd); setEurRate(data.eur || 0); });
         fetch('https://ve.dolarapi.com/v1/dolares/paralelo').then(res => res.json()).then(data => { if (data?.promedio) setParallelRate(data.promedio); });
+        
         Promise.all([getLogoBase64(), getFirmaBase64(), getSelloBase64()]).then(([l, f, s]) => { 
             setAssets({ logo: l || "", firma: f || "", sello: s || "" }); 
         });
 
-        const unsubOrdenes = subscribeToOrdenes("", (data) => setOrdenes(data));
-        const unsubDesigners = subscribeToDesigners((data) => setDesigners(data));
-        const unsubGastos = subscribeToGastos((data) => setGastos(data));
-        const unsubGastosFijos = subscribeToGastosFijos((data) => setGastosFijos(data));
-        const unsubEmpleados = subscribeToEmpleados((data) => setEmpleados(data));
-        const unsubPagos = subscribeToPagos((data) => setPagos(data)); 
-        const unsubClientes = subscribeToClients((data) => setClientes(data));
-        
-        // --- NUEVO: SUSCRIPCIÓN A MOVIMIENTOS DE CAJA (CUADRES) ---
-        const unsubMovimientosCaja = onSnapshot(collection(db, "movimientos_caja"), (snapshot) => {
-            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setMovimientosCaja(data);
+        getTotalOrdenesCount().then(total => {
+            if (total > 0) setTotalHistoricoOrdenes(total);
+        });
+
+        getOrdenesStatsFromServer().then(stats => {
+            if (stats) setRealBillingStats(stats);
         });
 
         const unsubNotis = subscribeToNotifications((data) => {
@@ -408,12 +431,62 @@ export default function Dashboard() {
             setExpenseEvents(data.filter(n => n.category === 'expense') as any);
         });
 
-        return () => { 
-            unsubOrdenes(); unsubDesigners(); unsubGastos(); 
-            unsubGastosFijos(); unsubEmpleados(); unsubPagos(); 
-            unsubNotis(); unsubClientes(); unsubMovimientosCaja(); // Añadido a la limpieza
-        };
+        return () => unsubNotis();
     }, []);
+
+    useEffect(() => {
+        const viewsRequiringOrders = ["orders", "financial_stats", "wallets", "payment_audit", "design_production", "clients", "notifications_full", "tasks_taller"];
+        const requiresOrders = viewsRequiringOrders.includes(activeView);
+
+        let unsubOrdenes = () => {};
+        let unsubClientes = () => {};
+
+        if (requiresOrders) {
+            unsubOrdenes = subscribeToOrdenes("", (data) => setOrdenes(data));
+            unsubClientes = subscribeToClients((data) => setClientes(data));
+        }
+
+        return () => { unsubOrdenes(); unsubClientes(); };
+    }, [activeView]);
+
+    useEffect(() => {
+        const viewsRequiringGastos = ["orders", "fixed_expenses", "insumos_mgmt", "financial_stats", "wallets", "payment_audit"];
+        let unsubGastos = () => {};
+        let unsubGastosFijos = () => {};
+
+        if (viewsRequiringGastos.includes(activeView)) {
+            unsubGastos = subscribeToGastos((data) => setGastos(data));
+            unsubGastosFijos = subscribeToGastosFijos((data) => setGastosFijos(data));
+        }
+
+        return () => { unsubGastos(); unsubGastosFijos(); };
+    }, [activeView]);
+
+    useEffect(() => {
+        let unsubEmpleados = () => {};
+        let unsubPagos = () => {};
+        let unsubDesigners = () => {};
+        let unsubMovimientosCaja = () => {};
+
+        // Ahora my_finances también necesita empleados y pagos
+        if (["orders", "employees_mgmt", "financial_stats", "wallets", "payment_audit", "my_finances"].includes(activeView)) {
+            unsubEmpleados = subscribeToEmpleados((data) => setEmpleados(data));
+            unsubPagos = subscribeToPagos((data) => setPagos(data));
+        }
+        
+        if (["orders", "design_production"].includes(activeView)) {
+            unsubDesigners = subscribeToDesigners((data) => setDesigners(data));
+        }
+
+        if (activeView === "wallets") {
+            unsubMovimientosCaja = onSnapshot(collection(db, "movimientos_caja"), (snapshot) => {
+                setMovimientosCaja(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            });
+        }
+
+        return () => { unsubEmpleados(); unsubPagos(); unsubDesigners(); unsubMovimientosCaja(); };
+    }, [activeView]);
+
 
     // --- 6. LÓGICA DE NOTIFICACIONES Y FILTROS ---
     const allNotifications = useMemo(() => {
@@ -467,13 +540,11 @@ export default function Dashboard() {
         return { total, sinPagar, abonadas, pagadas };
     }, [ordenes]);
 
-    // LÓGICA PARA EL MODAL DE TARJETAS
     const cardModalFilteredOrders = useMemo(() => {
         if (!cardModalState.type) return [];
 
         let result = [...ordenes];
         
-        // 1. Filtrar por categoría
         if (cardModalState.type === 'sinPagar') {
             result = result.filter(o => !o.montoPagadoUSD || o.montoPagadoUSD === 0);
         } else if (cardModalState.type === 'abonadas') {
@@ -482,7 +553,6 @@ export default function Dashboard() {
             result = result.filter(o => (o.montoPagadoUSD || 0) >= (o.totalUSD || 0) && (o.totalUSD || 0) > 0);
         }
 
-        // 2. Ordenar
         result.sort((a, b) => {
             const deudaA = (a.totalUSD || 0) - (a.montoPagadoUSD || 0);
             const deudaB = (b.totalUSD || 0) - (b.montoPagadoUSD || 0);
@@ -499,12 +569,14 @@ export default function Dashboard() {
                 default:
                     const dateA = a.fecha ? new Date(a.fecha).getTime() : 0;
                     const dateB = b.fecha ? new Date(b.fecha).getTime() : 0;
-                    return dateB - dateA; // Orden descendente (más recientes primero)
+                    return dateB - dateA;
             }
         });
 
         return result;
     }, [ordenes, cardModalState.type, cardSortBy]);
+
+    const isRoleAdminOrSales = userData?.rol === 'ADMIN' || userData?.rol === 'VENDEDOR';
 
     return (
       <div className="flex h-screen bg-[#f2f2f7] dark:bg-black overflow-hidden relative font-sans text-slate-900 dark:text-white">
@@ -534,7 +606,10 @@ export default function Dashboard() {
             <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
                 <Button variant="ghost" size="icon" className="h-10 w-10 rounded-2xl bg-black/5 dark:bg-white/10 shrink-0" onClick={() => setIsSidebarOpen(!isSidebarOpen)}><Menu className="h-5 w-5" /></Button>
                 <h2 className="text-lg sm:text-xl font-bold tracking-tight italic uppercase truncate max-w-[150px] sm:max-w-none">
-                    {activeView.startsWith("tasks_") ? "Taller" : navItems.find(i => i.id === activeView)?.label || 
+                    {activeView === "tasks_taller" ? "Taller" : 
+                     activeView === "profile_settings" ? "Configuración" :
+                     activeView === "my_finances" ? "Mis Finanzas" :
+                     navItems.find(i => i.id === activeView)?.label || 
                      (activeView === "design_production" ? "Pago Diseños" : "Panel")}
                 </h2>
             </div>
@@ -584,7 +659,8 @@ export default function Dashboard() {
             <AnimatePresence mode="wait">
               <motion.div key={activeView} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={springConfig} className="h-full">
                 
-                {activeView === "orders" && (
+                {/* VISTA SOLO PARA ADMIN Y VENTAS */}
+                {activeView === "orders" && isRoleAdminOrSales && (
                     <motion.div layout className="max-w-7xl mx-auto space-y-6 md:space-y-8">
                         
                         <NewsBar 
@@ -598,16 +674,26 @@ export default function Dashboard() {
                         />
 
                         <motion.div layout id="stats-grid" className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 w-full">
-                            <motion.div layout><StatCard label="Órdenes Totales" value={billingStats.total} icon={<FileSpreadsheet />} color="blue" subtext="Histórico" onClick={() => setCardModalState({ isOpen: true, type: 'total' })} /></motion.div>
-                            <motion.div layout><StatCard label="Sin Pagar" value={billingStats.sinPagar} icon={<AlertCircle />} color="red" subtext="Cero abonos" onClick={() => setCardModalState({ isOpen: true, type: 'sinPagar' })} /></motion.div>
-                            <motion.div layout><StatCard label="Abonadas" value={billingStats.abonadas} icon={<Clock />} color="orange" subtext="Saldo pendiente" onClick={() => setCardModalState({ isOpen: true, type: 'abonadas' })} /></motion.div>
-                            <motion.div layout><StatCard label="Pagadas" value={billingStats.pagadas} icon={<CheckCircle2 />} color="green" subtext="Liquidadas" onClick={() => setCardModalState({ isOpen: true, type: 'pagadas' })} /></motion.div>
+                            <motion.div layout><StatCard label="Órdenes Totales" value={totalHistoricoOrdenes || billingStats.total} icon={<FileSpreadsheet />} color="blue" subtext="Histórico Real" onClick={() => setCardModalState({ isOpen: true, type: 'total' })} /></motion.div>
+                            <motion.div layout><StatCard label="Sin Pagar" value={realBillingStats ? realBillingStats.sinPagar : billingStats.sinPagar} icon={<AlertCircle />} color="red" subtext="Cero abonos" onClick={() => setCardModalState({ isOpen: true, type: 'sinPagar' })} /></motion.div>
+                            <motion.div layout><StatCard label="Abonadas" value={realBillingStats ? realBillingStats.abonadas : billingStats.abonadas} icon={<Clock />} color="orange" subtext="Saldo pendiente" onClick={() => setCardModalState({ isOpen: true, type: 'abonadas' })} /></motion.div>
+                            <motion.div layout><StatCard label="Pagadas" value={realBillingStats ? realBillingStats.pagadas : billingStats.pagadas} icon={<CheckCircle2 />} color="green" subtext="Liquidadas" onClick={() => setCardModalState({ isOpen: true, type: 'pagadas' })} /></motion.div>
                         </motion.div>
 
                         <motion.div layout className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between bg-white/40 dark:bg-white/5 p-4 rounded-[2rem] border border-black/5 shadow-sm">
                             <div className="relative w-full sm:max-w-md">
                                 <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 opacity-20" />
-                                <input type="text" placeholder="Buscar orden o cliente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-6 py-3 bg-white dark:bg-black/20 border border-black/5 rounded-[1.8rem] text-sm outline-none" />
+                                <input 
+                                    type="text" 
+                                    placeholder="Buscar N° de Orden o cliente... (Presiona Enter)" 
+                                    value={searchTerm} 
+                                    onChange={(e) => setSearchTerm(e.target.value)} 
+                                    onKeyDown={handleDeepSearch}
+                                    className="w-full pl-12 pr-10 py-3 bg-white dark:bg-black/20 border border-black/5 rounded-[1.8rem] text-sm outline-none transition-all focus:border-blue-500/50" 
+                                />
+                                {isSearchingDeep && (
+                                    <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-blue-500 animate-spin" />
+                                )}
                             </div>
                             <Button id="btn-new-order" onClick={() => { setEditingOrder(null); setIsWizardOpen(true); }} className="px-8 py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-[1.8rem] font-bold text-sm gap-3 shrink-0"><Plus /> NUEVA ORDEN</Button>
                         </motion.div>
@@ -632,80 +718,51 @@ export default function Dashboard() {
                     </motion.div>
                 )}
 
+                {/* VISTA DE CONFIGURACIÓN DE PERFIL */}
+                {activeView === "profile_settings" && (
+                    <ProfileSettingsView />
+                )}
+
+                {/* VISTA DE FINANZAS PERSONALES DEL EMPLEADO */}
+                {activeView === "my_finances" && (
+                    <EmployeeFinancesView 
+                        empleados={empleados} 
+                        pagos={pagos} 
+                        currentUserId={currentUserId} 
+                        rates={{ usd: currentBcvRate, eur: eurRate }} 
+                    />
+                )}
+
+                {/* VISTA DEL TALLER DE PRODUCCIÓN (El componente en sí filtra las áreas) */}
+                {activeView === "tasks_taller" && (
+                    <TasksView ordenes={ordenes} currentUserId={currentUserId || ""} />
+                )}
+
+                {/* VISTAS ADMINISTRATIVAS */}
+                {activeView === "users_auth" && <UsersManagementView />}
+                
                 {activeView === "fixed_expenses" && (
                     <GastosFijosView 
                         gastos={gastosFijos} 
                         rates={{ usd: currentBcvRate, eur: eurRate }} 
                         onNotification={(t, d) => { 
-                            setRateToastMessage(d); 
-                            setShowRateToast(true);
-                            setTimeout(() => setShowRateToast(false), 4000);
+                            setRateToastMessage(d); setShowRateToast(true); setTimeout(() => setShowRateToast(false), 4000);
                             createNotification({ title: t, description: d, type: 'warning', category: 'expense' });
                         }} 
                     />
                 )}
                 
-                {activeView === "insumos_mgmt" && (
-                    <InsumosView 
-                        gastos={gastos} 
-                        currentBcvRate={currentBcvRate} 
-                        currentUserId={currentUserId || ""}
-                        onCreateGasto={createGasto} 
-                        onDeleteGasto={deleteGastoInsumo} 
-                    />
-                )}
+                {activeView === "insumos_mgmt" && <InsumosView gastos={gastos} currentBcvRate={currentBcvRate} currentUserId={currentUserId || ""} onCreateGasto={createGasto} onDeleteGasto={deleteGastoInsumo} />}
+                {activeView === "inventory_general" && <InventoryView />}
+                {activeView === "financial_stats" && <EstadisticasDashboard gastosInsumos={gastos as any} gastosFijos={gastosFijos} empleados={empleados} pagosEmpleados={pagos} cobranzas={ordenes.map(o => ({id: o.id, montoUSD: (o as any).totalUSD || 0, montoBs: (o as any).totalBs || 0, estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente', fecha: o.fecha })) as any} ordenes={ordenes} clientes={clientes} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} />}
+                {activeView === "employees_mgmt" && <EmpleadosView empleados={empleados} pagos={pagos} rates={{ usd: currentBcvRate, eur: eurRate }} />}
+                {activeView === "wallets" && <WalletsView ordenes={ordenes} gastos={gastos} gastosFijos={gastosFijos} pagosEmpleados={pagos} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} movimientosManuales={movimientosCaja} />}
+                {activeView === "payment_audit" && <PaymentAuditView ordenes={ordenes} gastos={[...gastos, ...gastosFijos]} pagosEmpleados={pagos} />}
+                {activeView === "design_production" && <DesignerPayrollView designers={designers} ordenes={ordenes} bcvRate={currentBcvRate} />}
+                {activeView === "clients" && <ClientsAndPaymentsView ordenes={ordenes} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} onRegisterPayment={handleOpenPaymentModal} pdfLogoBase64={assets.logo} firmaBase64={assets.firma} selloBase64={assets.sello} />}
 
-                {activeView === "inventory_general" && (
-                    <InventoryView />
-                )}
-
-                {activeView === "financial_stats" && (
-                    <EstadisticasDashboard 
-                        gastosInsumos={gastos as any} 
-                        gastosFijos={gastosFijos} 
-                        empleados={empleados} 
-                        pagosEmpleados={pagos} 
-                        cobranzas={ordenes.map(o => ({
-                            id: o.id, 
-                            montoUSD: (o as any).totalUSD || 0, 
-                            montoBs: (o as any).totalBs || 0,
-                            estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente',
-                            fecha: o.fecha
-                        })) as any}
-                        ordenes={ordenes}
-                        clientes={clientes}
-                        rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
-                    />
-                )}
-
-                {activeView === "employees_mgmt" && (
-                    <EmpleadosView 
-                        empleados={empleados} 
-                        pagos={pagos} 
-                        rates={{ usd: currentBcvRate, eur: eurRate }} 
-                    />
-                )}
-
-                {activeView === "wallets" && (
-                    <WalletsView 
-                        ordenes={ordenes}
-                        gastos={gastos}
-                        gastosFijos={gastosFijos}
-                        pagosEmpleados={pagos}
-                        rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
-                        movimientosManuales={movimientosCaja} // <--- SE PASAN LOS DATOS AQUÍ
-                    />
-                )}
-
-                {activeView === "payment_audit" && (
-                    <PaymentAuditView 
-                        ordenes={ordenes} 
-                        gastos={[...gastos, ...gastosFijos]} 
-                        pagosEmpleados={pagos} 
-                    />
-                )}
-
-                {activeView === "calculator" && (
+                {/* VISTA DE PRESUPUESTOS (Solo Admin y Ventas) */}
+                {activeView === "calculator" && isRoleAdminOrSales && (
                     <BudgetEntryView 
                         currentUserId={currentUserId}
                         rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
@@ -717,37 +774,11 @@ export default function Dashboard() {
                     />
                 )}
                 
-                {activeView.startsWith("tasks_") && <TasksView ordenes={ordenes} currentUserId={currentUserId || ""} areaPriorizada={activeView.replace("tasks_", "")} />}
-                {activeView === "design_production" && <DesignerPayrollView designers={designers} ordenes={ordenes} bcvRate={currentBcvRate} />}
-                
-                {activeView === "clients" && (
-                    <ClientsAndPaymentsView 
-                        ordenes={ordenes} 
-                        rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
-                        onRegisterPayment={handleOpenPaymentModal} 
-                        pdfLogoBase64={assets.logo}
-                        firmaBase64={assets.firma}
-                        selloBase64={assets.sello}
-                    />
-                )}
-                
-                {activeView === "old_calculator" && (
-                    <CalculatorView onSendToProduction={handleSendCalcToOrder} />
-                )}
-
-                {/* --- HERRAMIENTAS IA --- */}
-                {activeView === "ai_background" && (
-                    <BackgroundRemoverView />
-                )}
-
-                {activeView === "ai_upscale" && (
-                    <UpscaleView />
-                )}
-
-                {/* --- NUEVA VISTA: CONVERTIDOR DE FORMATOS --- */}
-                {activeView === "format_converter" && (
-                    <FormatConverterView />
-                )}
+                {/* HERRAMIENTAS LIBRES */}
+                {activeView === "old_calculator" && <CalculatorView onSendToProduction={handleSendCalcToOrder} />}
+                {activeView === "ai_background" && <BackgroundRemoverView />}
+                {activeView === "ai_upscale" && <UpscaleView />}
+                {activeView === "format_converter" && <FormatConverterView />}
 
                 {activeView === "notifications_full" && (
                     <div className="max-w-4xl mx-auto space-y-6">

@@ -23,7 +23,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-// ✅ IMPORTACIÓN CORREGIDA: Se añadió Coins
 import { 
     Wallet, Search, 
     CheckCircle2, ChevronDown, ChevronUp, DollarSign, 
@@ -31,7 +30,7 @@ import {
     ChevronLeft, ChevronRight, Layers, CreditCard,
     UploadCloud, X, Loader2,
     Printer, Banknote, History, Trash2, Eye, EyeOff,
-    Lock, Unlock, ExternalLink, ImageIcon, CheckSquare, Landmark, Coins
+    Lock, Unlock, ExternalLink, ImageIcon, Landmark, Coins
 } from 'lucide-react'
 
 // Servicios y Utilidades
@@ -43,9 +42,9 @@ import { createNotification } from "@/lib/services/gastos-service"
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
-// FIREBASE
+// FIREBASE (Nuevas importaciones para la autonomía)
 import { db } from "@/lib/firebase"
-import { doc, updateDoc, arrayUnion, writeBatch } from "firebase/firestore"
+import { collection, doc, updateDoc, arrayUnion, writeBatch, query, where, orderBy, limit, onSnapshot, getDocs } from "firebase/firestore"
 
 interface ClientSummary {
     key: string
@@ -57,7 +56,7 @@ interface ClientSummary {
 }
 
 interface ClientsAndPaymentsViewProps {
-    ordenes: any[];
+    ordenes?: any[]; // La mantenemos por compatibilidad con el dashboard, pero usaremos nuestra propia data
     rates: {
         usd: number;
         eur: number;
@@ -71,11 +70,7 @@ interface ClientsAndPaymentsViewProps {
 
 const containerVariants = {
     hidden: { opacity: 0, y: 20 },
-    visible: { 
-        opacity: 1, 
-        y: 0,
-        transition: { duration: 0.6, staggerChildren: 0.1 }
-    }
+    visible: { opacity: 1, y: 0, transition: { duration: 0.6, staggerChildren: 0.1 } }
 }
 
 const itemVariants = {
@@ -84,13 +79,18 @@ const itemVariants = {
 }
 
 export function ClientsAndPaymentsView({ 
-    ordenes, 
     rates, 
     onRegisterPayment,
     pdfLogoBase64,
     firmaBase64,
     selloBase64 
 }: ClientsAndPaymentsViewProps) {
+    
+    // --- ESTADOS AUTÓNOMOS DE LA VISTA (Ahorro de Cuota) ---
+    const [localUnpaidOrders, setLocalUnpaidOrders] = useState<any[]>([]);
+    const [localPaidOrders, setLocalPaidOrders] = useState<any[]>([]);
+    const [isLoadingCobranzas, setIsLoadingCobranzas] = useState(true);
+
     // --- ESTADOS DE UI Y FILTROS ---
     const [searchTerm, setSearchTerm] = useState('')
     const [currentPage, setCurrentPage] = useState(1)
@@ -122,60 +122,69 @@ export function ClientsAndPaymentsView({
     const globalFileInputRef = useRef<HTMLInputElement>(null)
 
     // ==============================================================
-    // LÓGICA INTELIGENTE DE BILLETERAS Y TASAS (TWO-WAY BINDING)
+    // FETCH AUTÓNOMO (LA PIEZA MAESTRA DEL AHORRO)
     // ==============================================================
-    
-    // Reglas estrictas de Billeteras
     useEffect(() => {
-        if (globalWallet === 'bank_bs') {
-            setGlobalCurrencyMode('BS');
-            setGlobalCalculationBase('USD'); 
-        } else if (globalWallet === 'zelle') {
-            setGlobalCurrencyMode('USD');
-        } else if (globalWallet === 'usdt') {
-            setGlobalCurrencyMode('USD');
-        } else {
-            setGlobalCurrencyMode('USD');
-        }
+        setIsLoadingCobranzas(true);
         
-        // Limpiamos al cambiar billetera para evitar confusiones de conversión cruzada
-        setGlobalAmountUSD('');
-        setGlobalAmountBS('');
+        // 1. CARTERA EN MORA: Descargamos SOLO las que deben dinero usando su etiqueta. 
+        // Si hay 1,000 facturas pero solo 40 deben, gastamos 40 lecturas.
+        const qUnpaid = query(
+            collection(db, "ordenes"), 
+            where("estadoPago", "in", ["PENDIENTE", "ABONADO"])
+        );
+        
+        const unsubUnpaid = onSnapshot(qUnpaid, (snap) => {
+            setLocalUnpaidOrders(snap.docs.map(d => ({id: d.id, ...d.data()})));
+            setIsLoadingCobranzas(false);
+        });
+
+        // 2. LIQUIDADAS: Descargamos solo las últimas 50 pagadas para el historial.
+        const qPaid = query(
+            collection(db, "ordenes"), 
+            where("estadoPago", "==", "PAGADO"), 
+            orderBy("fecha", "desc"), 
+            limit(50)
+        );
+
+        const unsubPaid = onSnapshot(qPaid, (snap) => {
+            setLocalPaidOrders(snap.docs.map(d => ({id: d.id, ...d.data()})));
+        });
+
+        return () => { unsubUnpaid(); unsubPaid(); };
+    }, []);
+
+    // ==============================================================
+    // LÓGICA INTELIGENTE DE BILLETERAS Y TASAS
+    // ==============================================================
+    useEffect(() => {
+        if (globalWallet === 'bank_bs') { setGlobalCurrencyMode('BS'); setGlobalCalculationBase('USD'); } 
+        else { setGlobalCurrencyMode('USD'); }
+        setGlobalAmountUSD(''); setGlobalAmountBS('');
     }, [globalWallet])
 
-    const getActiveRate = (base: string) => {
-        return base === 'USD' ? rates.usd : base === 'EUR' ? rates.eur : rates.usdt;
-    };
+    const getActiveRate = (base: string) => base === 'USD' ? rates.usd : base === 'EUR' ? rates.eur : rates.usdt;
 
     const handleAmountUSDChange = (valStr: string) => {
         setGlobalAmountUSD(valStr);
         const valUsd = parseFloat(valStr);
-        if (!isNaN(valUsd)) {
-            setGlobalAmountBS((valUsd * getActiveRate(globalCalculationBase)).toFixed(2));
-        } else {
-            setGlobalAmountBS('');
-        }
+        if (!isNaN(valUsd)) setGlobalAmountBS((valUsd * getActiveRate(globalCalculationBase)).toFixed(2));
+        else setGlobalAmountBS('');
     };
 
     const handleAmountBSChange = (valStr: string) => {
         setGlobalAmountBS(valStr);
         const valBs = parseFloat(valStr);
-        if (!isNaN(valBs)) {
-            setGlobalAmountUSD((valBs / getActiveRate(globalCalculationBase)).toFixed(2));
-        } else {
-            setGlobalAmountUSD('');
-        }
+        if (!isNaN(valBs)) setGlobalAmountUSD((valBs / getActiveRate(globalCalculationBase)).toFixed(2));
+        else setGlobalAmountUSD('');
     };
 
     const handleRateChange = (newBase: 'USD' | 'EUR' | 'USDT') => {
         setGlobalCalculationBase(newBase);
         const currentUsd = parseFloat(globalAmountUSD);
-        if (!isNaN(currentUsd) && currentUsd > 0) {
-            setGlobalAmountBS((currentUsd * getActiveRate(newBase)).toFixed(2));
-        }
+        if (!isNaN(currentUsd) && currentUsd > 0) setGlobalAmountBS((currentUsd * getActiveRate(newBase)).toFixed(2));
     };
 
-    // Auto-suma de montos al seleccionar/desmarcar órdenes
     useEffect(() => {
         if (isGlobalModalOpen && selectedClientForGlobal) {
             const sumUSD = selectedClientForGlobal.ordenesPendientes
@@ -188,33 +197,28 @@ export function ClientsAndPaymentsView({
             if (sumUSD > 0) {
                 setGlobalAmountUSD(sumUSD.toFixed(2));
                 setGlobalAmountBS((sumUSD * getActiveRate(globalCalculationBase)).toFixed(2));
-            } else {
-                setGlobalAmountUSD('');
-                setGlobalAmountBS('');
-            }
+            } else { setGlobalAmountUSD(''); setGlobalAmountBS(''); }
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedOrdersForGlobal]); 
 
-    // --- PROCESAMIENTO DE DATOS ---
+    // --- PROCESAMIENTO DE DATOS LOCALES ---
     const { clientSummaries, pagadasCompletamente, totalPendienteGlobal } = useMemo(() => {
         const summaryMap = new Map<string, ClientSummary>()
         let totalPendGlobal = 0;
         const lowerCaseSearch = searchTerm.toLowerCase().trim();
 
-        const pagadas = ordenes
+        // Las pagadas vienen directo de la base filtrada
+        const pagadas = localPaidOrders
             .filter((o: any) => {
-                const total = Number(o.totalUSD) || 0;
-                const pagado = Number(o.montoPagadoUSD) || 0;
-                const esPagada = (o.estadoPago === EstadoPago.PAGADO) || (total - pagado <= 0.01);
                 const nombreCliente = (o.cliente?.nombreRazonSocial || '').toLowerCase();
                 const coincideBusqueda = !lowerCaseSearch || nombreCliente.includes(lowerCaseSearch);
-                return esPagada && coincideBusqueda && o.estadoPago !== EstadoPago.ANULADO;
-            })
-            .sort((a: any, b: any) => new Date(b.fecha || 0).getTime() - new Date(a.fecha || 0).getTime());
+                return coincideBusqueda && o.estadoPago !== 'ANULADO';
+            });
 
-        ordenes.forEach((orden: any) => {
-            if (orden.estadoPago === EstadoPago.ANULADO) return;
+        // Las morosas (todas las históricas sin límite) vienen de localUnpaidOrders
+        localUnpaidOrders.forEach((orden: any) => {
+            if (orden.estado === 'ANULADO' || orden.estadoPago === 'ANULADO') return;
 
             const total = Number(orden.totalUSD) || 0;
             const pagado = Number(orden.montoPagadoUSD) || 0;
@@ -228,14 +232,7 @@ export function ClientsAndPaymentsView({
                 const key = (orden.cliente?.nombreRazonSocial || 'S/N').trim().toUpperCase();
                 
                 if (!summaryMap.has(key)) {
-                    summaryMap.set(key, {
-                        key, 
-                        nombre: orden.cliente?.nombreRazonSocial || 'Cliente sin nombre', 
-                        rif: orden.cliente?.rifCedula || 'S/N',
-                        totalOrdenes: 0, 
-                        totalPendienteUSD: 0, 
-                        ordenesPendientes: []
-                    });
+                    summaryMap.set(key, { key, nombre: orden.cliente?.nombreRazonSocial || 'Cliente sin nombre', rif: orden.cliente?.rifCedula || 'S/N', totalOrdenes: 0, totalPendienteUSD: 0, ordenesPendientes: [] });
                 }
                 const s = summaryMap.get(key)!;
                 s.totalPendienteUSD += pendiente;
@@ -251,7 +248,7 @@ export function ClientsAndPaymentsView({
             pagadasCompletamente: pagadas, 
             totalPendienteGlobal: totalPendGlobal 
         };
-    }, [ordenes, searchTerm]);
+    }, [localUnpaidOrders, localPaidOrders, searchTerm]);
 
     const totalPages = Math.ceil(clientSummaries.length / itemsPerPage);
     const paginatedClients = useMemo(() => clientSummaries.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage), [clientSummaries, currentPage]);
@@ -263,9 +260,7 @@ export function ClientsAndPaymentsView({
         const price = parseFloat(item.precioUnitario?.toString()) || 0;
 
         if (item.subtotal) return parseFloat(item.subtotal);
-        if (item.unidad === "m2" && x > 0 && y > 0) {
-            return (x / 100) * (y / 100) * price * qty;
-        }
+        if (item.unidad === "m2" && x > 0 && y > 0) return (x / 100) * (y / 100) * price * qty;
         return price * qty;
     };
 
@@ -293,35 +288,16 @@ export function ClientsAndPaymentsView({
                         else itemSubtotal = price * qty;
                     }
 
-                    return {
-                        parentOrder: `#${orden.ordenNumero || 'S/N'}`,
-                        nombre: item.nombre,
-                        cantidad: qty,
-                        medidasTiempo: item.unidad === "m2" ? `${x}x${y}cm` : (item.tiempoCorte || "N/A"), 
-                        precioUnitario: qty > 0 ? (itemSubtotal / qty) : 0,
-                        totalUSD: itemSubtotal 
-                    };
+                    return { parentOrder: `#${orden.ordenNumero || 'S/N'}`, nombre: item.nombre, cantidad: qty, medidasTiempo: item.unidad === "m2" ? `${x}x${y}cm` : (item.tiempoCorte || "N/A"), precioUnitario: qty > 0 ? (itemSubtotal / qty) : 0, totalUSD: itemSubtotal };
                 })
             );
 
             generateGeneralAccountStatusPDF(
-                {
-                    clienteNombre: summary.nombre,
-                    clienteRIF: summary.rif,
-                    items: consolidatedItems,
-                    totalPendienteUSD: summary.totalPendienteUSD,
-                    fechaReporte: new Date().toLocaleDateString('es-VE'),
-                },
-                pdfLogoBase64 || "", 
-                { firmaBase64, selloBase64, currency: selectedCurrency }
+                { clienteNombre: summary.nombre, clienteRIF: summary.rif, items: consolidatedItems, totalPendienteUSD: summary.totalPendienteUSD, fechaReporte: new Date().toLocaleDateString('es-VE') },
+                pdfLogoBase64 || "", { firmaBase64, selloBase64, currency: selectedCurrency }
             );
-            toast.dismiss();
-            toast.success("PDF Generado");
-        } catch (error) {
-            console.error(error);
-            toast.dismiss();
-            toast.error("Error al generar reporte");
-        }
+            toast.dismiss(); toast.success("PDF Generado");
+        } catch (error) { toast.dismiss(); toast.error("Error al generar reporte"); }
     };
 
     // --- MANEJO DE ABONO GLOBAL ---
@@ -334,16 +310,10 @@ export function ClientsAndPaymentsView({
             toast.loading("Subiendo comprobante...");
             const url = await uploadFileToCloudinary(file);
             setGlobalPaymentData(prev => ({ ...prev, imagenUrl: url }));
-            toast.dismiss();
-            toast.success("Comprobante cargado");
+            toast.dismiss(); toast.success("Comprobante cargado");
         } catch (error) {
-            toast.dismiss();
-            toast.error("Error al subir imagen");
-            setPreviewUrl(null);
-        } finally {
-            setIsGlobalUploading(false);
-            if (globalFileInputRef.current) globalFileInputRef.current.value = '';
-        }
+            toast.dismiss(); toast.error("Error al subir imagen"); setPreviewUrl(null);
+        } finally { setIsGlobalUploading(false); if (globalFileInputRef.current) globalFileInputRef.current.value = ''; }
     };
 
     const handleProcessGlobalPayment = async () => {
@@ -361,7 +331,6 @@ export function ClientsAndPaymentsView({
             finalNota = (finalNota + autoNote).trim();
         }
 
-        // Definir la etiqueta de método de pago según la billetera seleccionada
         let metodoLegible = "Efectivo USD";
         if (globalWallet === 'bank_bs') metodoLegible = "Pago Móvil / Bs";
         if (globalWallet === 'zelle') metodoLegible = "Zelle";
@@ -373,7 +342,6 @@ export function ClientsAndPaymentsView({
         try {
             toast.loading("Distribuyendo abono...");
             const batch = writeBatch(db); 
-            
             const ordersToProcess = selectedClientForGlobal.ordenesPendientes.filter(o => selectedOrdersForGlobal.includes(o.id));
 
             for (const orden of ordersToProcess) {
@@ -387,49 +355,28 @@ export function ClientsAndPaymentsView({
                     const nuevoMontoPagado = (Number(orden.montoPagadoUSD) || 0) + aPagar;
                     const nuevoEstado = (Number(orden.totalUSD) - nuevoMontoPagado) <= 0.01 ? "PAGADO" : "ABONADO";
 
-                    const nuevoRecibo = {
-                        montoUSD: aPagar,
-                        fecha: new Date().toISOString(),
-                        nota: finalNota,
-                        imagenUrl: globalPaymentData.imagenUrl || "",
-                        tasaBCV: rates.usd,
-                        metodo: metodoFinal
-                    };
+                    const nuevoRecibo = { montoUSD: aPagar, fecha: new Date().toISOString(), nota: finalNota, imagenUrl: globalPaymentData.imagenUrl || "", tasaBCV: rates.usd, metodo: metodoFinal };
 
-                    await updateDoc(ordenRef, {
-                        montoPagadoUSD: nuevoMontoPagado,
-                        estadoPago: nuevoEstado,
-                        registroPagos: arrayUnion(nuevoRecibo)
-                    });
-
+                    batch.update(ordenRef, { montoPagadoUSD: nuevoMontoPagado, estadoPago: nuevoEstado, registroPagos: arrayUnion(nuevoRecibo) });
                     remaining -= aPagar;
                 }
             }
 
-            toast.dismiss();
-            toast.success("Abono global aplicado correctamente");
+            await batch.commit(); // MAGIC: Esto actualizará Firebase, y onSnapshot moverá las facturas a "Pagadas" al instante en la UI
+
+            toast.dismiss(); toast.success("Abono global aplicado correctamente");
             closeGlobalModal();
-        } catch (error) {
-            console.error(error);
-            toast.dismiss();
-            toast.error("Error al procesar el pago global");
-        }
+        } catch (error) { console.error(error); toast.dismiss(); toast.error("Error al procesar el pago global"); }
     };
 
     const closeGlobalModal = () => {
-        setIsGlobalModalOpen(false);
-        setPreviewUrl(null);
-        setGlobalPaymentData({ nota: '', imagenUrl: '' });
-        setSelectedOrdersForGlobal([]);
-        setGlobalAmountUSD('');
-        setGlobalAmountBS('');
-        setGlobalCurrencyMode('USD');
-        setGlobalCalculationBase('USD');
-        setGlobalWallet('cash_usd'); // Resetea la billetera al salir
+        setIsGlobalModalOpen(false); setPreviewUrl(null); setGlobalPaymentData({ nota: '', imagenUrl: '' });
+        setSelectedOrdersForGlobal([]); setGlobalAmountUSD(''); setGlobalAmountBS('');
+        setGlobalCurrencyMode('USD'); setGlobalCalculationBase('USD'); setGlobalWallet('cash_usd'); 
     };
 
-    // --- REVERSIÓN DE ABONOS ---
-    const handleRevertGlobalBatch = async (group: any) => {
+    // --- REVERSIÓN DE ABONOS (Recibe datos completos del Modal de Historial) ---
+    const handleRevertGlobalBatch = async (group: any, fullOrdersReference: any[]) => {
         if (!confirm(`¿Estás seguro de revertir este abono global de ${formatCurrency(group.totalMonto)}?\n\nSe restará el saldo de ${group.distribucion.length} órdenes y se eliminará este registro.`)) return;
     
         try {
@@ -438,14 +385,12 @@ export function ClientsAndPaymentsView({
             let operationsCount = 0;
     
             for (const item of group.distribucion) {
-                const ordenOriginal = ordenes.find((o: any) => o.id === item.ordenId);
+                const ordenOriginal = fullOrdersReference.find((o: any) => o.id === item.ordenId);
                 if (!ordenOriginal) continue;
     
                 const ordenRef = doc(db, "ordenes", item.ordenId);
-                
                 const nuevoMontoPagado = Math.max(0, (Number(ordenOriginal.montoPagadoUSD) || 0) - item.montoAbonado);
-                const nuevoEstado = (Number(ordenOriginal.totalUSD) - nuevoMontoPagado) <= 0.01 ? "PAGADO" : 
-                                    (nuevoMontoPagado > 0 ? "ABONADO" : "PENDIENTE");
+                const nuevoEstado = (Number(ordenOriginal.totalUSD) - nuevoMontoPagado) <= 0.01 ? "PAGADO" : (nuevoMontoPagado > 0 ? "ABONADO" : "PENDIENTE");
     
                 const nuevoHistorial = (ordenOriginal.registroPagos || []).filter((p: any) => {
                     if (group.imagenUrl && p.imagenUrl === group.imagenUrl) return false;
@@ -456,38 +401,32 @@ export function ClientsAndPaymentsView({
                     return true; 
                 });
     
-                batch.update(ordenRef, {
-                    montoPagadoUSD: nuevoMontoPagado,
-                    estadoPago: nuevoEstado,
-                    registroPagos: nuevoHistorial
-                });
+                batch.update(ordenRef, { montoPagadoUSD: nuevoMontoPagado, estadoPago: nuevoEstado, registroPagos: nuevoHistorial });
                 operationsCount++;
             }
     
             if (operationsCount > 0) {
                 await batch.commit();
-                toast.dismiss();
-                toast.success("Abono global revertido correctamente");
-                setIsHistoryModalOpen(false);
-            } else {
-                toast.dismiss();
-                toast.error("No se encontraron órdenes para revertir.");
-            }
+                toast.dismiss(); toast.success("Abono global revertido correctamente");
+                setIsHistoryModalOpen(false); // Cierra el modal para forzar refresco
+            } else { toast.dismiss(); toast.error("No se encontraron órdenes para revertir."); }
     
-        } catch (error) {
-            console.error(error);
-            toast.dismiss();
-            toast.error("Error al revertir el abono");
-        }
+        } catch (error) { toast.dismiss(); toast.error("Error al revertir el abono"); }
     };
 
-    const formatBs = (amount: number, rate: number) => {
-        return `Bs. ${(amount * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    };
+    const formatBs = (amount: number, rate: number) => { return `Bs. ${(amount * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; };
 
     return (
-        <motion.div initial="hidden" animate="visible" variants={containerVariants} className="space-y-10 p-2 font-sans selection:bg-blue-100">
+        <motion.div initial="hidden" animate="visible" variants={containerVariants} className="relative space-y-10 p-2 font-sans selection:bg-blue-100 min-h-[500px]">
             
+            {/* SPINNER DE PROTECCIÓN */}
+            {isLoadingCobranzas && (
+                <div className="absolute inset-0 z-50 bg-white/50 dark:bg-[#1c1c1e]/50 backdrop-blur-sm flex flex-col items-center justify-center rounded-[3rem]">
+                    <Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4" />
+                    <p className="text-sm font-black uppercase text-slate-500 tracking-widest">Sincronizando Cartera...</p>
+                </div>
+            )}
+
             {/* HEADER */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
                 <div className="space-y-1">
@@ -802,7 +741,7 @@ export function ClientsAndPaymentsView({
                 </Card>
             </div>
 
-            {/* MODAL ABONO GLOBAL: DISTRIBUCIÓN EN 2 COLUMNAS */}
+            {/* MODAL ABONO GLOBAL */}
             <Dialog open={isGlobalModalOpen} onOpenChange={(open) => !isGlobalUploading && closeGlobalModal()}>
                 <DialogContent className="max-w-md md:max-w-5xl rounded-[2.5rem] border-0 shadow-2xl p-0 outline-none bg-white dark:bg-[#1c1c1e] flex flex-col max-h-[95vh] overflow-hidden">
                     
@@ -898,7 +837,7 @@ export function ClientsAndPaymentsView({
                         <div className="w-full md:w-1/2 p-6 md:p-8 flex flex-col overflow-y-auto custom-scrollbar bg-white dark:bg-[#1c1c1e]">
                             <div className="space-y-6 flex-1">
                                 
-                                {/* NUEVO: SELECCIÓN DE BILLETERA */}
+                                {/* SELECCIÓN DE BILLETERA */}
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-black uppercase tracking-widest ml-1 text-slate-400">Destino del Dinero</label>
                                     <div className="grid grid-cols-4 gap-2">
@@ -909,7 +848,7 @@ export function ClientsAndPaymentsView({
                                     </div>
                                 </div>
 
-                                {/* SELECTOR DE MONEDA E INPUTS CON TWO-WAY BINDING */}
+                                {/* SELECTOR DE MONEDA E INPUTS */}
                                 <div className="space-y-4">
                                     <Tabs value={globalCurrencyMode} onValueChange={(v) => {setGlobalCurrencyMode(v as any); setGlobalAmountUSD(''); setGlobalAmountBS('');}} className="w-full">
                                         <TabsList className="grid w-full grid-cols-2 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-xl mb-4 h-12">
@@ -1027,7 +966,7 @@ export function ClientsAndPaymentsView({
                                 </div>
                             </div>
 
-                            {/* BOTONES DE ACCIÓN (AL FINAL DE LA COLUMNA DERECHA) */}
+                            {/* BOTONES DE ACCIÓN */}
                             <div className="mt-8 pt-6 border-t border-slate-100 dark:border-white/5 flex flex-col gap-3 shrink-0">
                                 <Button 
                                     onClick={handleProcessGlobalPayment}
@@ -1043,11 +982,10 @@ export function ClientsAndPaymentsView({
                 </DialogContent>
             </Dialog>
 
-            {/* MODAL HISTORIAL Y REVERSIÓN DE ABONOS GLOBALES */}
+            {/* MODAL HISTORIAL Y REVERSIÓN DE ABONOS GLOBALES AUTÓNOMO */}
             <GlobalPaymentHistoryModal 
                 isOpen={isHistoryModalOpen} 
                 onClose={() => setIsHistoryModalOpen(false)}
-                ordenes={ordenes}
                 onDeleteBatch={handleRevertGlobalBatch}
                 onViewImage={(url: string) => setViewingImage(url)}
             />
@@ -1069,7 +1007,7 @@ export function ClientsAndPaymentsView({
                 </DialogContent>
             </Dialog>
 
-            {/* MODAL PARA VER ORDEN DETALLADA DESDE EL ABONO GLOBAL */}
+            {/* MODAL PARA VER ORDEN DETALLADA */}
             <OrderDetailModal 
                 open={!!viewingOrderDetails} 
                 onClose={() => setViewingOrderDetails(null)} 
@@ -1093,15 +1031,39 @@ function WalletOption({ id, label, icon: Icon, active, onClick, color }: any) {
     )
 }
 
-// --- COMPONENTE: HISTORIAL DE PAGOS GLOBALES ---
-function GlobalPaymentHistoryModal({ isOpen, onClose, ordenes, onDeleteBatch, onViewImage }: any) {
+// --- COMPONENTE: HISTORIAL DE PAGOS GLOBALES AUTÓNOMO ---
+function GlobalPaymentHistoryModal({ isOpen, onClose, onDeleteBatch, onViewImage }: any) {
     const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
     const [unlockedState, setUnlockedState] = useState<Record<string, boolean>>({});
+    
+    // ESTADO LOCAL DE ÓRDENES (Autónomo para proteger la cuota)
+    const [fullOrders, setFullOrders] = useState<any[]>([]);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+    // FETCH AL ABRIR EL MODAL (Ahorro Masivo de Cuota)
+    useEffect(() => {
+        if (isOpen) {
+            setIsLoadingHistory(true);
+            getDocs(collection(db, "ordenes")).then(snap => {
+                setFullOrders(snap.docs.map(d => ({id: d.id, ...d.data()})));
+            }).catch(err => {
+                console.error(err);
+                toast.error("Error cargando el historial");
+            }).finally(() => {
+                setIsLoadingHistory(false);
+            });
+        } else {
+            // Limpiamos memoria al cerrar
+            setFullOrders([]);
+            setExpandedGroup(null);
+            setUnlockedState({});
+        }
+    }, [isOpen]);
 
     const globalGroups = useMemo(() => {
         const groups: any = {};
 
-        ordenes.forEach((orden: any) => {
+        fullOrders.forEach((orden: any) => {
             (orden.registroPagos || []).forEach((pago: any) => {
                 if (pago.nota && pago.nota.includes("(Consolidado Global)")) {
                     
@@ -1140,13 +1102,24 @@ function GlobalPaymentHistoryModal({ isOpen, onClose, ordenes, onDeleteBatch, on
         });
 
         return Object.values(groups).sort((a: any, b: any) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
-    }, [ordenes]);
+    }, [fullOrders]);
 
     const toggleLock = (id: string) => {
         setUnlockedState(prev => ({ ...prev, [id]: !prev[id] }));
     };
 
     if (!isOpen) return null;
+
+    if (isLoadingHistory) {
+        return (
+            <Dialog open={isOpen} onOpenChange={onClose}>
+                <DialogContent className="max-w-md bg-white dark:bg-[#1c1c1e] rounded-[3rem] border-0 p-10 flex flex-col items-center justify-center shadow-2xl outline-none">
+                    <Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4" />
+                    <p className="text-sm font-black uppercase text-slate-500 tracking-widest text-center">Buscando historial global...</p>
+                </DialogContent>
+            </Dialog>
+        );
+    }
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
@@ -1230,7 +1203,7 @@ function GlobalPaymentHistoryModal({ isOpen, onClose, ordenes, onDeleteBatch, on
                                                         <Button 
                                                             size="sm" 
                                                             variant="destructive"
-                                                            onClick={() => onDeleteBatch(group)}
+                                                            onClick={() => onDeleteBatch(group, fullOrders)}
                                                             className="h-8 text-[10px] font-black uppercase bg-red-50 text-red-600 hover:bg-red-500 hover:text-white border-0 shadow-sm transition-all rounded-xl"
                                                         >
                                                             <Trash2 className="w-3 h-3 mr-2" /> Revertir Abono

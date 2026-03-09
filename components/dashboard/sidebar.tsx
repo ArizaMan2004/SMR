@@ -1,19 +1,22 @@
+// @/components/dashboard/sidebar.tsx
 "use client"
 
 import React, { useState } from "react" 
 import { Button } from "@/components/ui/button"
 import Image from "next/image" 
 import { motion, AnimatePresence } from "framer-motion"
-import { LogOut, X, ChevronRight, ChevronDown } from "lucide-react" 
+import { LogOut, X, ChevronDown } from "lucide-react" 
 import { ThemeToggle } from "@/components/theme-toggle" 
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/lib/auth-context" 
 
-// Actualizamos la interfaz para soportar hijos
-interface NavItem {
+// Interfaz adaptada para soportar protección por roles
+export interface NavItem {
     id: string
     label: string
     icon: React.ReactElement 
-    children?: { id: string, label: string }[] // Opcional para el acordeón
+    children?: { id: string, label: string, roles?: string[] }[] 
+    roles?: string[] 
 }
 
 interface SidebarProps {
@@ -36,14 +39,39 @@ export default function Sidebar({
     isMobileOpen,
     setIsMobileOpen,
 }: SidebarProps) {
-    // Estado para rastrear qué acordeones están abiertos
     const [openMenus, setOpenMenus] = useState<string[]>([]);
+    
+    // Obtenemos los datos del usuario activo para sus permisos e info visual
+    const { userData } = useAuth();
+    const userRole = userData?.rol || 'EMPLEADO';
 
     const toggleMenu = (id: string) => {
         setOpenMenus(prev => 
             prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]
         );
     };
+
+    // --- FILTRO DE SEGURIDAD ---
+    // Filtramos la lista de botones según el rol del usuario
+    const visibleNavItems = navItems.filter(item => {
+        if (item.roles && !item.roles.includes(userRole)) return false;
+        return true;
+    }).map(item => {
+        if (item.children) {
+            return {
+                ...item,
+                children: item.children.filter(child => !child.roles || child.roles.includes(userRole))
+            }
+        }
+        return item;
+    });
+
+    // Construimos la tarjeta del perfil dinámico
+    const userInitials = userData && userData.nombre && userData.apellido 
+        ? `${userData.nombre.charAt(0)}${userData.apellido.charAt(0)}`.toUpperCase() 
+        : "U";
+    const userName = userData ? `${userData.nombre} ${userData.apellido}` : "Cargando...";
+    const userRoleLabel = userData ? userData.rol : "...";
 
     return (
         <>
@@ -78,7 +106,7 @@ export default function Sidebar({
                         Menú Principal
                     </p>
 
-                    {navItems.map((item) => {
+                    {visibleNavItems.map((item) => {
                         const hasChildren = item.children && item.children.length > 0;
                         const isOpen = openMenus.includes(item.id);
                         const isActive = activeView === item.id || item.children?.some(c => c.id === activeView);
@@ -161,14 +189,26 @@ export default function Sidebar({
                 </nav>
                 
                 <div className="p-4 mt-auto border-t border-slate-100 dark:border-slate-800/60 space-y-3">
-                    {/* Perfil y Theme Toggle igual que antes */}
-                    <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 font-black text-sm">AD</div>
-                        <div className="flex-1 overflow-hidden">
-                            <p className="text-xs font-black text-slate-900 dark:text-white truncate">Administrador</p>
-                            <p className="text-[10px] font-bold text-slate-400 truncate tracking-tighter">SMR © 2026</p>
+                    
+                    {/* PERFIL DINÁMICO CLICKEABLE */}
+                    <div 
+                        onClick={() => {
+                            setActiveView("profile_settings");
+                            if (window.innerWidth < 1024) setIsMobileOpen(false);
+                        }}
+                        className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800 flex items-center gap-3 cursor-pointer hover:border-blue-500/50 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-all group"
+                        title="Configurar Perfil"
+                    >
+                        <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 font-black text-sm group-hover:scale-105 transition-transform">
+                            {userInitials}
                         </div>
-                        <ThemeToggle />
+                        <div className="flex-1 overflow-hidden">
+                            <p className="text-xs font-black text-slate-900 dark:text-white truncate capitalize group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{userName}</p>
+                            <p className="text-[9px] font-black text-slate-400 truncate tracking-widest uppercase">{userRoleLabel}</p>
+                        </div>
+                        <div onClick={(e) => e.stopPropagation()}>
+                            <ThemeToggle />
+                        </div>
                     </div>
 
                     <Button
