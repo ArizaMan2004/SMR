@@ -24,7 +24,6 @@ import {
 import { toPng } from 'html-to-image'
 import jsPDF from 'jspdf'
 
-// --- IMPORTACIONES DE FIREBASE PARA BÚSQUEDA AUTÓNOMA ---
 import { db } from "@/lib/firebase"
 import { collection, query, where, getDocs, Timestamp } from "firebase/firestore"
 
@@ -119,13 +118,12 @@ export function EstadisticasDashboard({
   const [selectedMaterialDetail, setSelectedMaterialDetail] = useState<any | null>(null);
   const [filtroPagoMateriales, setFiltroPagoMateriales] = useState<'TODOS' | 'PAGADO' | 'ABONADO' | 'SIN_PAGAR'>('TODOS');
 
-  // --- ESTADOS LOCALES PARA DATOS DEL MES ---
   const [localOrdenes, setLocalOrdenes] = useState<any[]>([]);
   const [localGastos, setLocalGastos] = useState<any[]>([]);
   const [localPagos, setLocalPagos] = useState<any[]>([]);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
 
-  // --- OBTENCIÓN DE DATOS AUTÓNOMA POR MES ---
+  // ✨ CORRECCIÓN CRÍTICA: BUSCADOR DOBLE (TIMESTAMP Y STRING) PARA NUNCA PERDER DATOS ✨
   useEffect(() => {
     const fetchMonthlyData = async () => {
         setIsLoadingStats(true);
@@ -133,11 +131,10 @@ export function EstadisticasDashboard({
             const year = fechaReferencia.getFullYear();
             const month = fechaReferencia.getMonth();
             
-            // Ventana: El mes actual y 2 meses atrás (para agarrar facturas viejas que se pagaron este mes)
             const ventanaInicio = new Date(year, month - 2, 1);
             const fin = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
-            // 1. Fetch Órdenes
+            // 1. Órdenes (Se guardan como String ISO)
             const qOrdenes = query(
                 collection(db, "ordenes"),
                 where("fecha", ">=", ventanaInicio.toISOString()),
@@ -146,31 +143,36 @@ export function EstadisticasDashboard({
             const snapOrdenes = await getDocs(qOrdenes);
             const fetchedOrdenes = snapOrdenes.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-            // 2. Fetch Gastos
             const startTs = Timestamp.fromDate(ventanaInicio);
             const endTs = Timestamp.fromDate(fin);
             
-            const qGastos = query(
-                collection(db, "gastos_insumos"),
-                where("fecha", ">=", startTs),
-                where("fecha", "<=", endTs)
-            );
-            const snapGastos = await getDocs(qGastos);
-            const fetchedGastos = snapGastos.docs.map(doc => {
-                const data = doc.data();
-                return { ...data, id: doc.id, fecha: data.fecha?.toDate() || new Date() };
+            // 2. Gastos (Doble Búsqueda)
+            const qGastosTs = query(collection(db, "gastos_insumos"), where("fecha", ">=", startTs), where("fecha", "<=", endTs));
+            const qGastosStr = query(collection(db, "gastos_insumos"), where("fecha", ">=", ventanaInicio.toISOString()), where("fecha", "<=", fin.toISOString()));
+            
+            const [snapGastosTs, snapGastosStr] = await Promise.all([getDocs(qGastosTs), getDocs(qGastosStr)]);
+            const gastosMap = new Map();
+            snapGastosTs.docs.forEach(d => gastosMap.set(d.id, { ...d.data(), id: d.id }));
+            snapGastosStr.docs.forEach(d => gastosMap.set(d.id, { ...d.data(), id: d.id }));
+            
+            const fetchedGastos = Array.from(gastosMap.values()).map((g: any) => {
+                const d = g.fecha?.toDate ? g.fecha.toDate() : new Date(g.fecha);
+                return { ...g, fecha: d.toISOString() }; // Normalizado a String ISO
             });
 
-            // 3. Fetch Pagos Nómina
-            const qPagos = query(
-                collection(db, "pagos"),
-                where("fecha", ">=", startTs),
-                where("fecha", "<=", endTs)
-            );
-            const snapPagos = await getDocs(qPagos);
-            const fetchedPagos = snapPagos.docs.map(doc => {
-                const data = doc.data();
-                return { ...data, id: doc.id, fecha: data.fecha?.toDate() || new Date() };
+            // 3. Pagos de Nómina (Doble Búsqueda - Resuelve el problema del $0)
+            const qPagosTs = query(collection(db, "pagos"), where("fecha", ">=", startTs), where("fecha", "<=", endTs));
+            const qPagosStr = query(collection(db, "pagos"), where("fecha", ">=", ventanaInicio.toISOString()), where("fecha", "<=", fin.toISOString()));
+            
+            const [snapPagosTs, snapPagosStr] = await Promise.all([getDocs(qPagosTs), getDocs(qPagosStr)]);
+            const pagosMap = new Map();
+            snapPagosTs.docs.forEach(d => pagosMap.set(d.id, { ...d.data(), id: d.id }));
+            snapPagosStr.docs.forEach(d => pagosMap.set(d.id, { ...d.data(), id: d.id }));
+            
+            const fetchedPagos = Array.from(pagosMap.values()).map((p: any) => {
+                const rawDate = p.fecha || p.fechaPago;
+                const d = rawDate?.toDate ? rawDate.toDate() : new Date(rawDate);
+                return { ...p, fecha: d.toISOString() }; // Normalizado a String ISO
             });
 
             setLocalOrdenes(fetchedOrdenes);
@@ -285,7 +287,8 @@ export function EstadisticasDashboard({
                       monto: Number(pago.montoUSD) || 0,
                       tipo: 'ABONO',
                       metodo: pago.metodo,
-                      nota: pago.nota
+                      nota: pago.nota,
+                      imagenUrl: pago.imagenUrl || null
                   });
               });
           } else {
@@ -299,7 +302,8 @@ export function EstadisticasDashboard({
                       nombreCliente: orden.cliente?.nombreRazonSocial || "Cliente Desconocido",
                       fechaReal: getFechaRealPago(cobroLegacy),
                       monto: Number(cobroLegacy.montoUSD) || 0,
-                      tipo: 'TOTAL_LEGACY'
+                      tipo: 'TOTAL_LEGACY',
+                      imagenUrl: (cobroLegacy as any).imagenUrl || null
                   });
               }
           }
@@ -559,14 +563,20 @@ export function EstadisticasDashboard({
 
     const fijosAplicables = actual.gastosFijosPagados; 
 
+    // ✨ NÓMINA CORREGIDA: NUNCA PIERDE DATOS NI MARCA $0 ✨
     const nominaFiltrada = (localPagos || []).filter(p => {
-        const f = new Date(p.fecha || p.fechaPago || '');
+        const f = new Date(p.fecha); // Seguro porque normalizamos todo a ISO string en el fetch
         const enFecha = f >= fechas.inicio && f <= fechas.fin;
         if (!enFecha) return false;
-        const cargo = empRoleMap.get(p.empleadoId) || '';
+
+        const areaPago = p.areaAsignada; 
+        const cargo = (empRoleMap.get(p.empleadoId) || '').toLowerCase(); 
+        const esCorte = cargo.includes('laser') || cargo.includes('corte') || cargo.includes('produccion') || cargo.includes('armado');
+
         if (viewMode === 'GENERAL') return true; 
-        if (viewMode === 'IMPRESION') return cargo.includes('empleado') || cargo.includes('impresion') || cargo.includes('operario');
-        if (viewMode === 'CORTE') return cargo.includes('laser') || cargo.includes('corte');
+        if (viewMode === 'IMPRESION') return areaPago === 'IMPRESION' || (!areaPago && !esCorte);
+        if (viewMode === 'CORTE') return areaPago === 'CORTE' || (!areaPago && esCorte);
+        
         return false;
     }).reduce((acc, p) => acc + (Number(p.totalUSD) || 0), 0);
     
@@ -581,11 +591,13 @@ export function EstadisticasDashboard({
     const ticketPromedio = actual.ordenesCount > 0 ? actual.ingresos / actual.ordenesCount : 0;
     const numEmpleados = empleados.filter(e => {
         const cargo = (e.cargo || '').toLowerCase();
+        const esCorte = cargo.includes('laser') || cargo.includes('corte') || cargo.includes('produccion') || cargo.includes('armado');
         if (viewMode === 'GENERAL') return true;
-        if (viewMode === 'IMPRESION') return cargo.includes('empleado') || cargo.includes('impresion');
-        if (viewMode === 'CORTE') return cargo.includes('laser');
+        if (viewMode === 'IMPRESION') return !esCorte;
+        if (viewMode === 'CORTE') return esCorte;
         return false;
     }).length || 1;
+    
     const ingresoPorEmpleado = actual.ingresos / numEmpleados;
     const puntoEquilibrioPct = egresosOperativos > 0 ? Math.min(100, (actual.ingresos / egresosOperativos) * 100) : 100;
     
@@ -730,17 +742,20 @@ export function EstadisticasDashboard({
     });
 
     (localPagos || []).filter(p => {
-        const f = new Date(p.fecha || p.fechaPago || '');
+        const f = new Date(p.fecha);
         const enFecha = f >= fechas.inicio && f <= fechas.fin;
         if (!enFecha) return false;
         
-        const cargo = empRoleMap.get(p.empleadoId) || '';
+        const areaPago = p.areaAsignada;
+        const cargo = (empRoleMap.get(p.empleadoId) || '').toLowerCase();
+        const esCorte = cargo.includes('laser') || cargo.includes('corte') || cargo.includes('produccion') || cargo.includes('armado');
+        
         if (viewMode === 'GENERAL') return true; 
-        if (viewMode === 'IMPRESION') return cargo.includes('empleado') || cargo.includes('impresion') || cargo.includes('operario');
-        if (viewMode === 'CORTE') return cargo.includes('laser') || cargo.includes('corte');
+        if (viewMode === 'IMPRESION') return areaPago === 'IMPRESION' || (!areaPago && !esCorte);
+        if (viewMode === 'CORTE') return areaPago === 'CORTE' || (!areaPago && esCorte);
         return false;
     }).forEach(p => {
-        const dia = new Date(p.fecha || p.fechaPago).getDate();
+        const dia = new Date(p.fecha).getDate();
         if (map.has(dia)) map.get(dia).gastos += (Number(p.totalUSD) || 0);
     });
 
@@ -783,7 +798,7 @@ export function EstadisticasDashboard({
       const day = data.activePayload[0].payload.day;
       const targetDate = new Date(fechaReferencia.getFullYear(), fechaReferencia.getMonth(), day);
 
-      const ingresosDelDia = transaccionesReales.filter(pago => {
+      const ingresosDelDiaRaw = transaccionesReales.filter(pago => {
           return pago.fechaReal.getDate() === day && 
                  pago.fechaReal.getMonth() === fechaReferencia.getMonth() && 
                  pago.fechaReal.getFullYear() === fechaReferencia.getFullYear();
@@ -795,12 +810,34 @@ export function EstadisticasDashboard({
           
           return {
               id: pago.id,
-              descripcion: `${pago.tipo === 'ABONO' ? 'Abono' : 'Cobro'} - Orden #${pago.ordenNumero || 'S/N'} - ${pago.nombreCliente}`,
+              ordenId: pago.ordenId,
+              descripcion: `Orden #${pago.ordenNumero || 'S/N'} - ${pago.nombreCliente}`,
               monto: monto,
               tipo: "Ingreso",
+              metodo: pago.metodo,
+              nota: pago.nota,
+              imagenUrl: pago.imagenUrl,
               orden: pago.ordenData
           };
       }).filter(i => i.monto > 0);
+
+      const ingresosMap = new Map();
+      ingresosDelDiaRaw.forEach(item => {
+          if (!ingresosMap.has(item.ordenId)) {
+              ingresosMap.set(item.ordenId, {
+                  ordenId: item.ordenId,
+                  orden: item.orden,
+                  descripcion: item.descripcion,
+                  totalMonto: 0,
+                  abonos: []
+              });
+          }
+          const grp = ingresosMap.get(item.ordenId);
+          grp.totalMonto += item.monto;
+          grp.abonos.push(item);
+      });
+
+      const ingresosDelDiaAgrupados = Array.from(ingresosMap.values());
 
       const egresosDelDia: any[] = [];
 
@@ -835,13 +872,16 @@ export function EstadisticasDashboard({
       });
 
       (localPagos || []).forEach(p => {
-          const f = new Date(p.fecha || p.fechaPago);
+          const f = new Date(p.fecha);
           if (f.getDate() === day && f.getMonth() === fechaReferencia.getMonth() && f.getFullYear() === fechaReferencia.getFullYear()) {
-                const cargo = empRoleMap.get(p.empleadoId) || '';
+                const areaPago = p.areaAsignada;
+                const cargo = (empRoleMap.get(p.empleadoId) || '').toLowerCase();
+                const esCorte = cargo.includes('laser') || cargo.includes('corte') || cargo.includes('produccion') || cargo.includes('armado');
                 let relevante = false;
+                
                 if (viewMode === 'GENERAL') relevante = true; 
-                else if (viewMode === 'IMPRESION') relevante = cargo.includes('empleado') || cargo.includes('impresion') || cargo.includes('operario');
-                else if (viewMode === 'CORTE') relevante = cargo.includes('laser') || cargo.includes('corte');
+                else if (viewMode === 'IMPRESION') relevante = areaPago === 'IMPRESION' || (!areaPago && !esCorte);
+                else if (viewMode === 'CORTE') relevante = areaPago === 'CORTE' || (!areaPago && esCorte);
 
                 if (relevante) {
                     egresosDelDia.push({
@@ -881,7 +921,7 @@ export function EstadisticasDashboard({
 
       setDayDetail({
           date: targetDate,
-          ingresos: ingresosDelDia || [],
+          ingresos: ingresosDelDiaAgrupados || [],
           egresos: egresosDelDia || []
       });
   };
@@ -892,6 +932,7 @@ export function EstadisticasDashboard({
           const d = new Date(f);
           return d >= fechas.inicio && d <= fechas.fin;
       };
+      
       if (selectedDetail === 'EGRESOS') {
           const keywordsImp = ['tinta', 'vinil', 'lona', 'banner', 'papel', 'impresion', 'microperforado', 'ojales', 'laminacion', 'laminado', 'esmerilado', 'dtf', 'clear', 'tornasol', 'pvc', 'rigido'];
           const keywordsCorte = ['mdf', 'acrilico', 'acr', 'madera', 'laser', 'corte', 'pintura', 'thinner', 'balsa', 'plywood'];
@@ -918,11 +959,17 @@ export function EstadisticasDashboard({
               monto: Number(g.monto) || Number(g.montoUSD) || 0 
           }));
 
-          const nomina = (localPagos || []).filter(p => filtroFecha(p.fecha || p.fechaPago || '') && (
-              viewMode === 'GENERAL' ||
-              (viewMode === 'IMPRESION' && (empRoleMap.get(p.empleadoId)||'').includes('empleado')) ||
-              (viewMode === 'CORTE' && (empRoleMap.get(p.empleadoId)||'').includes('laser'))
-          ));
+          const nomina = (localPagos || []).filter(p => {
+              if (!filtroFecha(p.fecha)) return false;
+              const areaPago = p.areaAsignada;
+              const cargo = (empRoleMap.get(p.empleadoId) || '').toLowerCase();
+              const esCorte = cargo.includes('laser') || cargo.includes('corte') || cargo.includes('produccion') || cargo.includes('armado');
+              
+              if (viewMode === 'GENERAL') return true;
+              if (viewMode === 'IMPRESION') return areaPago === 'IMPRESION' || (!areaPago && !esCorte);
+              if (viewMode === 'CORTE') return areaPago === 'CORTE' || (!areaPago && esCorte);
+              return false;
+          });
           
           const disenoItems: any[] = [];
           if (viewMode === 'GENERAL') {
@@ -978,7 +1025,6 @@ export function EstadisticasDashboard({
       className="space-y-6 sm:space-y-8 p-4 sm:p-6 font-sans pb-24 text-slate-800 dark:text-slate-100 relative"
       ref={dashboardRef}
     >
-      {/* PANTALLA DE CARGA MIENTRAS BUSCA EN FIREBASE */}
       {isLoadingStats && (
           <div className="absolute inset-0 z-50 bg-white/50 dark:bg-black/50 backdrop-blur-sm flex items-center justify-center rounded-[2.5rem]">
               <div className="flex flex-col items-center gap-3 p-6 bg-white dark:bg-[#1c1c1e] rounded-3xl shadow-2xl border border-black/10">
@@ -988,7 +1034,6 @@ export function EstadisticasDashboard({
           </div>
       )}
       
-      {/* HEADER DE CONTROL */}
       <motion.div id="stats-header" variants={itemVariants} className="flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4 sm:gap-6 bg-white dark:bg-[#1c1c1e] p-4 sm:p-5 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-black/5 hover:shadow-lg transition-shadow">
         <div className="flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
             <motion.div whileHover={{ rotate: 360, transition: { duration: 0.5 } }} className="p-3 bg-slate-100 dark:bg-white/5 rounded-2xl hidden sm:block">
@@ -1033,7 +1078,6 @@ export function EstadisticasDashboard({
         </div>
       </motion.div>
 
-      {/* SECCIONES DE PRODUCCIÓN (CLICKEABLE) */}
       <AnimatePresence mode="wait">
         {viewMode === 'IMPRESION' && (
             <motion.div 
@@ -1075,7 +1119,6 @@ export function EstadisticasDashboard({
                         <span className="text-xs font-black uppercase text-slate-400 tracking-widest">Desglose Materiales</span>
                     </div>
 
-                    {/* FILTROS DE PAGO PARA MATERIALES */}
                     <Tabs value={filtroPagoMateriales} onValueChange={(v) => setFiltroPagoMateriales(v as any)} className="w-full mb-3">
                         <TabsList className="w-full bg-slate-100 dark:bg-white/5 p-1 rounded-xl flex h-auto">
                             <TabsTrigger value="TODOS" className="flex-1 text-[9px] uppercase font-black py-1.5">Todos</TabsTrigger>
@@ -1151,7 +1194,6 @@ export function EstadisticasDashboard({
                         <span className="text-xs font-black uppercase text-slate-400 tracking-widest">Tendencias Corte</span>
                     </div>
 
-                    {/* FILTROS DE PAGO PARA CORTE */}
                     <Tabs value={filtroPagoMateriales} onValueChange={(v) => setFiltroPagoMateriales(v as any)} className="w-full mb-3">
                         <TabsList className="w-full bg-slate-100 dark:bg-white/5 p-1 rounded-xl flex h-auto">
                             <TabsTrigger value="TODOS" className="flex-1 text-[9px] uppercase font-black py-1.5">Todos</TabsTrigger>
@@ -1215,7 +1257,6 @@ export function EstadisticasDashboard({
         )}
       </AnimatePresence>
 
-      {/* KPI PRINCIPALES */}
       <motion.div id="financial-kpis" variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         <StatCard 
             label="Ingresos Totales" 
@@ -1273,7 +1314,6 @@ export function EstadisticasDashboard({
         </motion.div>
       </motion.div>
 
-      {/* EFICIENCIA Y GRÁFICO */}
       <motion.div variants={containerVariants} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <motion.div variants={itemVariants} whileHover={hoverEffect}>
             <Card className="p-6 sm:p-8 rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col justify-between h-full">
@@ -1302,7 +1342,6 @@ export function EstadisticasDashboard({
             </Card>
           </motion.div>
 
-          {/* GRÁFICO PRINCIPAL */}
           <motion.div id="main-chart-section" variants={itemVariants} className="lg:col-span-2">
             <Card className="p-6 sm:p-8 rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm relative overflow-hidden h-full">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
@@ -1311,7 +1350,6 @@ export function EstadisticasDashboard({
                         <h3 className="text-lg font-black uppercase italic">Flujo Mensual</h3>
                     </div>
                     
-                    {/* FILTRO DE SEMANAS */}
                     <div className="flex gap-1 bg-slate-100 dark:bg-black/20 p-1 rounded-xl overflow-x-auto max-w-full">
                         {['TODAS', '1', '2', '3', '4', '5'].map((w) => (
                             <button
@@ -1364,7 +1402,6 @@ export function EstadisticasDashboard({
           </motion.div>
       </motion.div>
 
-      {/* DEUDA AGRUPADA POR CLIENTE */}
       <motion.div id="debt-analysis-section" variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <motion.div variants={itemVariants} whileHover={hoverEffect}>
             <Card className="p-6 sm:p-8 rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col relative overflow-hidden h-full">
@@ -1398,7 +1435,6 @@ export function EstadisticasDashboard({
             </Card>
           </motion.div>
 
-          {/* TABLA DE DEUDORES (CLIENTES) */}
           <motion.div variants={itemVariants} className="lg:col-span-2">
             <Card className="p-6 sm:p-8 rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col h-full">
                 <h3 className="text-lg font-black uppercase italic mb-6 flex items-center gap-2">
@@ -1664,7 +1700,7 @@ export function EstadisticasDashboard({
         )}
       </AnimatePresence>
 
-      {/* --- MODAL DETALLE DE GRÁFICO --- */}
+      {/* --- MODAL DETALLE DE GRÁFICO (CON COMPROBANTES AGRUPADOS) --- */}
       <AnimatePresence>
         {dayDetail && (
             <Dialog open={!!dayDetail} onOpenChange={(o) => !o && setDayDetail(null)}>
@@ -1685,30 +1721,60 @@ export function EstadisticasDashboard({
                         </DialogHeader>
 
                         <div className="mt-8 space-y-8">
-                            {/* SECCIÓN INGRESOS */}
+                            {/* SECCIÓN INGRESOS AGRUPADOS */}
                             <div>
                                 <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 mb-4 flex items-center gap-2">
-                                    <ArrowDownLeft size={16}/> Ingresos ({dayDetail.ingresos.length})
+                                    <ArrowDownLeft size={16}/> Ingresos ({dayDetail.ingresos.reduce((acc, curr) => acc + curr.abonos.length, 0)})
                                 </h4>
-                                <div className="space-y-3 max-h-[200px] overflow-y-auto custom-scrollbar pr-2">
-                                    {dayDetail.ingresos.length > 0 ? dayDetail.ingresos.map((item, i) => (
-                                        <div 
-                                            key={i} 
-                                            onClick={() => item.orden && (setSelectedOrder(item.orden), setIsDetailModalOpen(true))}
-                                            className={cn(
-                                                "flex justify-between items-center p-4 bg-emerald-50/40 rounded-2xl transition-all border border-transparent",
-                                                item.orden ? "hover:bg-emerald-100/50 cursor-pointer hover:border-emerald-200 hover:shadow-sm" : "hover:bg-emerald-50"
-                                            )}
-                                        >
-                                            <div className="flex flex-col max-w-[70%]">
-                                                <span className="text-sm font-bold text-slate-700 truncate">{item.descripcion}</span>
-                                                {item.orden && (
-                                                    <span className="text-[9px] font-black text-emerald-600/70 uppercase flex items-center gap-1 mt-0.5">
-                                                        <Eye size={10} /> Ver Orden
-                                                    </span>
-                                                )}
+                                <div className="space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                                    {dayDetail.ingresos.length > 0 ? dayDetail.ingresos.map((grupo, i) => (
+                                        <div key={i} className="bg-emerald-50/40 rounded-[1.5rem] border border-emerald-100/50 p-5">
+                                            <div className="flex justify-between items-start mb-4 border-b border-emerald-100/50 pb-4">
+                                                <div className="flex flex-col max-w-[70%]">
+                                                    <span className="text-sm font-bold text-slate-800 truncate">{grupo.descripcion}</span>
+                                                    {grupo.orden && (
+                                                        <button 
+                                                            onClick={() => { setSelectedOrder(grupo.orden); setIsDetailModalOpen(true); }}
+                                                            className="text-[9px] font-black text-emerald-600/70 uppercase flex items-center gap-1 mt-1 hover:text-emerald-600 w-fit transition-colors"
+                                                        >
+                                                            <Eye size={12} /> Ver Resumen de Orden
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <span className="text-xl font-black text-emerald-600 whitespace-nowrap">+${grupo.totalMonto.toLocaleString()}</span>
                                             </div>
-                                            <span className="text-sm font-black text-emerald-600 whitespace-nowrap">+${item.monto.toLocaleString()}</span>
+
+                                            {/* Desglose de Abonos con Comprobantes */}
+                                            <div className="space-y-2">
+                                                {grupo.abonos.map((abono: any, j: number) => (
+                                                    <div key={j} className="flex justify-between items-center bg-white/60 dark:bg-black/20 p-3 rounded-xl shadow-sm border border-black/5">
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">
+                                                                {abono.metodo || 'Abono'}
+                                                            </span>
+                                                            {abono.nota && <span className="text-[10px] text-slate-400 italic truncate max-w-[120px] mt-0.5">{abono.nota}</span>}
+                                                        </div>
+                                                        <div className="flex items-center gap-3">
+                                                            <span className="text-sm font-bold text-emerald-700">${abono.monto.toLocaleString()}</span>
+                                                            {abono.imagenUrl ? (
+                                                                <a 
+                                                                    href={abono.imagenUrl} 
+                                                                    target="_blank" 
+                                                                    rel="noopener noreferrer" 
+                                                                    className="p-2 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white transition-colors shadow-sm" 
+                                                                    title="Ver Comprobante Adjunto"
+                                                                >
+                                                                    <ImageIcon size={14} />
+                                                                </a>
+                                                            ) : (
+                                                                <div className="p-2 bg-slate-100 text-slate-300 rounded-lg" title="Cobro sin comprobante">
+                                                                    <ImageIcon size={14} />
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
                                     )) : <div className="p-4 text-center text-xs font-bold text-slate-300 uppercase bg-slate-50 rounded-2xl">Sin movimientos</div>}
                                 </div>
@@ -1749,7 +1815,7 @@ export function EstadisticasDashboard({
         )}
       </AnimatePresence>
 
-      {/* --- MODAL NUEVO: DETALLE DE MATERIAL --- */}
+      {/* --- MODAL DETALLE DE MATERIAL --- */}
       <AnimatePresence>
         {selectedMaterialDetail && (
             <Dialog open={!!selectedMaterialDetail} onOpenChange={(o) => !o && setSelectedMaterialDetail(null)}>

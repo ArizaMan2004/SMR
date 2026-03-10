@@ -59,7 +59,7 @@ export function PaymentAuditView({
     // --- NUEVOS ESTADOS PARA MODALES ---
     const [deleteModal, setDeleteModal] = useState<{isOpen: boolean, item: any, type: string}>({isOpen: false, item: null, type: ''});
     const [editModal, setEditModal] = useState<{isOpen: boolean, item: any, type: string}>({isOpen: false, item: null, type: ''});
-    const [editForm, setEditForm] = useState({ monto: 0, concepto: '' });
+    const [editForm, setEditForm] = useState({ monto: 0, concepto: '', area: '', imagenUrl: '' });
 
     const filterByDate = (dateInput: any) => {
         if (!dateInput) return false;
@@ -97,7 +97,7 @@ export function PaymentAuditView({
                                 nota: nota,
                                 imagenUrl: pago.imagenUrl || null,
                                 index: index,
-                                type: 'ingreso' // Añadido para identificación global
+                                type: 'ingreso'
                             });
                         }
                     }
@@ -223,7 +223,8 @@ export function PaymentAuditView({
     }).map(g => ({
         id: g.id, fecha: g.fecha, beneficiario: g.proveedor || "Proveedor",
         concepto: g.descripcion || g.nombre || "Compra Insumo", metodo: g.metodoPago || "No especificado",
-        monto: Number(g.montoUSD) || Number(g.monto) || 0, type: 'gasto'
+        monto: Number(g.montoUSD) || Number(g.monto) || 0, type: 'gasto',
+        area: g.area || 'GENERAL', imagenUrl: g.imagenUrl || g.comprobante || null
     })), [gastos, selectedMonth, selectedYear, searchTerm]);
 
     const egresosFijos = useMemo(() => gastos.filter(g => {
@@ -233,13 +234,15 @@ export function PaymentAuditView({
     }).map(g => ({
         id: g.id, fecha: g.fecha, beneficiario: g.proveedor || "Servicio",
         concepto: g.nombre || g.descripcion || "Pago Mensual", metodo: g.metodoPago || "No especificado",
-        monto: Number(g.montoUSD) || Number(g.monto) || 0, type: 'fijo'
+        monto: Number(g.montoUSD) || Number(g.monto) || 0, type: 'fijo',
+        area: g.area || 'GENERAL', imagenUrl: g.imagenUrl || g.comprobante || null
     })), [gastos, selectedMonth, selectedYear, searchTerm]);
 
     const egresosNomina = useMemo(() => pagosEmpleados.filter(p => filterByDate(p.fechaPago || p.fecha) && filterBySearch(p.nombre || ""))
     .map(p => ({
-        id: p.id, fecha: p.fechaPago || p.fecha, beneficiario: p.nombre, concepto: "Nómina / Comisión",
-        metodo: p.metodoPago || "Efectivo", monto: Number(p.totalUSD) || 0, type: 'nomina'
+        id: p.id, fecha: p.fechaPago || p.fecha, beneficiario: p.nombre, concepto: p.notaAdicional || "Nómina / Comisión",
+        metodo: p.metodoPago || "Efectivo", monto: Number(p.totalUSD) || 0, type: 'nomina',
+        area: p.areaAsignada || 'GENERAL', imagenUrl: p.imagenUrl || null
     })), [pagosEmpleados, selectedMonth, selectedYear, searchTerm]);
 
     const egresosDiseno = useMemo(() => {
@@ -257,7 +260,7 @@ export function PaymentAuditView({
                             beneficiario: item.empleadoAsignado || "Diseñador", concepto: `Diseño Orden #${o.ordenNumero}`,
                             metodo: item.paymentMethod || "Pago Móvil",
                             monto: (Number(item.costoInterno) || Number(item.precioUnitario) || 0) * (Number(item.cantidad) || 1),
-                            type: 'diseno'
+                            type: 'diseno', area: 'DISEÑO'
                         });
                     }
                 }
@@ -267,7 +270,7 @@ export function PaymentAuditView({
     }, [ordenes, selectedMonth, selectedYear, searchTerm]);
 
     // ==========================================
-    // 3. ACCIONES DE ELIMINACIÓN Y EDICIÓN PROFUNDA
+    // 3. ACCIONES DE ELIMINACIÓN Y EDICIÓN PROFUNDA CON RECALCULO
     // ==========================================
     const confirmDelete = async () => {
         const { item, type } = deleteModal;
@@ -280,8 +283,20 @@ export function PaymentAuditView({
                 if (ordenSnap.exists()) {
                     const data = ordenSnap.data();
                     const newPagos = [...(data.registroPagos || [])];
-                    newPagos.splice(item.index, 1);
-                    await updateDoc(ordenRef, { registroPagos: newPagos });
+                    newPagos.splice(item.index, 1); // Borrar el pago
+                    
+                    // RECALCULAR DEUDA TOTAL DE LA ORDEN
+                    const totalUSD = Number(data.totalUSD) || 0;
+                    const nuevoMontoPagado = newPagos.reduce((sum, p) => sum + (Number(p.montoUSD) || 0), 0);
+                    let nuevoEstado = "PENDIENTE";
+                    if (nuevoMontoPagado >= totalUSD && totalUSD > 0) nuevoEstado = "PAGADO";
+                    else if (nuevoMontoPagado > 0) nuevoEstado = "ABONADO";
+
+                    await updateDoc(ordenRef, { 
+                        registroPagos: newPagos,
+                        montoPagadoUSD: nuevoMontoPagado,
+                        estadoPago: nuevoEstado
+                    });
                 }
             } else if (type === 'gasto' || type === 'fijo') {
                 await deleteDoc(doc(db, "gastos_insumos", item.id));
@@ -299,7 +314,7 @@ export function PaymentAuditView({
                     }
                 }
             }
-            toast.success("Registro eliminado exitosamente");
+            toast.success("Registro eliminado exitosamente (Saldos recalificados)");
         } catch (error) {
             toast.error("Error al eliminar el registro");
         } finally {
@@ -319,18 +334,45 @@ export function PaymentAuditView({
                     const data = ordenSnap.data();
                     const newPagos = [...(data.registroPagos || [])];
                     if(newPagos[item.index]) {
-                        newPagos[item.index] = { ...newPagos[item.index], montoUSD: editForm.monto, nota: editForm.concepto };
-                        await updateDoc(ordenRef, { registroPagos: newPagos });
+                        // Modificar los valores del pago
+                        newPagos[item.index] = { 
+                            ...newPagos[item.index], 
+                            montoUSD: editForm.monto, 
+                            nota: editForm.concepto,
+                            imagenUrl: editForm.imagenUrl
+                        };
+                        
+                        // RECALCULAR DEUDA TOTAL DE LA ORDEN
+                        const totalUSD = Number(data.totalUSD) || 0;
+                        const nuevoMontoPagado = newPagos.reduce((sum, p) => sum + (Number(p.montoUSD) || 0), 0);
+                        let nuevoEstado = "PENDIENTE";
+                        if (nuevoMontoPagado >= totalUSD && totalUSD > 0) nuevoEstado = "PAGADO";
+                        else if (nuevoMontoPagado > 0) nuevoEstado = "ABONADO";
+
+                        await updateDoc(ordenRef, { 
+                            registroPagos: newPagos,
+                            montoPagadoUSD: nuevoMontoPagado,
+                            estadoPago: nuevoEstado
+                        });
                     }
                 }
             } else if (type === 'gasto' || type === 'fijo') {
-                const updateData: any = { monto: editForm.monto, montoUSD: editForm.monto };
+                const updateData: any = { 
+                    monto: editForm.monto, 
+                    montoUSD: editForm.monto,
+                    area: editForm.area !== 'GENERAL' ? editForm.area : null,
+                    imagenUrl: editForm.imagenUrl
+                };
                 if (item.concepto) updateData.descripcion = editForm.concepto;
                 await updateDoc(doc(db, "gastos_insumos", item.id), updateData);
             } else if (type === 'nomina') {
-                await updateDoc(doc(db, "pagos", item.id), { totalUSD: editForm.monto });
+                await updateDoc(doc(db, "pagos", item.id), { 
+                    totalUSD: editForm.monto,
+                    areaAsignada: editForm.area !== 'GENERAL' ? editForm.area : null,
+                    notaAdicional: editForm.concepto,
+                    imagenUrl: editForm.imagenUrl
+                });
             } else if (type === 'diseno') {
-                // Modificar el costo interno del item en la orden
                 const ordenRef = doc(db, "ordenes", item.orderId);
                 const ordenSnap = await getDoc(ordenRef);
                 if (ordenSnap.exists()) {
@@ -342,7 +384,7 @@ export function PaymentAuditView({
                     }
                 }
             }
-            toast.success("Registro actualizado correctamente");
+            toast.success("Registro actualizado y auditoría recalculada.");
         } catch (error) {
             toast.error("Error al guardar los cambios");
         } finally {
@@ -351,7 +393,12 @@ export function PaymentAuditView({
     };
 
     const openEditModal = (item: any, type: string) => {
-        setEditForm({ monto: item.monto, concepto: type === 'ingreso' ? item.nota : item.concepto });
+        setEditForm({ 
+            monto: item.monto, 
+            concepto: type === 'ingreso' ? item.nota : item.concepto,
+            area: item.area || 'GENERAL',
+            imagenUrl: item.imagenUrl || ''
+        });
         setEditModal({ isOpen: true, item, type });
     };
 
@@ -447,8 +494,8 @@ export function PaymentAuditView({
                                             </td>
                                             <td className="p-5 text-center">
                                                 {pago.imagenUrl ? (
-                                                    <Button variant="ghost" size="sm" onClick={() => setPreviewImage(pago.imagenUrl)} className="h-8 w-8 p-0 rounded-full bg-blue-50 text-blue-600 hover:scale-110 transition-transform"><Eye className="w-4 h-4"/></Button>
-                                                ) : <span className="text-slate-200"><ImageIcon className="w-4 h-4 mx-auto"/></span>}
+                                                    <Button variant="ghost" size="sm" onClick={() => setPreviewImage(pago.imagenUrl)} className="h-8 w-8 p-0 rounded-full bg-blue-50 text-blue-600 hover:scale-110 transition-transform" title="Ver Comprobante"><Eye className="w-4 h-4"/></Button>
+                                                ) : <span className="text-slate-200" title="Sin Comprobante"><ImageIcon className="w-4 h-4 mx-auto"/></span>}
                                             </td>
                                             <td className="p-5 text-right">
                                                 <Badge className="bg-emerald-100 text-emerald-700 font-black text-sm border-none shadow-sm">{formatCurrency(pago.monto)}</Badge>
@@ -470,7 +517,7 @@ export function PaymentAuditView({
                                             {isEditMode && (
                                                 <td className="p-5 text-center">
                                                     <div className="flex items-center justify-center gap-2">
-                                                        <Button variant="ghost" size="icon" onClick={() => openEditModal(pago, pago.type)} className="h-8 w-8 text-blue-500 hover:bg-blue-50"><Pencil className="w-4 h-4" /></Button>
+                                                        <Button variant="ghost" size="icon" onClick={() => openEditModal(pago, pago.type)} className="h-8 w-8 text-blue-500 hover:bg-blue-50" title="Editar Monto/Comprobante"><Pencil className="w-4 h-4" /></Button>
                                                         <Button variant="ghost" size="icon" onClick={() => setDeleteModal({ isOpen: true, item: pago, type: pago.type })} className="h-8 w-8 text-rose-500 hover:bg-rose-50"><Trash2 className="w-4 h-4" /></Button>
                                                     </div>
                                                 </td>
@@ -494,10 +541,10 @@ export function PaymentAuditView({
                             <EgresosTabTrigger value="diseno" label="Diseño" count={egresosDiseno.length} total={egresosDiseno.reduce((a,b)=>a+b.monto,0)} />
                         </TabsList>
 
-                        <TabsContent value="insumos"><AuditTable data={egresosInsumos} color="blue" onUpdate={handleUpdateExpenseMethod} onUpdateDate={handleUpdateExpenseDate} updatingId={updatingId} isEditMode={isEditMode} onEdit={openEditModal} onDelete={(item:any, type:string) => setDeleteModal({isOpen: true, item, type})} /></TabsContent>
-                        <TabsContent value="fijos"><AuditTable data={egresosFijos} color="orange" onUpdate={handleUpdateExpenseMethod} onUpdateDate={handleUpdateExpenseDate} updatingId={updatingId} isEditMode={isEditMode} onEdit={openEditModal} onDelete={(item:any, type:string) => setDeleteModal({isOpen: true, item, type})} /></TabsContent>
-                        <TabsContent value="nomina"><AuditTable data={egresosNomina} color="indigo" onUpdate={handleUpdateExpenseMethod} onUpdateDate={handleUpdateExpenseDate} updatingId={updatingId} isEditMode={isEditMode} onEdit={openEditModal} onDelete={(item:any, type:string) => setDeleteModal({isOpen: true, item, type})} /></TabsContent>
-                        <TabsContent value="diseno"><AuditTable data={egresosDiseno} color="purple" onUpdate={handleUpdateExpenseMethod} onUpdateDate={handleUpdateExpenseDate} updatingId={updatingId} isEditMode={isEditMode} onEdit={openEditModal} onDelete={(item:any, type:string) => setDeleteModal({isOpen: true, item, type})} /></TabsContent>
+                        <TabsContent value="insumos"><AuditTable data={egresosInsumos} color="blue" onUpdate={handleUpdateExpenseMethod} onUpdateDate={handleUpdateExpenseDate} updatingId={updatingId} isEditMode={isEditMode} onEdit={openEditModal} onDelete={(item:any, type:string) => setDeleteModal({isOpen: true, item, type})} setPreviewImage={setPreviewImage} /></TabsContent>
+                        <TabsContent value="fijos"><AuditTable data={egresosFijos} color="orange" onUpdate={handleUpdateExpenseMethod} onUpdateDate={handleUpdateExpenseDate} updatingId={updatingId} isEditMode={isEditMode} onEdit={openEditModal} onDelete={(item:any, type:string) => setDeleteModal({isOpen: true, item, type})} setPreviewImage={setPreviewImage} /></TabsContent>
+                        <TabsContent value="nomina"><AuditTable data={egresosNomina} color="indigo" onUpdate={handleUpdateExpenseMethod} onUpdateDate={handleUpdateExpenseDate} updatingId={updatingId} isEditMode={isEditMode} onEdit={openEditModal} onDelete={(item:any, type:string) => setDeleteModal({isOpen: true, item, type})} setPreviewImage={setPreviewImage} /></TabsContent>
+                        <TabsContent value="diseno"><AuditTable data={egresosDiseno} color="purple" onUpdate={handleUpdateExpenseMethod} onUpdateDate={handleUpdateExpenseDate} updatingId={updatingId} isEditMode={isEditMode} onEdit={openEditModal} onDelete={(item:any, type:string) => setDeleteModal({isOpen: true, item, type})} setPreviewImage={setPreviewImage} /></TabsContent>
                     </Tabs>
                 </TabsContent>
             </Tabs>
@@ -524,7 +571,7 @@ export function PaymentAuditView({
                         </DialogTitle>
                         <DialogDescription className="pt-2">
                             ¿Estás completamente seguro de que deseas eliminar este registro de {deleteModal.type}? 
-                            Esta acción es irreversible y afectará los totales de la auditoría.
+                            Esta acción es irreversible y afectará los totales de la auditoría. Los saldos se recalcularán automáticamente.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="bg-slate-50 dark:bg-white/5 p-4 rounded-xl text-sm border border-slate-100 dark:border-white/10 mt-2">
@@ -538,28 +585,49 @@ export function PaymentAuditView({
                 </DialogContent>
             </Dialog>
 
-            {/* MODAL DE EDICIÓN PROFUNDA */}
+            {/* MODAL DE EDICIÓN PROFUNDA (MONTO, ÁREA Y URL) */}
             <Dialog open={editModal.isOpen} onOpenChange={(open) => !open && setEditModal({ isOpen: false, item: null, type: '' })}>
                 <DialogContent className="sm:max-w-md rounded-2xl">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <Pencil className="w-5 h-5 text-blue-500" /> Editar Registro ({editModal.type})
                         </DialogTitle>
-                        <DialogDescription>Ajusta el monto o el concepto de este movimiento.</DialogDescription>
+                        <DialogDescription>Ajusta el monto, concepto o el comprobante de este movimiento.</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
-                            <label className="text-xs font-bold uppercase text-slate-500">Monto (USD)</label>
+                            <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Monto de Liquidación (USD)</label>
                             <Input type="number" step="0.01" value={editForm.monto} onChange={(e) => setEditForm({...editForm, monto: Number(e.target.value)})} className="h-12 rounded-xl text-lg font-black" />
                         </div>
+                        
                         <div className="space-y-2">
-                            <label className="text-xs font-bold uppercase text-slate-500">Nota / Concepto</label>
-                            <Input value={editForm.concepto} onChange={(e) => setEditForm({...editForm, concepto: e.target.value})} className="h-12 rounded-xl" placeholder="Escribe el concepto..." />
+                            <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Nota / Concepto</label>
+                            <Input value={editForm.concepto} onChange={(e) => setEditForm({...editForm, concepto: e.target.value})} className="h-12 rounded-xl font-bold" placeholder="Escribe el concepto..." />
+                        </div>
+
+                        {/* SELECTOR DE ÁREA (Solo para egresos auditables) */}
+                        {editModal.type !== 'ingreso' && editModal.type !== 'diseno' && (
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Área Asignada (Balance)</label>
+                                <Select value={editForm.area || 'GENERAL'} onValueChange={(val) => setEditForm({...editForm, area: val})}>
+                                    <SelectTrigger className="h-12 rounded-xl font-bold text-xs"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="GENERAL">GENERAL / COMPARTIDO</SelectItem>
+                                        <SelectItem value="IMPRESION">IMPRESIÓN</SelectItem>
+                                        <SelectItem value="CORTE">CORTE / LÁSER</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1 flex items-center gap-1"><ImageIcon size={12}/> Enlace del Comprobante (URL)</label>
+                            <Input value={editForm.imagenUrl} onChange={(e) => setEditForm({...editForm, imagenUrl: e.target.value})} className="h-12 rounded-xl text-xs" placeholder="https://res.cloudinary.com/..." />
                         </div>
                     </div>
                     <DialogFooter className="gap-2 sm:gap-0">
                         <Button variant="outline" onClick={() => setEditModal({ isOpen: false, item: null, type: '' })} className="rounded-xl">Cancelar</Button>
-                        <Button onClick={confirmEdit} className="rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white">Guardar Cambios</Button>
+                        <Button onClick={confirmEdit} className="rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20">Guardar Cambios</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -582,7 +650,7 @@ function EgresosTabTrigger({ value, label, count, total }: any) {
     )
 }
 
-function AuditTable({ data, color, onUpdate, onUpdateDate, updatingId, isEditMode, onEdit, onDelete }: any) {
+function AuditTable({ data, color, onUpdate, onUpdateDate, updatingId, isEditMode, onEdit, onDelete, setPreviewImage }: any) {
     const total = data.reduce((sum: number, item: any) => sum + item.monto, 0);
     const colorClasses: any = {
         blue: "text-blue-600 bg-blue-50 border-blue-100 dark:bg-blue-900/20 dark:border-blue-800/30",
@@ -596,18 +664,20 @@ function AuditTable({ data, color, onUpdate, onUpdateDate, updatingId, isEditMod
             <Card className="lg:col-span-3 p-6 rounded-[2.5rem] border-none bg-white dark:bg-[#1c1c1e] shadow-xl overflow-hidden">
                 <div className="overflow-y-auto max-h-[500px] custom-scrollbar">
                     <table className="w-full text-left border-collapse">
-                        <thead className="sticky top-0 bg-white dark:bg-[#1c1c1e] z-10">
+                        <thead className="sticky top-0 bg-white dark:bg-[#1c1c1e] z-10 border-b border-black/5 dark:border-white/5">
                             <tr>
-                                <th className="p-4 text-[9px] font-black uppercase text-slate-400">{isEditMode ? "Ajustar Fecha" : "Fecha"}</th>
-                                <th className="p-4 text-[9px] font-black uppercase text-slate-400">Beneficiario / Concepto</th>
-                                <th className="p-4 text-[9px] font-black uppercase text-slate-400 text-right">Monto</th>
-                                <th className="p-4 text-[9px] font-black uppercase text-slate-400 w-[160px]">{isEditMode ? "Asignar Billetera" : "Billetera"}</th>
-                                {isEditMode && <th className="p-4 text-[9px] font-black uppercase text-slate-400 text-center w-[100px]">Acciones</th>}
+                                <th className="p-4 text-[9px] font-black uppercase tracking-widest text-slate-400">{isEditMode ? "Ajustar Fecha" : "Fecha"}</th>
+                                <th className="p-4 text-[9px] font-black uppercase tracking-widest text-slate-400">Beneficiario / Concepto</th>
+                                <th className="p-4 text-[9px] font-black uppercase tracking-widest text-slate-400 text-center">Capture</th>
+                                <th className="p-4 text-[9px] font-black uppercase tracking-widest text-slate-400 text-center">Área</th>
+                                <th className="p-4 text-[9px] font-black uppercase tracking-widest text-slate-400 text-right">Monto</th>
+                                <th className="p-4 text-[9px] font-black uppercase tracking-widest text-slate-400 w-[160px]">{isEditMode ? "Asignar Billetera" : "Billetera"}</th>
+                                {isEditMode && <th className="p-4 text-[9px] font-black uppercase tracking-widest text-slate-400 text-center w-[100px]">Acciones</th>}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                             {data.length > 0 ? data.map((item: any, idx: number) => (
-                                <tr key={item.id || idx} className="hover:bg-slate-50 dark:hover:bg-white/5">
+                                <tr key={item.id || idx} className="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
                                     <td className="p-4">
                                         {isEditMode ? (
                                             updatingId === `date-${item.id}` ? (
@@ -625,6 +695,16 @@ function AuditTable({ data, color, onUpdate, onUpdateDate, updatingId, isEditMod
                                     <td className="p-4">
                                         <p className="text-xs font-black text-slate-800 dark:text-white uppercase truncate max-w-[200px]">{item.beneficiario}</p>
                                         <p className="text-[9px] font-semibold text-slate-500 truncate max-w-[200px]">{item.concepto}</p>
+                                    </td>
+                                    <td className="p-4 text-center">
+                                        {item.imagenUrl ? (
+                                            <Button variant="ghost" size="sm" onClick={() => setPreviewImage(item.imagenUrl)} className="h-8 w-8 p-0 rounded-full bg-blue-50 text-blue-600 hover:scale-110 transition-transform" title="Ver Comprobante"><Eye className="w-4 h-4"/></Button>
+                                        ) : <span className="text-slate-200" title="Sin Comprobante"><ImageIcon className="w-4 h-4 mx-auto"/></span>}
+                                    </td>
+                                    <td className="p-4 text-center">
+                                        <Badge variant="secondary" className="text-[8px] uppercase font-bold text-slate-500">
+                                            {item.area === 'IMPRESION' ? 'Impresión' : item.area === 'CORTE' ? 'Corte' : item.area === 'DISEÑO' ? 'Diseño' : 'General'}
+                                        </Badge>
                                     </td>
                                     <td className="p-4 text-right">
                                         <span className="text-sm font-black text-slate-900 dark:text-white">${item.monto.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
@@ -646,13 +726,13 @@ function AuditTable({ data, color, onUpdate, onUpdateDate, updatingId, isEditMod
                                     {isEditMode && (
                                         <td className="p-4 text-center">
                                             <div className="flex items-center justify-center gap-2">
-                                                <Button variant="ghost" size="icon" onClick={() => onEdit(item, item.type)} className="h-8 w-8 text-blue-500 hover:bg-blue-50"><Pencil className="w-4 h-4" /></Button>
+                                                <Button variant="ghost" size="icon" onClick={() => onEdit(item, item.type)} className="h-8 w-8 text-blue-500 hover:bg-blue-50" title="Editar Monto/Área"><Pencil className="w-4 h-4" /></Button>
                                                 <Button variant="ghost" size="icon" onClick={() => onDelete(item, item.type)} className="h-8 w-8 text-rose-500 hover:bg-rose-50"><Trash2 className="w-4 h-4" /></Button>
                                             </div>
                                         </td>
                                     )}
                                 </tr>
-                            )) : <tr><td colSpan={isEditMode ? 5 : 4} className="p-10 text-center text-slate-400 text-xs font-bold uppercase">Sin movimientos</td></tr>}
+                            )) : <tr><td colSpan={isEditMode ? 7 : 6} className="p-10 text-center text-slate-400 text-xs font-bold uppercase">Sin movimientos</td></tr>}
                         </tbody>
                     </table>
                 </div>
