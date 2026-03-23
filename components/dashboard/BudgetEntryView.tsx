@@ -14,10 +14,16 @@ import {
 import { createOrden } from "@/lib/services/ordenes-service";
 import { getLastOrderNumber } from "@/lib/firebase/ordenes";
 
+// NUEVOS IMPORT PARA CLIENTES
+import { subscribeToClients } from "@/lib/services/clientes-service";
+import { db } from "@/lib/firebase";
+import { collection, addDoc } from "firebase/firestore";
+
 // --- UI COMPONENTS ---
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +42,7 @@ import {
     Plus, Trash2, FileText, Save, Clock, Download, 
     User, Calculator, TrendingUp, Sparkles, Layers, Zap, Wallet, X,
     DollarSign, CheckCircle2, Calendar, Pencil, RotateCcw, Check, 
-    AlertCircle, Hourglass, Banknote, ChevronDown
+    AlertCircle, Hourglass, Banknote, ChevronDown, Building2, Users
 } from "lucide-react"; 
 
 import { cn } from "@/lib/utils";
@@ -52,7 +58,6 @@ const SMR_CATALOG = [
 ];
 
 export default function BudgetEntryView({
-    // AÑADIDO: 'rates' para manejar varias monedas
     rates = { usd: 0, eur: 0, usdt: 0 }, 
     currentBcvRate, pdfLogoBase64, firmaBase64, selloBase64,
     handleLogoUpload, handleClearLogo, handleFirmaUpload, 
@@ -60,7 +65,6 @@ export default function BudgetEntryView({
     currentUserId
 }: any) {
     
-    // Si rates viene vacío, usamos currentBcvRate como fallback para USD
     const safeRates = useMemo(() => ({
         usd: rates.usd || currentBcvRate || 1,
         eur: rates.eur || 1,
@@ -71,6 +75,7 @@ export default function BudgetEntryView({
     const initialBudgetState = { 
         id: null as string | null, 
         clienteNombre: '', 
+        isMaster: false, 
         items: [] as any[],
         dateCreated: null as string | null 
     };
@@ -78,30 +83,50 @@ export default function BudgetEntryView({
     const [budgetData, setBudgetData] = useState(initialBudgetState);
     const [newItem, setNewItem] = useState({ 
         id: null as number | null, 
+        subCliente: '', 
         descripcion: '', 
         cantidad: 1, 
         precioUnitarioUSD: 0 
     });
+    
     const [history, setHistory] = useState<any[]>([]); 
+    const [clientsList, setClientsList] = useState<any[]>([]); // ESTADO PARA LOS CLIENTES DE LA BD
+    const [showClientSuggestions, setShowClientSuggestions] = useState(false);
+    
     const [isLoading, setIsLoading] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [errors, setErrors] = useState<any>({}); 
+    
     const suggestionRef = useRef<HTMLDivElement>(null);
+    const clientRef = useRef<HTMLDivElement>(null); // REF PARA CERRAR EL BUSCADOR DE CLIENTES
 
     // --- CÁLCULOS ---
     const totalUSD = useMemo(() => 
         budgetData.items.reduce((sum: number, i: any) => sum + i.totalUSD, 0), 
     [budgetData.items]);
 
-    // --- CARGAR HISTORIAL ---
+    const groupedItems = useMemo(() => {
+        if (!budgetData.isMaster) return { 'General': budgetData.items };
+        const groups: any = {};
+        budgetData.items.forEach(item => {
+            const sc = item.subCliente || 'General';
+            if (!groups[sc]) groups[sc] = [];
+            groups[sc].push(item);
+        });
+        return groups;
+    }, [budgetData.items, budgetData.isMaster]);
+
+    const uniqueSubClientes = useMemo(() => {
+        if (!budgetData.isMaster) return [];
+        return Array.from(new Set(budgetData.items.map(i => i.subCliente).filter(sc => sc && sc.trim() !== '')));
+    }, [budgetData.items, budgetData.isMaster]);
+
+    // --- CARGAR DATOS EXTERNOS (Historial y Clientes) ---
     const fetchHistory = useCallback(async () => {
         try {
             const data = await loadBudgetsFromFirestore();
             if (data) {
-                const uniqueEntries = Array.from(
-                    new Map(data.map((item: any) => [item.id, item])).values()
-                );
-                // Ordenar por fecha, más reciente primero
+                const uniqueEntries = Array.from(new Map(data.map((item: any) => [item.id, item])).values());
                 uniqueEntries.sort((a: any, b: any) => {
                     const dateA = a.dateCreated ? new Date(a.dateCreated).getTime() : 0;
                     const dateB = b.dateCreated ? new Date(b.dateCreated).getTime() : 0;
@@ -109,30 +134,77 @@ export default function BudgetEntryView({
                 });
                 setHistory(uniqueEntries);
             }
-        } catch (e) { 
-            console.error("Error al cargar historial:", e); 
-        }
+        } catch (e) { console.error("Error al cargar historial:", e); }
     }, []);
 
-    useEffect(() => { fetchHistory(); }, [fetchHistory]);
+    useEffect(() => { 
+        fetchHistory(); 
+        
+        // SUSCRIBIR A LA BASE DE DATOS DE CLIENTES
+        const unsubscribeClients = subscribeToClients((data) => {
+            setClientsList(data);
+        });
 
-    // --- AUXILIAR: CALCULAR DÍAS TRANSCURRIDOS ---
+        // DETECTAR CLICS AFUERA PARA CERRAR LOS BUSCADORES
+        function handleClickOutside(event: any) {
+            if (clientRef.current && !clientRef.current.contains(event.target)) {
+                setShowClientSuggestions(false);
+            }
+            if (suggestionRef.current && !suggestionRef.current.contains(event.target)) {
+                setShowSuggestions(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+
+        return () => {
+            unsubscribeClients();
+            document.removeEventListener("mousedown", handleClickOutside);
+        };
+    }, [fetchHistory]);
+
     const getDaysElapsed = (dateString: string | null) => {
         if (!dateString) return 0;
         const diff = new Date().getTime() - new Date(dateString).getTime();
         return Math.floor(diff / (1000 * 3600 * 24));
     };
 
+    // --- LÓGICA DE CLIENTES ---
+    // Filtramos la lista de la BD por lo que se va escribiendo
+    const filteredClients = clientsList.filter(c => 
+        c.nombreRazonSocial?.toLowerCase().includes(budgetData.clienteNombre.toLowerCase())
+    );
+    // Verificamos si lo que está escrito es exactamente igual a un cliente para no mostrar el botón de "Guardar"
+    const exactClientMatch = clientsList.some(c => 
+        c.nombreRazonSocial?.toLowerCase() === budgetData.clienteNombre.trim().toLowerCase()
+    );
+
+    const handleSaveNewClient = async (nombre: string) => {
+        try {
+            await addDoc(collection(db, "clientes"), {
+                nombreRazonSocial: nombre.trim().toUpperCase(),
+                rifCedulaCompleto: "EXPRESS", 
+                telefono: "N/A",
+                domicilioFiscal: "N/A",
+                correo: "",
+                fechaRegistro: new Date().toISOString()
+            });
+            toast.success(`¡Cliente "${nombre}" guardado en la base de datos!`);
+            setShowClientSuggestions(false);
+        } catch (error) {
+            console.error("Error guardando cliente:", error);
+            toast.error("Hubo un error al guardar el cliente.");
+        }
+    };
+
+
     // --- LÓGICA DE PDF ---
     const handleDownloadPDF = async (data: any, rateType: 'USD' | 'EUR' | 'USDT' | 'USD_ONLY') => {
-        // Preparamos la data asegurando que tenga el total y fecha
         const dataToPrint = {
             ...data,
-            totalUSD: data.totalUSD || totalUSD, // Si viene del historial tiene total, si es el actual usa el calculado
+            totalUSD: data.totalUSD || totalUSD, 
             dateCreated: data.dateCreated || new Date().toISOString()
         };
 
-        // Configuramos la moneda
         let selectedCurrency = { rate: safeRates.usd, label: "Tasa BCV ($)", symbol: "Bs." };
         if (rateType === 'EUR') selectedCurrency = { rate: safeRates.eur, label: "Tasa BCV (€)", symbol: "Bs." };
         if (rateType === 'USDT') selectedCurrency = { rate: safeRates.usdt, label: "Tasa Monitor", symbol: "Bs." };
@@ -141,11 +213,7 @@ export default function BudgetEntryView({
         await generateBudgetPDF(
             dataToPrint, 
             pdfLogoBase64, 
-            { 
-                firmaBase64, 
-                selloBase64,
-                currency: selectedCurrency
-            }
+            { firmaBase64, selloBase64, currency: selectedCurrency }
         );
     };
 
@@ -154,15 +222,17 @@ export default function BudgetEntryView({
         const newErrors: any = {};
         let hasError = false;
 
+        if (budgetData.isMaster && !newItem.subCliente.trim()) { newErrors.subCliente = true; hasError = true; }
         if (!newItem.descripcion.trim()) { newErrors.descripcion = true; hasError = true; }
         if (newItem.cantidad <= 0) { newErrors.cantidad = true; hasError = true; }
 
         if (hasError) {
             setErrors((prev: any) => ({ ...prev, ...newErrors }));
-            toast.error("Complete los datos del ítem");
+            toast.error("Complete los datos requeridos");
             return;
         }
 
+        const subC = newItem.subCliente.trim();
         const desc = newItem.descripcion.trim() || "Concepto General";
         const calculatedTotal = newItem.cantidad * newItem.precioUnitarioUSD;
 
@@ -171,7 +241,7 @@ export default function BudgetEntryView({
                 ...prev,
                 items: prev.items.map((item: any) => 
                     item.id === newItem.id 
-                    ? { ...newItem, descripcion: desc, totalUSD: calculatedTotal } 
+                    ? { ...newItem, subCliente: subC, descripcion: desc, totalUSD: calculatedTotal } 
                     : item
                 )
             }));
@@ -179,19 +249,20 @@ export default function BudgetEntryView({
         } else {
             setBudgetData((prev: any) => ({ 
                 ...prev, 
-                items: [...prev.items, { ...newItem, descripcion: desc, id: Date.now(), totalUSD: calculatedTotal }] 
+                items: [...prev.items, { ...newItem, subCliente: subC, descripcion: desc, id: Date.now(), totalUSD: calculatedTotal }] 
             }));
             toast.success("Concepto añadido");
         }
 
-        setNewItem({ id: null, descripcion: '', cantidad: 1, precioUnitarioUSD: 0 });
+        setNewItem({ id: null, subCliente: budgetData.isMaster ? subC : '', descripcion: '', cantidad: 1, precioUnitarioUSD: 0 });
         setShowSuggestions(false);
-        setErrors((prev:any) => ({ ...prev, descripcion: false, cantidad: false, precio: false })); 
+        setErrors((prev:any) => ({ ...prev, subCliente: false, descripcion: false, cantidad: false, precio: false })); 
     };
 
     const handleEditItemRequest = (item: any) => {
         setNewItem({
             id: item.id,
+            subCliente: item.subCliente || '', 
             descripcion: item.descripcion,
             cantidad: item.cantidad,
             precioUnitarioUSD: item.precioUnitarioUSD
@@ -208,7 +279,7 @@ export default function BudgetEntryView({
         
         if (hasError) {
             setErrors((prev: any) => ({ ...prev, ...newErrors }));
-            toast.error("Faltan datos obligatorios (Cliente)");
+            toast.error("Faltan datos obligatorios");
             return;
         }
 
@@ -244,7 +315,7 @@ export default function BudgetEntryView({
         const data = targetBudget || budgetData;
         if (data.items.length === 0) return toast.error("No hay conceptos para facturar");
 
-        const confirmConversion = window.confirm(`¿Convertir presupuesto de ${data.clienteNombre} en factura real? (Se borrará del historial)`);
+        const confirmConversion = window.confirm(`¿Convertir presupuesto de ${data.clienteNombre} en factura real?`);
         if (!confirmConversion) return;
 
         setIsLoading(true);
@@ -256,6 +327,7 @@ export default function BudgetEntryView({
                 ordenNumero: nextNumber,
                 fecha: new Date().toISOString(),
                 fechaEntrega: new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0],
+                isMaster: data.isMaster || false, 
                 cliente: {
                     nombreRazonSocial: data.clienteNombre,
                     rifCedula: "EXPRESS",
@@ -264,6 +336,7 @@ export default function BudgetEntryView({
                     correo: ""
                 },
                 items: data.items.map((item: any) => ({
+                    subCliente: data.isMaster ? (item.subCliente || '') : '',
                     nombre: item.descripcion,
                     cantidad: item.cantidad,
                     precioUnitario: item.precioUnitarioUSD,
@@ -295,6 +368,7 @@ export default function BudgetEntryView({
         setBudgetData({
             id: entry.id,
             clienteNombre: entry.clienteNombre,
+            isMaster: entry.isMaster || false, 
             items: entry.items || [],
             dateCreated: entry.dateCreated || null
         });
@@ -354,28 +428,87 @@ export default function BudgetEntryView({
                     <Card className="rounded-[3rem] border-none shadow-2xl bg-white dark:bg-slate-900 overflow-hidden">
                         <div className="p-8 md:p-12 space-y-10">
                             
-                            <div className="flex justify-between items-center">
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                                 <Label className={cn("text-[10px] font-black uppercase tracking-widest ml-4 flex items-center gap-2", errors.clienteNombre ? "text-red-500" : "text-slate-400")}>
-                                    Datos del Cliente {errors.clienteNombre && <span className="text-[8px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">Requerido</span>}
+                                    {budgetData.isMaster ? "Empresa Matriz" : "Datos del Cliente"} 
+                                    {errors.clienteNombre && <span className="text-[8px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">Requerido</span>}
                                 </Label>
-                                {(budgetData.id || budgetData.items.length > 0) && (
-                                    <Button variant="ghost" size="sm" onClick={() => { setBudgetData(initialBudgetState); setErrors({}); }} className="text-[9px] font-black uppercase text-red-400 gap-1 hover:bg-red-50">
-                                        <RotateCcw className="w-3 h-3"/> Resetear Formulario
+                                
+                                <div className="flex items-center gap-2 w-full md:w-auto px-4 md:px-0">
+                                    <Button 
+                                        variant="outline" 
+                                        onClick={() => { setBudgetData({...budgetData, isMaster: !budgetData.isMaster}); setErrors({}); }} 
+                                        className={cn(
+                                            "text-[10px] font-black uppercase tracking-wider rounded-xl transition-all h-10 w-full md:w-auto", 
+                                            budgetData.isMaster ? "bg-blue-50 text-blue-700 border-blue-200 shadow-sm hover:bg-blue-100" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        <Building2 className="w-4 h-4 mr-2"/> 
+                                        {budgetData.isMaster ? "Modo Matriz: ON" : "Presupuesto Matriz"}
                                     </Button>
-                                )}
+                                    
+                                    {(budgetData.id || budgetData.items.length > 0) && (
+                                        <Button variant="ghost" size="icon" onClick={() => { setBudgetData(initialBudgetState); setErrors({}); }} className="text-red-400 hover:bg-red-50 h-10 w-10 shrink-0">
+                                            <RotateCcw className="w-4 h-4"/>
+                                        </Button>
+                                    )}
+                                </div>
                             </div>
 
-                            <div className="relative">
-                                <User className={cn("absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 transition-colors", errors.clienteNombre ? "text-red-400" : "text-slate-300")} />
+                            {/* BUSCADOR DE CLIENTES CON AUTOCOMPLETADO */}
+                            <div className="relative w-full" ref={clientRef}>
+                                <User className={cn("absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 transition-colors z-10", errors.clienteNombre ? "text-red-400" : "text-slate-300")} />
                                 <Input 
                                     value={budgetData.clienteNombre} 
-                                    onChange={(e) => { setBudgetData({...budgetData, clienteNombre: e.target.value}); clearError('clienteNombre'); }} 
+                                    onChange={(e) => { 
+                                        setBudgetData({...budgetData, clienteNombre: e.target.value}); 
+                                        setShowClientSuggestions(true);
+                                        clearError('clienteNombre'); 
+                                    }} 
+                                    onFocus={() => setShowClientSuggestions(true)}
                                     className={cn(
-                                        "h-16 rounded-[1.5rem] border-none font-black text-xl px-16 shadow-inner transition-all",
+                                        "h-16 rounded-[1.5rem] border-none font-black text-xl px-16 shadow-inner transition-all relative z-0",
                                         errors.clienteNombre ? "bg-red-50 ring-2 ring-red-500/20 placeholder:text-red-300" : "bg-slate-50 dark:bg-slate-800/50"
                                     )}
-                                    placeholder="NOMBRE DEL CLIENTE..." 
+                                    placeholder={budgetData.isMaster ? "NOMBRE DE LA EMPRESA MATRIZ..." : "NOMBRE DEL CLIENTE..."} 
                                 />
+                                
+                                <AnimatePresence>
+                                    {showClientSuggestions && budgetData.clienteNombre.trim().length > 0 && (
+                                        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="absolute left-0 right-0 top-full mt-2 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl z-50 border border-slate-100 dark:border-slate-700 overflow-hidden max-h-64 overflow-y-auto">
+                                            
+                                            {/* LISTA DE CLIENTES COINCIDENTES */}
+                                            {filteredClients.map((c, i) => (
+                                                <button key={c.id || i} onClick={() => { 
+                                                    setBudgetData({...budgetData, clienteNombre: c.nombreRazonSocial}); 
+                                                    setShowClientSuggestions(false); 
+                                                    clearError('clienteNombre'); 
+                                                }} className="w-full text-left p-4 hover:bg-blue-50 dark:hover:bg-blue-500/10 font-bold text-xs uppercase border-b last:border-none text-slate-600 dark:text-slate-300 flex items-center gap-2">
+                                                    <User className="w-3 h-3 text-blue-500" />
+                                                    {c.nombreRazonSocial}
+                                                    {c.rifCedulaCompleto && c.rifCedulaCompleto !== "EXPRESS" && <span className="text-[9px] text-slate-400 ml-auto">{c.rifCedulaCompleto}</span>}
+                                                </button>
+                                            ))}
+
+                                            {/* BOTÓN PARA GUARDAR SI NO HAY COINCIDENCIA EXACTA */}
+                                            {!exactClientMatch && budgetData.clienteNombre.trim().length > 2 && (
+                                                <div className="p-3 bg-slate-50 dark:bg-slate-900 border-t border-slate-100 dark:border-slate-700">
+                                                    <Button 
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={(e) => {
+                                                            e.preventDefault();
+                                                            handleSaveNewClient(budgetData.clienteNombre);
+                                                        }} 
+                                                        className="w-full text-xs font-bold text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100 gap-2"
+                                                    >
+                                                        <Save className="w-3 h-3"/> Añadir "{budgetData.clienteNombre}" a Base de Datos
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
                             </div>
 
                             {/* CONCEPTOS */}
@@ -383,16 +516,46 @@ export default function BudgetEntryView({
                                 <h3 className="font-black text-[10px] uppercase tracking-widest text-slate-400 ml-4 flex items-center gap-2">
                                     <Layers className="w-4 h-4 text-blue-500" /> Conceptos {newItem.id && <Badge className="bg-amber-500 ml-2">Editando</Badge>}
                                 </h3>
-                                <div className={cn("p-4 bg-slate-50 dark:bg-slate-800/50 rounded-[2rem] border space-y-4 transition-all", (errors.descripcion || errors.cantidad) ? "border-red-200 bg-red-50/30" : "border-black/5")}>
+                                <div className={cn("p-4 bg-slate-50 dark:bg-slate-800/50 rounded-[2rem] border space-y-4 transition-all", (errors.descripcion || errors.cantidad || errors.subCliente) ? "border-red-200 bg-red-50/30" : "border-black/5")}>
+                                    
+                                    {budgetData.isMaster && (
+                                        <div className="mb-4">
+                                            <Input 
+                                                value={newItem.subCliente} 
+                                                onChange={(e) => { setNewItem({...newItem, subCliente: e.target.value}); clearError('subCliente'); }} 
+                                                className={cn(
+                                                    "h-12 rounded-xl border-none px-6 font-bold text-sm shadow-sm transition-all",
+                                                    errors.subCliente ? "bg-red-50 ring-1 ring-red-300 placeholder:text-red-300" : "bg-white dark:bg-slate-900 text-blue-600 placeholder:text-blue-300/50"
+                                                )}
+                                                placeholder="Nombre del Sub-Cliente o Sucursal (Ej. Tienda Centro)..."
+                                            />
+                                            {uniqueSubClientes.length > 0 && (
+                                                <div className="flex flex-wrap items-center gap-2 mt-2 px-2">
+                                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Recientes:</span>
+                                                    {uniqueSubClientes.map(sc => (
+                                                        <Badge
+                                                            key={sc as string}
+                                                            variant="secondary"
+                                                            className="cursor-pointer hover:bg-blue-100 hover:text-blue-700 bg-white dark:bg-slate-800 text-slate-500 text-[10px] transition-colors shadow-sm"
+                                                            onClick={() => { setNewItem({...newItem, subCliente: sc as string}); clearError('subCliente'); }}
+                                                        >
+                                                            {sc as string}
+                                                        </Badge>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
                                     <div className="relative" ref={suggestionRef}>
-                                        <Input 
+                                        <Textarea 
                                             value={newItem.descripcion} 
                                             onChange={(e) => { setNewItem({...newItem, descripcion: e.target.value}); setShowSuggestions(true); clearError('descripcion'); }} 
                                             className={cn(
-                                                "h-14 rounded-xl border-none px-6 font-bold text-base shadow-sm transition-all",
+                                                "min-h-[80px] py-4 rounded-xl border-none px-6 font-bold text-base shadow-sm transition-all resize-y",
                                                 errors.descripcion ? "bg-red-50 ring-1 ring-red-300 placeholder:text-red-300" : "bg-white dark:bg-slate-900"
                                             )}
-                                            placeholder={errors.descripcion ? "⚠️ Escribe una descripción..." : "Descripción del trabajo..."}
+                                            placeholder={errors.descripcion ? "⚠️ Escribe una descripción..." : "Nombre del ítem...\nDetalles adicionales..."}
                                         />
                                         <AnimatePresence>
                                             {showSuggestions && newItem.descripcion.length > 1 && (
@@ -439,11 +602,6 @@ export default function BudgetEntryView({
                                             </Button>
                                         </div>
                                     </div>
-                                    {(errors.descripcion || errors.cantidad) && (
-                                        <p className="text-[10px] font-bold text-red-500 flex items-center gap-1 pl-2">
-                                            <AlertCircle className="w-3 h-3" /> Faltan datos en el ítem
-                                        </p>
-                                    )}
                                 </div>
                             </div>
 
@@ -458,29 +616,69 @@ export default function BudgetEntryView({
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {budgetData.items.map(item => (
-                                            <TableRow key={item.id} className={cn("h-16 border-b dark:border-slate-800 last:border-none transition-colors", newItem.id === item.id && "bg-blue-50/50 dark:bg-blue-500/5")}>
-                                                <TableCell className="px-8 font-bold uppercase text-[11px] text-slate-600 dark:text-slate-300">
-                                                    {item.descripcion} <span className="ml-2 text-slate-400 font-black italic">x{item.cantidad}</span>
-                                                </TableCell>
-                                                <TableCell className="text-right px-8 font-black text-blue-600 text-sm tracking-tight">${item.totalUSD.toFixed(2)}</TableCell>
-                                                <TableCell className="pr-6">
-                                                    <div className="flex items-center justify-end gap-1">
-                                                        <Button variant="ghost" size="icon" onClick={() => handleEditItemRequest(item)} className="text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10">
-                                                            <Pencil className="w-4 h-4" />
-                                                        </Button>
-                                                        <Button variant="ghost" size="icon" onClick={() => setBudgetData((p:any) => ({...p, items: p.items.filter((i:any) => i.id !== item.id)}))} className="text-red-400 hover:bg-red-50">
-                                                            <Trash2 className="w-4 h-4"/>
-                                                        </Button>
-                                                    </div>
-                                                </TableCell>
-                                            </TableRow>
+                                        {Object.entries(groupedItems).map(([subCliente, items]: any) => (
+                                            <React.Fragment key={subCliente}>
+                                                
+                                                {budgetData.isMaster && (
+                                                    <TableRow 
+                                                        className="bg-blue-50/80 dark:bg-blue-900/30 border-none group cursor-pointer hover:bg-blue-100/80 transition-colors"
+                                                        onClick={() => { 
+                                                            setNewItem({...newItem, subCliente: subCliente}); 
+                                                            clearError('subCliente');
+                                                            window.scrollTo({ top: 0, behavior: 'smooth' }); 
+                                                        }}
+                                                        title="Clic para añadir un ítem a este cliente"
+                                                    >
+                                                        <TableCell colSpan={3} className="px-8 py-3">
+                                                            <div className="flex items-center justify-between">
+                                                                <span className="font-black text-[10px] uppercase tracking-widest text-blue-800 dark:text-blue-400 flex items-center gap-2">
+                                                                    <Users className="w-3 h-3"/> {subCliente}
+                                                                </span>
+                                                                <span className="text-[9px] font-bold text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                                                                    <Plus className="w-3 h-3"/> Añadir
+                                                                </span>
+                                                            </div>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )}
+
+                                                {items.map((item: any) => (
+                                                    <TableRow key={item.id} className={cn("h-16 border-b dark:border-slate-800 transition-colors", newItem.id === item.id && "bg-amber-50 dark:bg-amber-500/5", budgetData.isMaster && "border-none")}>
+                                                        <TableCell className="px-8 font-bold uppercase text-[11px] text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed py-4">
+                                                            {item.descripcion} <span className="ml-2 text-slate-400 font-black italic">x{item.cantidad}</span>
+                                                        </TableCell>
+                                                        <TableCell className="text-right px-8 font-black text-blue-600 text-sm tracking-tight">${item.totalUSD.toFixed(2)}</TableCell>
+                                                        <TableCell className="pr-6">
+                                                            <div className="flex items-center justify-end gap-1">
+                                                                <Button variant="ghost" size="icon" onClick={() => handleEditItemRequest(item)} className="text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10">
+                                                                    <Pencil className="w-4 h-4" />
+                                                                </Button>
+                                                                <Button variant="ghost" size="icon" onClick={() => setBudgetData((p:any) => ({...p, items: p.items.filter((i:any) => i.id !== item.id)}))} className="text-red-400 hover:bg-red-50">
+                                                                    <Trash2 className="w-4 h-4"/>
+                                                                </Button>
+                                                            </div>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+
+                                                {budgetData.isMaster && (
+                                                    <TableRow className="bg-slate-50/50 dark:bg-slate-800/30 hover:bg-slate-50/50">
+                                                        <TableCell className="text-right px-8 font-black text-[9px] uppercase tracking-widest text-slate-500">
+                                                            Subtotal {subCliente}
+                                                        </TableCell>
+                                                        <TableCell className="text-right px-8 font-black text-slate-700 dark:text-slate-200">
+                                                            ${items.reduce((s:number, i:any) => s + i.totalUSD, 0).toFixed(2)}
+                                                        </TableCell>
+                                                        <TableCell></TableCell>
+                                                    </TableRow>
+                                                )}
+                                            </React.Fragment>
                                         ))}
                                     </TableBody>
                                 </Table>
                             </div>
 
-                            {/* BOTONES DE ACCIÓN (DROPDOWN AÑADIDO) */}
+                            {/* BOTONES DE ACCIÓN */}
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <Button onClick={() => handleConvertToOrder()} disabled={isLoading || budgetData.items.length === 0} className="h-16 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black uppercase text-xs gap-3 shadow-xl active:scale-95 transition-all">
                                     {isLoading ? <Clock className="animate-spin w-5 h-5" /> : <Zap className="w-5 h-5" />} Facturar ahora
@@ -489,7 +687,6 @@ export default function BudgetEntryView({
                                     <Save className="w-5 h-5" /> {budgetData.id ? "Actualizar Registro" : "Guardar Borrador"}
                                 </Button>
                                 
-                                {/* NUEVO DROPDOWN PARA EXPORTAR PDF */}
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                         <Button 
@@ -547,7 +744,10 @@ export default function BudgetEntryView({
                                     <Card className="p-5 rounded-[2.5rem] border-none shadow-lg bg-white dark:bg-slate-900 group relative overflow-hidden transition-all hover:scale-[1.02]">
                                         <div className="flex justify-between items-start">
                                             <div className="space-y-2 min-w-0 pr-4">
-                                                <h4 className="font-black text-slate-800 dark:text-slate-100 text-sm truncate uppercase italic tracking-tight">{entry.clienteNombre}</h4>
+                                                <h4 className="font-black text-slate-800 dark:text-slate-100 text-sm truncate uppercase italic tracking-tight flex items-center gap-2">
+                                                    {entry.isMaster && <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0"/>}
+                                                    {entry.clienteNombre}
+                                                </h4>
                                                 <div className="flex flex-wrap gap-2">
                                                     <Badge variant="outline" className="border-slate-200 text-slate-400 font-bold text-[9px] h-5 px-1.5 flex gap-1">
                                                         <Calendar className="w-2.5 h-2.5" /> 
@@ -569,7 +769,6 @@ export default function BudgetEntryView({
                                                 <Pencil className="w-4 h-4" />
                                             </Button>
 
-                                            {/* DROPDOWN PARA ITEMS DEL HISTORIAL */}
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <Button size="icon" className="h-10 w-10 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-colors shadow-sm">

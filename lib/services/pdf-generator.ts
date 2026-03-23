@@ -12,29 +12,30 @@ const COMPANY_DATA = {
 };
 
 // --- CONFIGURACIÓN DE PÁGINA ---
-const LETTER_WIDTH = 612; // Ancho estándar carta (puntos)
-const MIN_HEIGHT = 792;   // Alto estándar carta (puntos)
+const LETTER_WIDTH = 612; 
+const MIN_HEIGHT = 792;   
 
-// --- FUNCIÓN DE CÁLCULO DE ALTURA CORREGIDA ---
-const getDynamicPageSize = (itemCount: number) => {
-    // AJUSTE: Aumentamos drásticamente la base fija.
-    // Antes 450 -> Ahora 850.
-    // Esto cuenta: Cabecera + Totals + Notas + Sello (150pts) + Firma + Pie Fiscal + Márgenes.
+const getDynamicPageSize = (items: any[]) => {
     const fixedHeightBase = 850; 
-    
-    // Aumentamos el estimado por ítem por si hay descripciones de 2 líneas
-    const heightPerItem = 50; 
+    const baseHeightPerItem = 50; 
+    const extraHeightPerLine = 15; 
 
-    const estimatedHeight = fixedHeightBase + (itemCount * heightPerItem);
+    let totalItemsHeight = 0;
+
+    items.forEach(item => {
+        const textToAnalyze = item.descripcion || item.nombre || "";
+        const lineBreaks = (textToAnalyze.match(/\n/g) || []).length;
+        totalItemsHeight += baseHeightPerItem + (lineBreaks * extraHeightPerLine);
+    });
+
+    const estimatedHeight = fixedHeightBase + totalItemsHeight;
     
     return { 
         width: LETTER_WIDTH, 
-        // Si el estimado es menor que una carta (792), usa carta. Si es mayor, usa el estimado.
         height: Math.max(MIN_HEIGHT, estimatedHeight) 
     };
 };
 
-// --- HELPER PARA CARGA DINÁMICA ---
 async function loadPdfDependencies() {
     if (typeof window === 'undefined') return null; 
     
@@ -65,7 +66,6 @@ async function loadPdfDependencies() {
     return pdfMake;
 }
 
-// --- CONSTANTES ---
 const PRECIO_LASER_POR_MINUTO = 0.8;
 const NOTAS_LEGALES = [
   "LOS PRECIOS NO INCLUYEN IVA, SOLO FACTURA NOTA DE ENTREGA.",
@@ -74,7 +74,6 @@ const NOTAS_LEGALES = [
 ];
 const FALLBACK_LOGO_PRINCIPAL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYGD4DwAChwGAf60MhQAAAABJRU5ErkJggg==";
 
-// --- INTERFACES ---
 export interface PDFOptions {
   bcvRate?: number;
   firmaBase64?: string;
@@ -82,12 +81,11 @@ export interface PDFOptions {
   currency?: { rate: number; label: string; symbol: string; };
 }
 
-interface BudgetItem { descripcion: string; cantidad: number; precioUnitarioUSD: number; totalUSD: number; }
-interface BudgetData { titulo: string; clienteNombre: string; clienteCedula?: string; items: BudgetItem[]; totalUSD: number; fechaCreacion: string; }
+interface BudgetItem { subCliente?: string; descripcion: string; cantidad: number; precioUnitarioUSD: number; totalUSD: number; }
+interface BudgetData { isMaster?: boolean; titulo: string; clienteNombre: string; clienteCedula?: string; items: BudgetItem[]; totalUSD: number; fechaCreacion: string; }
 export interface ConsolidatedItem { parentOrder: string; nombre: string; cantidad: number; medidasTiempo: string; precioUnitario: number; totalUSD: number; }
 export interface GeneralAccountStatusData { clienteNombre: string; clienteRIF: string; items: ConsolidatedItem[]; totalPendienteUSD: number; fechaReporte: string; }
 
-// --- LÓGICA ---
 const calculateItemSubtotal = (item: any): number => {
   if (item.subtotal !== undefined && item.subtotal !== null) return parseFloat(item.subtotal);
   if (item.totalAjustado !== undefined) return parseFloat(item.totalAjustado);
@@ -110,16 +108,12 @@ const calculateItemSubtotal = (item: any): number => {
   return finalCantidad * finalPrecio;
 };
 
-// --- DISEÑO ---
 const customTableLayout = {
     hLineWidth: (i: number) => 1, vLineWidth: (i: number) => 1, hLineColor: () => "black", vLineColor: () => "black",
     fillColor: (i: number) => (i === 0 ? "#EEEEEE" : null),
     paddingLeft: () => 8, paddingRight: () => 8, paddingTop: () => 6, paddingBottom: () => 6,
 };
 
-// --- COMPONENTES DE DISEÑO ---
-
-// 1. Marca de Agua Fiscal (Alineada a la derecha, pequeña)
 const getCompanyFooter = () => ({
     stack: [
         { text: COMPANY_DATA.name, style: "watermarkTitle" },
@@ -127,10 +121,9 @@ const getCompanyFooter = () => ({
         { text: COMPANY_DATA.address, style: "watermarkText" }
     ],
     alignment: "right",
-    margin: [150, 10, 0, 0] // Margen izquierdo grande para forzar alineación derecha compacta
+    margin: [150, 10, 0, 0] 
 });
 
-// 2. Bloque de Firmas
 const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: string | undefined) => ({
     columns: [
         { width: "*", text: "" },
@@ -160,7 +153,6 @@ const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: 
     ],
 });
 
-// 3. BLOQUE FINAL UNIFICADO (FIRMA + MARCA DE AGUA)
 const getUnifiedFooterBlock = (firmaBase64: string | undefined, selloBase64: string | undefined) => ({
     stack: [
         { text: "SIN MAS QUE HACER REFERENCIA...", style: "farewellText", alignment: "center", margin: [0, 20, 0, 20] },
@@ -170,7 +162,6 @@ const getUnifiedFooterBlock = (firmaBase64: string | undefined, selloBase64: str
     unbreakable: true 
 });
 
-// --- ESTILOS ---
 const COMMON_STYLES = {
     title: { fontSize: 16, bold: true, color: "#333333" },
     tableHeader: { bold: true, fontSize: 10, fillColor: "#EEEEEE" },
@@ -178,6 +169,7 @@ const COMMON_STYLES = {
     itemTotal: { fontSize: 9, bold: true },
     finalTotalValueBig: { fontSize: 14, bold: true, color: "#007bff" },
     finalTotalLabelBig: { fontSize: 10, bold: true, color: "#000000" },
+    divisionHeader: { fontSize: 10, bold: true, color: "#1e3a8a", fillColor: "#dbeafe", margin: [0, 2, 0, 2] }, 
     dateInfo: { fontSize: 10 },
     clientInfo: { fontSize: 10, bold: true },
     contactName: { fontSize: 10, bold: true },
@@ -189,10 +181,9 @@ const COMMON_STYLES = {
     watermarkText: { fontSize: 6, color: "#AAAAAA", lineHeight: 1.1 }
 };
 
-// --- GENERADORES PDF ---
 
 // 1. ORDEN DE SERVICIO
-export async function generateOrderPDF(orden: OrdenServicio, SMRLogoBase64: string, options: PDFOptions = {}) {
+export async function generateOrderPDF(orden: any, SMRLogoBase64: string, options: PDFOptions = {}) {
   const pdfMake = await loadPdfDependencies();
   if (!pdfMake) return;
 
@@ -200,38 +191,71 @@ export async function generateOrderPDF(orden: OrdenServicio, SMRLogoBase64: stri
   const totalUSD = orden.totalUSD;
   const abonadoUSD = orden.montoPagadoUSD || 0;
   const restanteUSD = Math.max(0, totalUSD - abonadoUSD);
-    
-  const itemRows = orden.items.map((item: any) => {
-    const subtotal = calculateItemSubtotal(item);
-    let med = item.unidad === "m2" ? `${item.medidaXCm}x${item.medidaYCm}cm` : (item.tiempoCorte || "N/A");
-    let desc = item.nombre + (item.materialDetalleCorte || item.materialDeImpresion ? `\n(${item.materialDetalleCorte || item.materialDeImpresion})` : "");
-    return [
-      { text: item.cantidad, style: "itemText" },
-      { text: desc, style: "itemText" },
-      { text: med, style: "itemText", alignment: "center" },
-      { text: formatCurrency(subtotal), style: "itemTotal", alignment: "right" },
-    ];
-  });
+
+  let tableBody: any[] = [
+      [{ text: "Cant.", style: "tableHeader" }, { text: "Descripción", style: "tableHeader" }, { text: "Medida/Tiempo", style: "tableHeader", alignment: "center" }, { text: "Monto", style: "tableHeader", alignment: "right" }]
+  ];
+
+  if (orden.isMaster) {
+      const groupedItems = orden.items.reduce((acc: any, item: any) => {
+          const sc = item.subCliente?.trim() || 'General';
+          if (!acc[sc]) acc[sc] = [];
+          acc[sc].push(item);
+          return acc;
+      }, {});
+
+      Object.keys(groupedItems).forEach((sc) => {
+          tableBody.push([
+              { text: `SUB-CLIENTE: ${sc.toUpperCase()}`, colSpan: 4, style: "divisionHeader", alignment: "left" }, {}, {}, {}
+          ]);
+          let subtotal = 0;
+          groupedItems[sc].forEach((item: any) => {
+              const itemSubtotal = calculateItemSubtotal(item);
+              subtotal += itemSubtotal;
+              let med = item.unidad === "m2" ? `${item.medidaXCm}x${item.medidaYCm}cm` : (item.tiempoCorte || "N/A");
+              let desc = item.nombre + (item.materialDetalleCorte || item.materialDeImpresion ? `\n(${item.materialDetalleCorte || item.materialDeImpresion})` : "");
+              
+              tableBody.push([
+                  { text: item.cantidad, style: "itemText" },
+                  { text: desc, style: "itemText" },
+                  { text: med, style: "itemText", alignment: "center" },
+                  { text: formatCurrency(itemSubtotal), style: "itemTotal", alignment: "right" },
+              ]);
+          });
+          tableBody.push([
+              { text: `SUBTOTAL ${sc.toUpperCase()}`, colSpan: 3, style: "itemText", alignment: "right", color: "#64748b" }, {}, {}, 
+              { text: formatCurrency(subtotal), style: "itemTotal", alignment: "right", color: "#64748b" }
+          ]);
+      });
+  } else {
+      orden.items.forEach((item: any) => {
+          const subtotal = calculateItemSubtotal(item);
+          let med = item.unidad === "m2" ? `${item.medidaXCm}x${item.medidaYCm}cm` : (item.tiempoCorte || "N/A");
+          let desc = item.nombre + (item.materialDetalleCorte || item.materialDeImpresion ? `\n(${item.materialDetalleCorte || item.materialDeImpresion})` : "");
+          
+          tableBody.push([
+              { text: item.cantidad, style: "itemText" },
+              { text: desc, style: "itemText" },
+              { text: med, style: "itemText", alignment: "center" },
+              { text: formatCurrency(subtotal), style: "itemTotal", alignment: "right" },
+          ]);
+      });
+  }
+
+  tableBody.push([{ text: "SUBTOTAL", colSpan: 3, style: "finalTotalLabelBig", alignment: "right" }, {}, {}, { text: formatCurrency(totalUSD), style: "itemTotal", alignment: "right" }]);
+  tableBody.push([{ text: "ABONADO", colSpan: 3, style: "finalTotalLabelBig", alignment: "right", color: "#16a34a" }, {}, {}, { text: formatCurrency(abonadoUSD), style: "itemTotal", alignment: "right", color: "#16a34a" }]);
+  tableBody.push([{ text: "TOTAL RESTANTE", colSpan: 3, style: "finalTotalLabelBig", alignment: "right", color: restanteUSD > 0.01 ? "#dc2626" : "black" }, {}, {}, { text: formatCurrency(restanteUSD), style: "finalTotalValueBig", alignment: "right", color: restanteUSD > 0.01 ? "#dc2626" : "black" }]);
 
   const docDefinition: any = {
-    pageSize: getDynamicPageSize(orden.items.length), 
+    pageSize: getDynamicPageSize(orden.items),
     pageMargins: [40, 40, 40, 40],
     content: [
       { text: `${orden.cliente.ciudad || "Coro"}, ${formatDate(orden.fecha)}`, alignment: "right", style: "dateInfo" },
       { image: SMRLogoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
       { text: "PRESUPUESTO", style: "title", alignment: "center", margin: [0, 10] },
-      { text: `Cliente: ${orden.cliente.nombreRazonSocial}`, style: "clientInfo", margin: [0, 10] },
+      { text: `${orden.isMaster ? "Empresa Matriz" : "Cliente"}: ${orden.cliente.nombreRazonSocial}`, style: "clientInfo", margin: [0, 10] },
       {
-        table: {
-          widths: [55, "*", 100, 70],
-          body: [
-            [{ text: "Cant.", style: "tableHeader" }, { text: "Descripción", style: "tableHeader" }, { text: "Medida/Tiempo", style: "tableHeader", alignment: "center" }, { text: "Monto", style: "tableHeader", alignment: "right" }],
-            ...itemRows,
-            [{ text: "SUBTOTAL", colSpan: 3, style: "finalTotalLabelBig", alignment: "right" }, {}, {}, { text: formatCurrency(totalUSD), style: "itemTotal", alignment: "right" }],
-            [{ text: "ABONADO", colSpan: 3, style: "finalTotalLabelBig", alignment: "right", color: "#16a34a" }, {}, {}, { text: formatCurrency(abonadoUSD), style: "itemTotal", alignment: "right", color: "#16a34a" }],
-            [{ text: "TOTAL RESTANTE", colSpan: 3, style: "finalTotalLabelBig", alignment: "right", color: restanteUSD > 0.01 ? "#dc2626" : "black" }, {}, {}, { text: formatCurrency(restanteUSD), style: "finalTotalValueBig", alignment: "right", color: restanteUSD > 0.01 ? "#dc2626" : "black" }]
-          ]
-        },
+        table: { widths: [55, "*", 100, 70], body: tableBody },
         layout: customTableLayout,
         margin: [0, 5, 0, 15]
       },
@@ -252,37 +276,70 @@ export async function generateOrderPDF(orden: OrdenServicio, SMRLogoBase64: stri
   pdfMake.createPdf(docDefinition).open();
 }
 
-// 2. PRESUPUESTO (Calculadora)
+// 2. PRESUPUESTO
 export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: string, options: PDFOptions = {}) {
     const pdfMake = await loadPdfDependencies();
     if (!pdfMake) return; 
     
     const { firmaBase64, selloBase64, currency = { rate: options.bcvRate || 1, label: "Tasa BCV", symbol: "Bs." } } = options;
 
-    const itemRows = budgetData.items.map(item => [
-        { text: item.cantidad, style: "itemText" },
-        { text: item.descripcion, style: "itemText" },
-        { text: formatCurrency(item.totalUSD / (item.cantidad || 1)), style: "itemText", alignment: "right" },
-        { text: formatCurrency(item.totalUSD), style: "itemTotal", alignment: "right" },
+    let tableBody: any[] = [
+        [{ text: "Cant.", style: "tableHeader" }, { text: "Descripción", style: "tableHeader" }, { text: "P. Unit", style: "tableHeader", alignment: "right" }, { text: "Total", style: "tableHeader", alignment: "right" }]
+    ];
+
+    if (budgetData.isMaster) {
+        const groupedItems = budgetData.items.reduce((acc: any, item: any) => {
+            const sc = item.subCliente?.trim() || 'General';
+            if (!acc[sc]) acc[sc] = [];
+            acc[sc].push(item);
+            return acc;
+        }, {});
+
+        Object.keys(groupedItems).forEach((sc) => {
+            tableBody.push([
+                { text: `SUB-CLIENTE: ${sc.toUpperCase()}`, colSpan: 4, style: "divisionHeader", alignment: "left" }, {}, {}, {}
+            ]);
+            let subtotal = 0;
+            groupedItems[sc].forEach((item: any) => {
+                subtotal += item.totalUSD;
+                tableBody.push([
+                    { text: item.cantidad, style: "itemText" },
+                    { text: item.descripcion, style: "itemText" },
+                    { text: formatCurrency(item.totalUSD / (item.cantidad || 1)), style: "itemText", alignment: "right" },
+                    { text: formatCurrency(item.totalUSD), style: "itemTotal", alignment: "right" },
+                ]);
+            });
+            tableBody.push([
+                { text: `SUBTOTAL ${sc.toUpperCase()}`, colSpan: 3, style: "itemText", alignment: "right", color: "#64748b" }, {}, {}, 
+                { text: formatCurrency(subtotal), style: "itemTotal", alignment: "right", color: "#64748b" }
+            ]);
+        });
+    } else {
+        budgetData.items.forEach((item: any) => {
+             tableBody.push([
+                { text: item.cantidad, style: "itemText" },
+                { text: item.descripcion, style: "itemText" },
+                { text: formatCurrency(item.totalUSD / (item.cantidad || 1)), style: "itemText", alignment: "right" },
+                { text: formatCurrency(item.totalUSD), style: "itemTotal", alignment: "right" },
+            ]);
+        });
+    }
+
+    tableBody.push([
+        { text: budgetData.isMaster ? "TOTAL GENERAL MATRIZ" : "TOTAL", colSpan: 3, style: "finalTotalLabelBig", alignment: "right" }, {}, {}, 
+        { text: formatCurrency(budgetData.totalUSD), style: "finalTotalValueBig", alignment: "right" }
     ]);
 
     const docDefinition: any = {
-        pageSize: getDynamicPageSize(budgetData.items.length), 
+        pageSize: getDynamicPageSize(budgetData.items),
         pageMargins: [40, 40, 40, 40],
         content: [
             { text: budgetData.fechaCreacion, alignment: "right", style: "dateInfo" },
             { image: SMRLogoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
             { text: "PRESUPUESTO", style: "title", alignment: "center", margin: [0, 10] },
-            { text: `Cliente: ${budgetData.clienteNombre}`, style: "clientInfo", margin: [0, 10] },
+            { text: `${budgetData.isMaster ? "Empresa Matriz" : "Cliente"}: ${budgetData.clienteNombre}`, style: "clientInfo", margin: [0, 10] },
             {
-                table: {
-                    widths: [55, "*", 70, 70],
-                    body: [
-                        [{ text: "Cant.", style: "tableHeader" }, { text: "Descripción", style: "tableHeader" }, { text: "P. Unit", style: "tableHeader", alignment: "right" }, { text: "Total", style: "tableHeader", alignment: "right" }],
-                        ...itemRows,
-                        [{ text: "TOTAL", colSpan: 3, style: "finalTotalLabelBig", alignment: "right" }, {}, {}, { text: formatCurrency(budgetData.totalUSD), style: "finalTotalValueBig", alignment: "right" }]
-                    ]
-                },
+                table: { widths: [55, "*", 70, 70], body: tableBody },
                 layout: customTableLayout,
                 margin: [0, 5, 0, 15]
             },
@@ -321,7 +378,7 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
     ]);
 
     const docDefinition: any = {
-        pageSize: getDynamicPageSize(data.items.length), 
+        pageSize: getDynamicPageSize(data.items), 
         pageMargins: [40, 40, 40, 40],
         content: [
             { text: `Corte al: ${data.fechaReporte}`, style: "dateInfo", alignment: "right", margin: [0, 0, 0, 5] },
