@@ -29,7 +29,7 @@ import {
     Trash2, Eye, Pencil, ChevronLeft, ChevronRight, 
     ChevronDown, CheckCircle2, Wallet, Landmark,
     History, X, Clock, Download, RefreshCw, Loader2, Sparkles, Banknote,
-    ArrowUpDown, ArrowUp, ArrowDown, Wrench
+    ArrowUpDown, ArrowUp, ArrowDown, Wrench, Building2
 } from "lucide-react"
 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
@@ -51,7 +51,7 @@ interface OrdersTableProps {
   firmaBase64?: string
   selloBase64?: string
   onSyncStatus?: () => Promise<{ success: boolean; message: string }>;
-  onFixPayments?: () => Promise<{ success: boolean; message: string }>; // <--- NUEVA FUNCIÓN
+  onFixPayments?: () => Promise<{ success: boolean; message: string }>; 
 }
 
 // COMPONENTE DE ESTATUS CON CORRECCIÓN DE PRECISIÓN
@@ -91,7 +91,7 @@ export function OrdersTable({
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
   const [orderForHistory, setOrderForHistory] = useState<OrdenServicio | null>(null)
   const [isSyncing, setIsSyncing] = useState(false)
-  const [isFixing, setIsFixing] = useState(false) // <--- NUEVO ESTADO PARA EL SPINNER
+  const [isFixing, setIsFixing] = useState(false) 
 
   const [showUnpaid, setShowUnpaid] = useState(true)
   const [showPaid, setShowPaid] = useState(false)
@@ -161,7 +161,6 @@ export function OrdersTable({
     <div className="space-y-10 pb-24">
       <div className="flex justify-end gap-2 px-6 -mb-6">
           
-          {/* 🔹 NUEVO BOTÓN DE REPARACIÓN DE SALDOS */}
           <AlertDialog>
               <AlertDialogTrigger asChild>
                   <Button variant="ghost" disabled={isFixing} className={cn("h-8 px-3 rounded-xl font-bold text-[9px] uppercase tracking-tight transition-all gap-2", "text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10", isFixing && "opacity-50")}>
@@ -185,7 +184,6 @@ export function OrdersTable({
               </AlertDialogContent>
           </AlertDialog>
 
-          {/* BOTÓN DE SINCRONIZAR (ORIGINAL) */}
           <AlertDialog>
               <AlertDialogTrigger asChild>
                   <Button variant="ghost" disabled={isSyncing} className={cn("h-8 px-3 rounded-xl font-bold text-[9px] uppercase tracking-tight transition-all gap-2", "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-white/5", isSyncing && "opacity-50")}>
@@ -362,7 +360,7 @@ function OrdersSubTable({ data, actions, rates }: any) {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {paginated.map((o: OrdenServicio) => (
+                        {paginated.map((o: any) => (
                             <TableRow key={o.id} className="group border-b border-slate-50 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
                                 <TableCell className="py-5 px-8">
                                     <div className="flex flex-col">
@@ -376,11 +374,19 @@ function OrdersSubTable({ data, actions, rates }: any) {
                                 </TableCell>
                                 <TableCell className="py-5">
                                     <div className="flex flex-col gap-1.5">
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex flex-wrap items-center gap-2">
                                             <span className="font-bold text-slate-800 dark:text-slate-200 text-sm truncate max-w-[200px] leading-tight uppercase italic">{o.cliente?.nombreRazonSocial || "Cliente S/N"}</span>
+                                            
+                                            {/* BADGE DE EMPRESA MATRIZ */}
+                                            {o.isMaster && (
+                                                <Badge className="bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400 border-none text-[7px] font-black uppercase px-2 h-4 gap-1 flex items-center">
+                                                    <Building2 className="w-2 h-2" /> Matriz
+                                                </Badge>
+                                            )}
+
                                             {o.cliente?.tipoCliente === 'ALIADO' ? (
                                                 <Badge className="bg-purple-100 text-purple-600 dark:bg-purple-500/20 dark:text-purple-400 border-none text-[7px] font-black uppercase px-2 h-4">Aliado</Badge>
-                                            ) : (
+                                            ) : !o.isMaster && (
                                                 <Badge className="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border-none text-[7px] font-black uppercase px-2 h-4">Regular</Badge>
                                             )}
                                         </div>

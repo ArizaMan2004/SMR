@@ -306,3 +306,38 @@ export async function buscarOrdenesHistoricas(searchTerm: string) {
     return [];
   }
 }
+
+/**
+ * 🔹 Suscribe al NewsBar SOLO a las órdenes que no han sido pagadas por completo (PENDIENTE).
+ */
+export const subscribeToDeudasActivas = (callback: (ordenes: any[]) => void) => {
+    const q = query(
+        collection(db, "ordenes"),
+        where("estadoPago", "==", "PENDIENTE") 
+    );
+
+    return onSnapshot(q, (snapshot) => {
+        const deudas = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
+        callback(deudas);
+    }, (error) => {
+        console.error("Error cargando deudas activas:", error);
+    });
+};
+
+/**
+ * 🔹 Carga un bloque grande de órdenes recientes para extraer historiales completos (Ej. Diseños pagados viejos)
+ * Solo consume las lecturas necesarias sin explotar la cuota de Firebase.
+ */
+export async function cargarHistorialMasivo() {
+  try {
+    const q = query(collection(db, "ordenes"), orderBy("fecha", "desc"), limit(800));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as OrdenServicio[];
+  } catch (error) {
+    console.error("❌ Error cargando historial masivo:", error);
+    return [];
+  }
+}

@@ -16,19 +16,21 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { toast } from "sonner"
 
 // Iconos - Lucide
 import { 
     Wallet, Search, Landmark,
     Plus, Layers, Palette, CreditCard, Loader2, Eye, ImageIcon, 
     User, Upload, X, CheckCircle2, Receipt, ChevronDown, Download,
-    DollarSign
+    DollarSign, CalendarDays, Database
 } from "lucide-react"
 
 // Tipos y Servicios
 import { type OrdenServicio, type ItemOrden, EstadoOrden, EstadoPago } from "@/lib/types/orden"
 import { type Designer } from "@/lib/services/designers-service"
-import { updateOrdenItemField, createOrden, actualizarOrden } from "@/lib/services/ordenes-service"
+// AÑADIDO: cargarHistorialMasivo
+import { createOrden, actualizarOrden, buscarOrdenesHistoricas, cargarHistorialMasivo } from "@/lib/services/ordenes-service"
 import { addDesigner, deleteDesigner } from "@/lib/services/designers-service"
 import { getLastOrderNumber } from "@/lib/firebase/ordenes"
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
@@ -50,19 +52,12 @@ const PAYMENT_METHODS = [
 // --- VARIANTES DE ANIMACIÓN ---
 const containerVariants = {
     hidden: { opacity: 0 },
-    visible: {
-        opacity: 1,
-        transition: { staggerChildren: 0.1, delayChildren: 0.2 }
-    }
+    visible: { opacity: 1, transition: { staggerChildren: 0.1, delayChildren: 0.2 } }
 }
 
 const itemVariants = {
     hidden: { y: 20, opacity: 0 },
-    visible: { 
-        y: 0, 
-        opacity: 1,
-        transition: { type: "spring", stiffness: 260, damping: 20 }
-    }
+    visible: { y: 0, opacity: 1, transition: { type: "spring", stiffness: 260, damping: 20 } }
 }
 
 interface DesignerPayrollProps {
@@ -72,10 +67,14 @@ interface DesignerPayrollProps {
     eurRate?: number 
 }
 
-export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }: DesignerPayrollProps) {
+export function DesignerPayrollView({ ordenes: ordenesLocales, designers, bcvRate, eurRate = 0 }: DesignerPayrollProps) {
     const [searchTerm, setSearchTerm] = useState("")
     const [activeTab, setActiveTab] = useState("pendientes")
     const [expandedDesigner, setExpandedDesigner] = useState<string | null>(null)
+
+    // Estado para inyectar órdenes históricas buscadas desde Firebase
+    const [ordenesHistoricas, setOrdenesHistoricas] = useState<OrdenServicio[]>([])
+    const [isSearchingDeep, setIsSearchingDeep] = useState(false)
 
     // Modales
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
@@ -89,86 +88,115 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
     // Formulario de Pago
     const [payingItem, setPayingItem] = useState<{orderId: string, itemIndex: number, amount: number, designerName: string} | null>(null)
     const [paymentForm, setPaymentForm] = useState({
-        referencia: "", 
-        metodo: "Efectivo USD", // Default actualizado
-        monedaTasa: "BCV" as "BCV" | "EUR" | "MANUAL", 
-        customRate: "", 
-        comprobanteFile: null as File | null, 
-        previewUrl: ""
+        referencia: "", metodo: "Efectivo USD", monedaTasa: "BCV" as "BCV" | "EUR" | "MANUAL", 
+        customRate: "", comprobanteFile: null as File | null, previewUrl: ""
     })
 
-    // --- ACCIONES ---
+    // --- ACCIONES DE BÚSQUEDA PROFUNDA MEJORADA ---
+    const handleDeepSearch = async () => {
+        setIsSearchingDeep(true);
+        try {
+            let resultados = [];
+            
+            // Si el buscador está vacío, cargamos el historial masivo de los últimos meses
+            if (!searchTerm.trim()) {
+                toast.info("Descargando historial completo de diseño...");
+                resultados = await cargarHistorialMasivo();
+            } else {
+                // Si escribió algo, buscamos específicamente ese registro
+                resultados = await buscarOrdenesHistoricas(searchTerm);
+            }
+            
+            if (resultados && resultados.length > 0) {
+                const nuevasHistoricas = resultados.filter(res => !ordenesLocales.find(loc => loc.id === res.id));
+                setOrdenesHistoricas(prev => {
+                    const combinado = [...prev, ...nuevasHistoricas];
+                    return Array.from(new Map(combinado.map(item => [item.id, item])).values());
+                });
+                
+                if (!searchTerm.trim()) {
+                    toast.success("¡Historial sincronizado exitosamente!");
+                } else {
+                    toast.success(`Se recuperaron ${resultados.length} registros para "${searchTerm}".`);
+                }
+            } else {
+                toast.info("No se encontraron registros adicionales.");
+            }
+        } catch (error) { toast.error("Error de conexión al buscar."); } 
+        finally { setIsSearchingDeep(false); }
+    };
 
+    const todasLasOrdenes = useMemo(() => {
+        const map = new Map();
+        [...ordenesHistoricas, ...ordenesLocales].forEach(o => map.set(o.id, o));
+        return Array.from(map.values()) as OrdenServicio[];
+    }, [ordenesLocales, ordenesHistoricas]);
+
+    // --- ACCIONES GENERALES ---
     const handleDownloadImage = async (url: string) => {
         try {
             const response = await fetch(url);
             const blob = await response.blob();
-            const blobUrl = window.URL.createObjectURL(blob);
             const link = document.createElement('a');
-            link.href = blobUrl;
+            link.href = window.URL.createObjectURL(blob);
             link.download = `Pago-${payingItem?.designerName || 'Voucher'}-${Date.now()}.jpg`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        } catch (error) { console.error("Error al descargar:", error); }
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        } catch (error) { console.error("Error:", error); }
     };
 
     const handleReassign = async (orderId: string, itemIndex: number, newDesignerName: string) => {
         try {
-            await updateOrdenItemField(orderId, itemIndex, { empleadoAsignado: newDesignerName });
+            const parentOrder = todasLasOrdenes.find(o => o.id === orderId);
+            if (!parentOrder) return;
+
+            let currentItems: any[] = [];
+            if (Array.isArray(parentOrder.items)) currentItems = [...parentOrder.items];
+            else if (parentOrder.items && typeof parentOrder.items === 'object') currentItems = Object.values(parentOrder.items);
+
+            if (currentItems[itemIndex]) {
+                currentItems[itemIndex] = { ...currentItems[itemIndex], empleadoAsignado: newDesignerName };
+                await actualizarOrden(orderId, { items: currentItems });
+                toast.success("Responsable asignado correctamente");
+            }
         } catch (e) {
-            console.error("Error al reasignar:", e);
-            alert("Error al reasignar responsable.");
+            console.error(e);
+            toast.error("Error al asignar responsable.");
         }
     };
 
     const handleToggleBillable = async (task: any) => {
-        if (!confirm("¿Cambiar el estado de facturación?\n\nSi marcas como 'Interno', el precio al cliente será $0 (la deuda desaparecerá del Dashboard), pero mantendrás el costo de nómina.")) return;
-        
+        if (!confirm("¿Cambiar el estado de facturación?\n\nSi marcas como 'Interno', el precio al cliente será $0 pero mantendrás el costo de nómina.")) return;
         try {
-            const parentOrder = ordenes.find(o => o.id === task.orderId);
+            const parentOrder = todasLasOrdenes.find(o => o.id === task.orderId);
             if (!parentOrder) return;
 
             const isCurrentlyBillable = (task.precioUnitario || 0) > 0;
             const baseValue = (task as any).costoInterno || task.precioUnitario || 0;
 
-            const updatedItems = [...(parentOrder.items || [])];
+            let currentItems: any[] = [];
+            if (Array.isArray(parentOrder.items)) currentItems = [...parentOrder.items];
+            else if (parentOrder.items && typeof parentOrder.items === 'object') currentItems = Object.values(parentOrder.items);
             
-            updatedItems[task.itemIndex] = {
-                ...updatedItems[task.itemIndex],
-                precioUnitario: isCurrentlyBillable ? 0 : baseValue,
-                // @ts-ignore
-                costoInterno: baseValue
-            };
+            if(currentItems[task.itemIndex]){
+                currentItems[task.itemIndex] = {
+                    ...currentItems[task.itemIndex],
+                    precioUnitario: isCurrentlyBillable ? 0 : baseValue,
+                    costoInterno: baseValue
+                };
+            }
 
-            const newTotalUSD = updatedItems.reduce((acc, item) => {
-                return acc + ((item.precioUnitario || 0) * (item.cantidad || 1));
-            }, 0);
-
+            const newTotalUSD = currentItems.reduce((acc, item) => acc + ((item.precioUnitario || 0) * (item.cantidad || 1)), 0);
             const montoPagado = parentOrder.montoPagadoUSD || 0;
             const newStatus = (montoPagado >= newTotalUSD - 0.01) ? "PAGADO" : (parentOrder.estadoPago === "PAGADO" ? "PENDIENTE" : parentOrder.estadoPago);
 
-            await actualizarOrden(task.orderId, {
-                items: updatedItems,
-                totalUSD: newTotalUSD,
-                estadoPago: newStatus as any
-            });
-
-        } catch (e) {
-            console.error(e);
-            alert("Error al actualizar el estado del diseño");
-        }
+            await actualizarOrden(task.orderId, { items: currentItems, totalUSD: newTotalUSD, estadoPago: newStatus as any });
+            toast.success("Estado de facturación actualizado");
+        } catch (e) { toast.error("Error al actualizar"); }
     };
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
-        if (file) {
-            setPaymentForm(prev => ({ 
-                ...prev, 
-                comprobanteFile: file, 
-                previewUrl: URL.createObjectURL(file) 
-            }))
-        }
+        if (file) setPaymentForm(prev => ({ ...prev, comprobanteFile: file, previewUrl: URL.createObjectURL(file) }))
     }
 
     const confirmFinalPayment = async () => {
@@ -176,60 +204,81 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
         setIsProcessing(true)
         try {
             let screenshotUrl = ""
-            if (paymentForm.comprobanteFile) {
-                screenshotUrl = await uploadFileToCloudinary(paymentForm.comprobanteFile)
-            }
+            if (paymentForm.comprobanteFile) screenshotUrl = await uploadFileToCloudinary(paymentForm.comprobanteFile)
 
             let rateUsed = bcvRate
             if (paymentForm.monedaTasa === "EUR") rateUsed = eurRate
             if (paymentForm.monedaTasa === "MANUAL") rateUsed = parseFloat(paymentForm.customRate) || bcvRate
 
-            await updateOrdenItemField(payingItem.orderId, payingItem.itemIndex, { 
-                designPaymentStatus: 'PAGADO', 
-                paymentReference: paymentForm.referencia || "Efectivo",
-                paymentMethod: paymentForm.metodo, 
-                paymentScreenshotUrl: screenshotUrl,
-                paymentDate: new Date().toISOString(), 
-                paymentRateUsed: rateUsed
-            })
+            const parentOrder = todasLasOrdenes.find(o => o.id === payingItem.orderId);
+            if (!parentOrder) throw new Error("Orden no encontrada");
+
+            let currentItems: any[] = [];
+            if (Array.isArray(parentOrder.items)) currentItems = [...parentOrder.items];
+            else if (parentOrder.items && typeof parentOrder.items === 'object') currentItems = Object.values(parentOrder.items);
+
+            if (currentItems[payingItem.itemIndex]) {
+                currentItems[payingItem.itemIndex] = { 
+                    ...currentItems[payingItem.itemIndex],
+                    designPaymentStatus: 'PAGADO', 
+                    paymentReference: paymentForm.referencia || "Efectivo",
+                    paymentMethod: paymentForm.metodo, 
+                    paymentScreenshotUrl: screenshotUrl,
+                    paymentDate: new Date().toISOString(), 
+                    paymentRateUsed: rateUsed
+                };
+                await actualizarOrden(payingItem.orderId, { items: currentItems });
+            }
+
             setIsPaymentModalOpen(false)
             setPaymentForm({ referencia: "", metodo: "Efectivo USD", monedaTasa: "BCV", customRate: "", comprobanteFile: null, previewUrl: "" })
-        } catch (e) { alert("Error al procesar el pago") } finally { setIsProcessing(false) }
+            toast.success("Pago liquidado exitosamente");
+        } catch (e) { toast.error("Error al procesar el pago"); } 
+        finally { setIsProcessing(false) }
     }
 
-    // --- MOTOR DE DATOS UNIFICADO ---
+    // --- MOTOR DE DATOS UNIFICADO (CORREGIDO CON FILTRO ESTRICTO) ---
     const allDesignTasks = useMemo(() => {
-        return ordenes.flatMap(orden => 
-            (orden.items || []).map((item, index) => {
-                const isPaid = (item as any).designPaymentStatus?.toUpperCase() === 'PAGADO' || !!(item as any).paymentReference;
+        return todasLasOrdenes.flatMap(orden => {
+            let itemsArray: any[] = [];
+            if (Array.isArray(orden.items)) itemsArray = orden.items;
+            else if (orden.items && typeof orden.items === 'object') itemsArray = Object.values(orden.items);
+
+            return itemsArray.map((item: any, index: number) => {
+                const isPaid = item.designPaymentStatus?.toUpperCase() === 'PAGADO' || !!item.paymentReference;
                 const designerName = item.empleadoAsignado || "Sin Asignar";
-                
                 const matchedDesigner = designers.find(d => d.name === designerName);
                 const designerId = matchedDesigner?.id || (designerName === "Sin Asignar" || designerName === "N/A" ? "sin_asignar" : "desconocido");
-
-                const rawPrice = (item as any).costoInterno !== undefined ? (item as any).costoInterno : (item.precioUnitario || 0);
+                const rawPrice = item.costoInterno !== undefined ? item.costoInterno : (item.precioUnitario || 0);
                 const totalTaskUSD = rawPrice * (item.cantidad || 1);
 
                 return {
-                    ...item,
-                    orderId: orden.id,
-                    orderNum: orden.ordenNumero,
-                    itemIndex: index,
+                    ...item, orderId: orden.id, orderNum: orden.ordenNumero, itemIndex: index,
                     clientName: orden.cliente?.nombreRazonSocial || "Cliente Genérico",
-                    designerId,
-                    designerName,
-                    isPaid,
-                    fullOrder: orden,
-                    totalTaskUSD,
-                    isBillable: (item.precioUnitario || 0) > 0
+                    designerId, designerName, isPaid, fullOrder: orden, totalTaskUSD,
+                    isBillable: (item.precioUnitario || 0) > 0, paymentDate: item.paymentDate || null
                 }
             })
-        ).filter(item => {
+        }).filter(item => {
             const serviceType = (item.tipoServicio || "").toUpperCase();
-            return serviceType === 'DISENO' || serviceType === 'DISEÑO';
-        });
-    }, [ordenes, designers]);
+            const itemName = (item.nombre || "").toUpperCase();
+            
+            // REGLA 1: Si es explícitamente Impresión, Corte u Otros, se bloquea al instante.
+            if (serviceType === 'IMPRESION' || serviceType === 'CORTE_LASER' || serviceType === 'OTROS') {
+                return false;
+            }
 
+            // REGLA 2: Si el título dice explícitamente "No incluye diseño" se bloquea
+            if (itemName.includes('NO INCLUYE DISEÑO') || itemName.includes('NO INCLUYE DISENO') || itemName.includes('SIN DISEÑO') || itemName.includes('SIN DISENO')) {
+                return false;
+            }
+
+            // REGLA 3: Si pasa los filtros anteriores y es Diseño se aprueba.
+            return serviceType === 'DISENO' || serviceType === 'DISEÑO' || itemName.includes('DISEÑO') || itemName.includes('DISENO');
+        });
+    }, [todasLasOrdenes, designers]);
+
+    // 1. PENDIENTES
     const pendingGroups = useMemo(() => {
         const groups = [...designers, { id: 'sin_asignar', name: 'Sin Asignar' }].map(d => {
             const tasks = allDesignTasks.filter(t => {
@@ -242,19 +291,31 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
         return groups.filter(g => g.tasks.length > 0 && g.name.toLowerCase().includes(searchTerm.toLowerCase()));
     }, [allDesignTasks, designers, searchTerm]);
 
-    const historyList = useMemo(() => {
-        return allDesignTasks
-            .filter(t => t.isPaid)
-            .filter(t => 
-                t.designerName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                String(t.orderNum).includes(searchTerm) ||
-                t.clientName.toLowerCase().includes(searchTerm.toLowerCase())
-            )
-            .sort((a, b) => new Date((b as any).paymentDate || 0).getTime() - new Date((a as any).paymentDate || 0).getTime());
+    // 2. HISTORIAL
+    const historyGroupedByMonth = useMemo(() => {
+        const paidTasks = allDesignTasks.filter(t => t.isPaid);
+        const filteredTasks = paidTasks.filter(t => t.designerName.toLowerCase().includes(searchTerm.toLowerCase()) || String(t.orderNum).includes(searchTerm) || t.clientName.toLowerCase().includes(searchTerm.toLowerCase()));
+        const grouped: Record<string, typeof filteredTasks> = {};
+        
+        filteredTasks.forEach(task => {
+            const date = task.paymentDate ? new Date(task.paymentDate) : new Date();
+            const monthYear = date.toLocaleDateString('es-VE', { month: 'long', year: 'numeric' });
+            const capitalizedMonth = monthYear.charAt(0).toUpperCase() + monthYear.slice(1);
+            if (!grouped[capitalizedMonth]) grouped[capitalizedMonth] = [];
+            grouped[capitalizedMonth].push(task);
+        });
+
+        Object.keys(grouped).forEach(month => grouped[month].sort((a, b) => new Date(b.paymentDate || 0).getTime() - new Date(a.paymentDate || 0).getTime()));
+        const sortedMonths = Object.keys(grouped).sort((a, b) => {
+            const [mesA, anioA] = a.split(' '); const [mesB, anioB] = b.split(' ');
+            return new Date(Date.parse(`${mesB} 1, ${anioB}`)).getTime() - new Date(Date.parse(`${mesA} 1, ${anioA}`)).getTime();
+        });
+
+        return { grouped, sortedMonths };
     }, [allDesignTasks, searchTerm]);
 
     const totalPendingCount = pendingGroups.reduce((acc, group) => acc + group.tasks.length, 0);
-    const totalHistoryCount = historyList.length;
+    const totalHistoryCount = allDesignTasks.filter(t => t.isPaid).length;
 
     return (
         <TooltipProvider>
@@ -279,7 +340,7 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                 <StatCard label="Por Liquidar" value={`$${pendingGroups.reduce((s, g) => s + g.totalUSD, 0).toFixed(2)}`} icon={<Wallet />} color="orange" />
                 <StatCard label="Tasa BCV" value={`${bcvRate.toFixed(2)}`} icon={<Landmark />} color="blue" />
                 <div className="col-span-2 md:col-span-1">
-                    <StatCard label="Acumulado Pagado" value={`$${historyList.reduce((s, t) => s + t.totalTaskUSD, 0).toFixed(2)}`} icon={<CheckCircle2 />} color="emerald" />
+                    <StatCard label="Acumulado Pagado" value={`$${allDesignTasks.filter(t => t.isPaid).reduce((s, t) => s + t.totalTaskUSD, 0).toFixed(2)}`} icon={<CheckCircle2 />} color="emerald" />
                 </div>
             </motion.div>
 
@@ -287,15 +348,26 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                 <motion.div variants={itemVariants} className="flex flex-col md:flex-row justify-between items-center gap-3 bg-white dark:bg-slate-900 p-2 rounded-2xl lg:rounded-3xl border shadow-sm">
                     <TabsList className="bg-transparent gap-1 lg:gap-2 h-10 lg:h-12 w-full md:w-auto overflow-x-auto">
                         <TabsTrigger value="pendientes" className="flex-1 md:flex-none rounded-xl lg:rounded-2xl px-4 lg:px-8 font-black data-[state=active]:bg-slate-900 data-[state=active]:text-white transition-all uppercase text-[9px] lg:text-[10px] tracking-widest">
-                            Pendientes ({totalPendingCount})
+                            Por Pagar ({totalPendingCount})
                         </TabsTrigger>
                         <TabsTrigger value="historial" className="flex-1 md:flex-none rounded-xl lg:rounded-2xl px-4 lg:px-8 font-black data-[state=active]:bg-slate-900 data-[state=active]:text-white transition-all uppercase text-[9px] lg:text-[10px] tracking-widest">
-                            Historial ({totalHistoryCount})
+                            Pagados ({totalHistoryCount})
                         </TabsTrigger>
                     </TabsList>
-                    <div className="relative w-full md:w-80">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                        <Input placeholder="Buscar..." className="pl-10 rounded-xl lg:rounded-2xl border-none bg-slate-100 dark:bg-slate-800 h-10 lg:h-12 font-bold text-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                    
+                    <div className="flex w-full md:w-auto gap-2 relative">
+                        <div className="relative w-full md:w-80">
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <Input placeholder="Filtrar localmente..." className="pl-10 rounded-xl lg:rounded-2xl border-none bg-slate-100 dark:bg-slate-800 h-10 lg:h-12 font-bold text-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleDeepSearch(); }} />
+                        </div>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button onClick={handleDeepSearch} disabled={isSearchingDeep} className="h-10 lg:h-12 w-10 lg:w-12 rounded-xl lg:rounded-2xl bg-blue-100 text-blue-600 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400 p-0">
+                                    {isSearchingDeep ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Buscar o dejar vacío para Cargar Todo</TooltipContent>
+                        </Tooltip>
                     </div>
                 </motion.div>
 
@@ -309,8 +381,7 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                                         onToggle={() => setExpandedDesigner(expandedDesigner === group.id ? null : group.id)}
                                         onPay={(task: any) => { setPayingItem({ orderId: task.orderId, itemIndex: task.itemIndex, amount: task.totalTaskUSD, designerName: group.name }); setIsPaymentModalOpen(true); }}
                                         onView={(task: any) => { setSelectedOrder(task.fullOrder); setIsDetailModalOpen(true); }}
-                                        onToggleBillable={handleToggleBillable}
-                                        designersList={designers} onReassign={handleReassign}
+                                        onToggleBillable={handleToggleBillable} designersList={designers} onReassign={handleReassign}
                                     />
                                 ))
                             )}
@@ -319,156 +390,88 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
                 </TabsContent>
 
                 <TabsContent value="historial">
-                    <Card className="rounded-2xl lg:rounded-[2rem] border-none shadow-sm overflow-hidden bg-white dark:bg-slate-900">
-                        <div className="overflow-x-auto">
-                            <Table>
-                                <TableHeader className="bg-slate-50 dark:bg-slate-800/50 h-14 lg:h-16">
-                                    <TableRow className="border-none">
-                                        <TableHead className="px-4 lg:px-8 font-black text-[9px] lg:text-[10px] uppercase tracking-widest">Fecha</TableHead>
-                                        <TableHead className="font-black text-[9px] lg:text-[10px] uppercase tracking-widest">Orden</TableHead>
-                                        <TableHead className="hidden md:table-cell font-black text-[9px] lg:text-[10px] uppercase tracking-widest">Diseñador</TableHead>
-                                        <TableHead className="text-right font-black text-[9px] lg:text-[10px] uppercase tracking-widest">Monto</TableHead>
-                                        <TableHead className="text-center font-black text-[9px] lg:text-[10px] uppercase tracking-widest">Acciones</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {historyList.map((item, idx) => (
-                                        <TableRow key={idx} className="h-16 lg:h-20 border-slate-50 hover:bg-slate-50/50 transition-colors">
-                                            <TableCell className="px-4 lg:px-8 font-bold text-slate-500 text-[10px] lg:text-xs">
-                                                {item.paymentDate ? new Date(item.paymentDate).toLocaleDateString() : '---'}
-                                            </TableCell>
-                                            <TableCell>
-                                                <div className="font-black text-blue-600 text-xs lg:text-sm">#{item.orderNum}</div>
-                                                <div className="text-[9px] font-bold text-slate-400 uppercase truncate max-w-[80px] lg:max-w-none">{item.clientName}</div>
-                                            </TableCell>
-                                            <TableCell className="hidden md:table-cell">
-                                                <Badge className="bg-slate-100 text-slate-900 border-none rounded-lg px-3 font-black text-[10px] uppercase">
-                                                    {item.designerName}
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <div className="font-black text-emerald-600 text-sm lg:text-xl">
-                                                    ${item.totalTaskUSD.toFixed(2)}
-                                                </div>
-                                                {!item.isBillable && (
-                                                    <div className="text-[7px] font-bold text-orange-500 uppercase tracking-widest bg-orange-50 inline-block px-1 rounded">
-                                                        Interno
-                                                    </div>
-                                                )}
-                                            </TableCell>
-                                            <TableCell className="text-center">
-                                                <div className="flex items-center justify-center gap-2">
-                                                    <Tooltip>
-                                                        <TooltipTrigger asChild>
-                                                            <Button 
-                                                                variant="ghost" 
-                                                                size="icon" 
-                                                                onClick={() => handleToggleBillable(item)}
-                                                                className={cn(
-                                                                    "h-8 w-8 transition-colors rounded-lg",
-                                                                    item.isBillable 
-                                                                        ? "text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50" 
-                                                                        : "text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-orange-50/50"
-                                                                )}
-                                                            >
-                                                                <DollarSign className="w-4 h-4" />
-                                                            </Button>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent>
-                                                            <p>{item.isBillable ? "Convertir a Interno (No cobrar)" : "Convertir a Facturable"}</p>
-                                                        </TooltipContent>
-                                                    </Tooltip>
-
-                                                    {(item as any).paymentScreenshotUrl && (
-                                                        <Button 
-                                                            variant="ghost" 
-                                                            size="icon" 
-                                                            onClick={() => setPreviewImageUrl((item as any).paymentScreenshotUrl)} 
-                                                            className="text-blue-500 h-8 w-8 hover:bg-blue-50 rounded-lg"
-                                                        >
-                                                            <ImageIcon className="w-5 h-5" />
-                                                        </Button>
-                                                    )}
-                                                </div>
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
-                        </div>
-                    </Card>
+                    <div className="space-y-6">
+                        {historyGroupedByMonth.sortedMonths.length === 0 ? (
+                             <div className="text-center py-10 lg:py-20 bg-white/50 dark:bg-slate-900/50 rounded-[2.5rem] border border-dashed border-black/10">
+                                 <Database className="w-10 h-10 lg:w-12 lg:h-12 mx-auto mb-4 text-slate-300" />
+                                 <p className="text-slate-500 font-medium text-sm lg:text-base">No hay historial descargado.</p>
+                                 <p className="text-[10px] lg:text-xs font-bold text-blue-500 mt-2">Haz clic en el botón de la Nube (con el buscador vacío) para sincronizar todos los meses.</p>
+                             </div>
+                        ) : (
+                            historyGroupedByMonth.sortedMonths.map(month => (
+                                <Card key={month} className="rounded-2xl lg:rounded-[2rem] border-none shadow-sm overflow-hidden bg-white dark:bg-slate-900 mb-6">
+                                    <div className="bg-slate-50 dark:bg-slate-800/50 p-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3">
+                                        <CalendarDays className="w-5 h-5 text-blue-500" />
+                                        <h3 className="font-black text-sm lg:text-base uppercase tracking-widest text-slate-700 dark:text-slate-300">{month}</h3>
+                                        <Badge className="ml-auto bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-none font-bold">
+                                            Total: ${historyGroupedByMonth.grouped[month].reduce((acc, t) => acc + t.totalTaskUSD, 0).toFixed(2)}
+                                        </Badge>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <Table>
+                                            <TableHeader className="bg-white dark:bg-slate-900 h-10 lg:h-12">
+                                                <TableRow className="border-slate-100 dark:border-slate-800">
+                                                    <TableHead className="px-4 lg:px-8 font-black text-[9px] lg:text-[10px] uppercase tracking-widest text-slate-400">Día</TableHead>
+                                                    <TableHead className="font-black text-[9px] lg:text-[10px] uppercase tracking-widest text-slate-400">Orden / Cliente</TableHead>
+                                                    <TableHead className="hidden md:table-cell font-black text-[9px] lg:text-[10px] uppercase tracking-widest text-slate-400">Diseñador</TableHead>
+                                                    <TableHead className="text-right font-black text-[9px] lg:text-[10px] uppercase tracking-widest text-slate-400">Monto</TableHead>
+                                                    <TableHead className="text-center font-black text-[9px] lg:text-[10px] uppercase tracking-widest text-slate-400">Voucher</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {historyGroupedByMonth.grouped[month].map((item, idx) => (
+                                                    <TableRow key={idx} className="h-14 lg:h-16 border-slate-50 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                                                        <TableCell className="px-4 lg:px-8 font-bold text-slate-500 text-[10px] lg:text-xs">
+                                                            {item.paymentDate ? new Date(item.paymentDate).toLocaleDateString('es-VE', {day: '2-digit', month: 'short'}) : '---'}
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            <div className="font-black text-blue-600 dark:text-blue-400 text-xs lg:text-sm">#{item.orderNum}</div>
+                                                            <div className="text-[9px] font-bold text-slate-400 uppercase truncate max-w-[120px] lg:max-w-none">{item.clientName}</div>
+                                                        </TableCell>
+                                                        <TableCell className="hidden md:table-cell">
+                                                            <Badge className="bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border-none rounded-lg px-3 font-black text-[10px] uppercase">{item.designerName}</Badge>
+                                                        </TableCell>
+                                                        <TableCell className="text-right">
+                                                            <div className="font-black text-emerald-600 dark:text-emerald-400 text-sm lg:text-lg">${item.totalTaskUSD.toFixed(2)}</div>
+                                                            {!item.isBillable && <div className="text-[7px] font-bold text-orange-500 uppercase tracking-widest bg-orange-50 dark:bg-orange-900/20 inline-block px-1 rounded mt-0.5">Interno</div>}
+                                                        </TableCell>
+                                                        <TableCell className="text-center">
+                                                            <div className="flex items-center justify-center">
+                                                                {(item as any).paymentScreenshotUrl ? (
+                                                                    <Button variant="ghost" size="icon" onClick={() => setPreviewImageUrl((item as any).paymentScreenshotUrl)} className="text-blue-500 h-8 w-8 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"><ImageIcon className="w-5 h-5" /></Button>
+                                                                ) : <span className="text-[10px] text-slate-400 font-bold italic">Sin adjunto</span>}
+                                                            </div>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                </Card>
+                            ))
+                        )}
+                    </div>
                 </TabsContent>
             </Tabs>
 
-            {/* Modales */}
-            <PaymentModal 
-                isOpen={isPaymentModalOpen} onClose={() => setIsPaymentModalOpen(false)} item={payingItem} 
-                form={paymentForm} setForm={setPaymentForm} rates={{ bcv: bcvRate, eur: eurRate }}
-                onConfirm={confirmFinalPayment} loading={isProcessing} onFileChange={handleFileChange}
-            />
-
-            <AssignmentModal 
-                isOpen={isAssignModalOpen} onClose={() => setIsAssignModalOpen(false)} designers={designers}
-                loading={isProcessing}
-                onConfirm={async (data: any) => {
-                    setIsProcessing(true);
-                    try {
-                        const lastNum = await getLastOrderNumber();
-                        
-                        const precioReal = parseFloat(data.precioDiseno || "0");
-                        const precioCliente = data.facturarDiseno ? precioReal : 0;
-
-                        const items: ItemOrden[] = [{
-                            nombre: `Diseño: ${data.detalles}`, 
-                            tipoServicio: "DISENO", 
-                            cantidad: 1, 
-                            unidad: "und", 
-                            precioUnitario: precioCliente,
-                            empleadoAsignado: designers.find(d => d.id === data.designerId)?.name || "Sin Asignar",
-                            // @ts-ignore
-                            designPaymentStatus: 'PENDIENTE',
-                            costoInterno: precioReal
-                        }];
-
-                        if (data.incluirMaterial) {
-                            const materialPrice = (parseFloat(data.ancho || "0") * parseFloat(data.alto || "0") * parseFloat(data.precioM2 || "10")) / 10000;
-                            items.push({ 
-                                nombre: `Producción: ${data.material} (${data.ancho}x${data.alto}cm)`, 
-                                tipoServicio: "IMPRESION", 
-                                cantidad: 1, 
-                                unidad: "und", 
-                                precioUnitario: materialPrice, 
-                                materialDeImpresion: data.material 
-                            });
-                        }
-
-                        const totalUSD = items.reduce((s, i) => s + i.precioUnitario, 0);
-
-                        await createOrden({ 
-                            ordenNumero: String(lastNum + 1), 
-                            fecha: new Date().toISOString(), 
-                            cliente: { 
-                                nombreRazonSocial: data.cliente, 
-                                rifCedula: "V-EXPRESS", 
-                                telefono: "N/A", 
-                                correo: "N/A", 
-                                domicilioFiscal: "N/A", 
-                                personaContacto: "N/A" 
-                            }, 
-                            items, 
-                            serviciosSolicitados: { impresionDigital: false, impresionGranFormato: data.incluirMaterial, corteLaser: false, laminacion: false, avisoCorporeo: false, rotulacion: false, instalacion: false, senaletica: false }, 
-                            descripcionDetallada: data.detalles || "Express", 
-                            totalUSD, 
-                            montoPagadoUSD: 0, 
-                            estadoPago: totalUSD === 0 ? EstadoPago.PAGADO : EstadoPago.PENDIENTE, 
-                            estado: EstadoOrden.PENDIENTE, 
-                            designerId: data.designerId 
-                        });
-                        setIsAssignModalOpen(false);
-                    } catch (e) { alert("Error al crear tarea") } finally { setIsProcessing(false) }
-                }}
-            />
-
+            <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setIsPaymentModalOpen(false)} item={payingItem} form={paymentForm} setForm={setPaymentForm} rates={{ bcv: bcvRate, eur: eurRate }} onConfirm={confirmFinalPayment} loading={isProcessing} onFileChange={handleFileChange} />
+            <AssignmentModal isOpen={isAssignModalOpen} onClose={() => setIsAssignModalOpen(false)} designers={designers} loading={isProcessing} onConfirm={async (data: any) => {
+                setIsProcessing(true);
+                try {
+                    const lastNum = await getLastOrderNumber();
+                    const precioReal = parseFloat(data.precioDiseno || "0");
+                    const precioCliente = data.facturarDiseno ? precioReal : 0;
+                    const items: ItemOrden[] = [{ nombre: `Diseño: ${data.detalles}`, tipoServicio: "DISENO", cantidad: 1, unidad: "und", precioUnitario: precioCliente, empleadoAsignado: designers.find(d => d.id === data.designerId)?.name || "Sin Asignar", designPaymentStatus: 'PENDIENTE', costoInterno: precioReal } as any];
+                    if (data.incluirMaterial) {
+                        const materialPrice = (parseFloat(data.ancho || "0") * parseFloat(data.alto || "0") * parseFloat(data.precioM2 || "10")) / 10000;
+                        items.push({ nombre: `Producción: ${data.material} (${data.ancho}x${data.alto}cm)`, tipoServicio: "IMPRESION", cantidad: 1, unidad: "und", precioUnitario: materialPrice, materialDeImpresion: data.material } as any);
+                    }
+                    const totalUSD = items.reduce((s, i) => s + i.precioUnitario, 0);
+                    await createOrden({ ordenNumero: String(lastNum + 1), fecha: new Date().toISOString(), cliente: { nombreRazonSocial: data.cliente, rifCedula: "V-EXPRESS", telefono: "N/A", correo: "N/A", domicilioFiscal: "N/A", personaContacto: "N/A" }, items, serviciosSolicitados: { impresionDigital: false, impresionGranFormato: data.incluirMaterial, corteLaser: false, laminacion: false, avisoCorporeo: false, rotulacion: false, instalacion: false, senaletica: false }, descripcionDetallada: data.detalles || "Express", totalUSD, montoPagadoUSD: 0, estadoPago: totalUSD === 0 ? EstadoPago.PAGADO : EstadoPago.PENDIENTE, estado: EstadoOrden.PENDIENTE, designerId: data.designerId });
+                    setIsAssignModalOpen(false); toast.success("Tarea express creada exitosamente");
+                } catch (e) { toast.error("Error al crear la tarea"); } 
+                finally { setIsProcessing(false); }
+            }} />
             <OrderDetailModal open={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} orden={selectedOrder} bcvRate={bcvRate} />
             <ImagePreviewModal imageUrl={previewImageUrl} onClose={() => setPreviewImageUrl(null)} onDownload={() => previewImageUrl && handleDownloadImage(previewImageUrl)} />
         </motion.div>
@@ -476,14 +479,12 @@ export function DesignerPayrollView({ ordenes, designers, bcvRate, eurRate = 0 }
     )
 }
 
-// --- SUB-COMPONENTES INTERNOS ---
-
 function DesignerCollapse({ group, isExpanded, onToggle, onPay, onView, designersList, onReassign, onToggleBillable }: any) {
     return (
         <Card className="border-none shadow-sm overflow-hidden bg-white dark:bg-slate-900 rounded-2xl lg:rounded-[2rem]">
-            <button onClick={onToggle} className="w-full flex items-center justify-between p-4 lg:p-6 hover:bg-slate-50/50 transition-colors">
+            <button onClick={onToggle} className="w-full flex items-center justify-between p-4 lg:p-6 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
                 <div className="flex items-center gap-3 lg:gap-5">
-                    <div className="w-10 h-10 lg:w-14 lg:h-14 rounded-xl lg:rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-black text-sm lg:text-xl italic">{group.name.charAt(0)}</div>
+                    <div className="w-10 h-10 lg:w-14 lg:h-14 rounded-xl lg:rounded-2xl bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 flex items-center justify-center font-black text-sm lg:text-xl italic">{group.name.charAt(0)}</div>
                     <div className="text-left"><h3 className="font-black text-sm lg:text-xl uppercase tracking-tighter truncate max-w-[120px] lg:max-w-none">{group.name}</h3><Badge variant="secondary" className="font-bold text-[8px] lg:text-[10px] mt-0.5 lg:mt-1 uppercase">Tareas: {group.tasks.length}</Badge></div>
                 </div>
                 <div className="flex items-center gap-3 lg:gap-8">
@@ -496,38 +497,20 @@ function DesignerCollapse({ group, isExpanded, onToggle, onPay, onView, designer
                     {group.tasks.map((task: any) => (
                         <div key={`${task.orderId}-${task.itemIndex}`} className="flex flex-col md:flex-row items-center justify-between bg-slate-50 dark:bg-slate-800/50 p-3 lg:p-5 rounded-xl lg:rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm gap-3 lg:gap-4">
                             <div className="flex-1 w-full md:w-auto">
-                                <div className="flex items-center gap-2">
-                                    <span className="font-black text-blue-600 text-xs lg:text-sm">#{task.orderNum}</span>
-                                    <span className="font-bold text-slate-800 dark:text-slate-200 uppercase text-[10px] lg:text-xs truncate">{task.nombre}</span>
-                                </div>
+                                <div className="flex items-center gap-2"><span className="font-black text-blue-600 dark:text-blue-400 text-xs lg:text-sm">#{task.orderNum}</span><span className="font-bold text-slate-800 dark:text-slate-200 uppercase text-[10px] lg:text-xs truncate">{task.nombre}</span></div>
                                 <div className="text-[9px] lg:text-[10px] font-bold text-slate-400 mt-0.5 lg:mt-1 uppercase"><User className="inline w-3 h-3 mr-1" /> {task.clientName}</div>
                             </div>
                             <div className="flex items-center gap-2 lg:gap-3 w-full md:w-auto justify-between md:justify-end">
                                 <div className="text-right mr-2">
                                     <div className="font-black text-lg lg:text-xl text-slate-900 dark:text-white">${task.totalTaskUSD.toFixed(2)}</div>
-                                    {!task.isBillable && (
-                                        <div className="text-[8px] font-bold text-orange-500 uppercase tracking-widest bg-orange-50 px-1.5 rounded">Interno</div>
-                                    )}
+                                    {!task.isBillable && <div className="text-[8px] font-bold text-orange-500 uppercase tracking-widest bg-orange-50 dark:bg-orange-900/20 px-1.5 rounded">Interno</div>}
                                 </div>
                                 <div className="flex gap-1.5 lg:gap-2">
                                     <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Button 
-                                                variant="outline" 
-                                                size="icon" 
-                                                onClick={() => onToggleBillable(task)}
-                                                className={cn(
-                                                    "rounded-lg lg:rounded-xl h-8 w-8 lg:h-10 lg:w-10 transition-colors",
-                                                    task.isBillable ? "text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50" : "text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-orange-50/50"
-                                                )}
-                                            >
-                                                <DollarSign className="w-4 h-4" />
-                                            </Button>
-                                        </TooltipTrigger>
+                                        <TooltipTrigger asChild><Button variant="outline" size="icon" onClick={() => onToggleBillable(task)} className={cn("rounded-lg lg:rounded-xl h-8 w-8 lg:h-10 lg:w-10 transition-colors bg-white dark:bg-slate-900", task.isBillable ? "text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20" : "text-orange-500 hover:text-orange-600 hover:bg-orange-50 bg-orange-50/50 dark:bg-orange-900/10")}><DollarSign className="w-4 h-4" /></Button></TooltipTrigger>
                                         <TooltipContent><p>{task.isBillable ? "Convertir a Interno (No cobrar)" : "Convertir a Facturable"}</p></TooltipContent>
                                     </Tooltip>
-
-                                    <Button variant="outline" size="icon" className="rounded-lg lg:rounded-xl h-8 w-8 lg:h-10 lg:w-10" onClick={() => onView(task)}><Eye className="w-4 h-4" /></Button>
+                                    <Button variant="outline" size="icon" className="rounded-lg lg:rounded-xl h-8 w-8 lg:h-10 lg:w-10 bg-white dark:bg-slate-900" onClick={() => onView(task)}><Eye className="w-4 h-4" /></Button>
                                     <Select value={task.designerId} onValueChange={(v) => onReassign(task.orderId, task.itemIndex, designersList.find((dl:any) => dl.id === v)?.name || "Sin Asignar")}>
                                         <SelectTrigger className="w-24 lg:w-32 h-8 lg:h-10 rounded-lg lg:rounded-xl bg-white dark:bg-slate-900 text-[9px] lg:text-[10px] font-bold"><SelectValue /></SelectTrigger>
                                         <SelectContent><SelectItem value="sin_asignar">Sin Asignar</SelectItem>{designersList.map((d: any) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent>
@@ -544,7 +527,7 @@ function DesignerCollapse({ group, isExpanded, onToggle, onPay, onView, designer
 }
 
 function StatCard({ label, value, icon, color }: any) {
-    const variants: any = { orange: "bg-orange-50 text-orange-600", blue: "bg-blue-50 text-blue-600", emerald: "bg-emerald-50 text-emerald-600" };
+    const variants: any = { orange: "bg-orange-50 dark:bg-orange-900/10 text-orange-600 dark:text-orange-400", blue: "bg-blue-50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400", emerald: "bg-emerald-50 dark:bg-emerald-900/10 text-emerald-600 dark:text-emerald-400" };
     return (
         <Card className="border-none shadow-sm rounded-2xl lg:rounded-[2rem] bg-white dark:bg-slate-900 p-4 lg:p-8 flex items-center gap-3 lg:gap-6">
             <div className={cn("p-3 lg:p-5 rounded-xl lg:rounded-2xl", variants[color])}>{React.cloneElement(icon, { className: "w-5 h-5 lg:w-8 h-8" })}</div>
@@ -557,7 +540,7 @@ function StatCard({ label, value, icon, color }: any) {
 }
 
 function EmptyState({ text }: { text: string }) {
-    return <div className="p-10 lg:p-20 text-center bg-white dark:bg-slate-900 rounded-[2rem] lg:rounded-[3rem] border-2 border-dashed border-slate-100 dark:border-slate-800"><Palette className="w-8 h-8 lg:w-12 h-12 text-slate-200 mx-auto mb-4" /><p className="font-black text-slate-300 uppercase text-sm lg:text-xl tracking-tighter">{text}</p></div>;
+    return <div className="p-10 lg:p-20 text-center bg-white dark:bg-slate-900 rounded-[2rem] lg:rounded-[3rem] border-2 border-dashed border-slate-100 dark:border-slate-800"><Palette className="w-8 h-8 lg:w-12 h-12 text-slate-200 dark:text-slate-700 mx-auto mb-4" /><p className="font-black text-slate-300 dark:text-slate-600 uppercase text-sm lg:text-xl tracking-tighter">{text}</p></div>;
 }
 
 function PaymentModal({ isOpen, onClose, item, form, setForm, rates, onConfirm, loading, onFileChange }: any) {
@@ -565,37 +548,19 @@ function PaymentModal({ isOpen, onClose, item, form, setForm, rates, onConfirm, 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="rounded-[2rem] lg:rounded-[2.5rem] p-6 lg:p-8 bg-white dark:bg-slate-950 max-w-md border-none shadow-2xl overflow-hidden w-[95vw] lg:w-full">
-                <DialogHeader><DialogTitle className="text-xl lg:text-2xl font-black flex items-center gap-3"><CreditCard className="text-emerald-500 w-6 h-6 lg:w-8 h-8" /> Liquidar Pago</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle className="text-xl lg:text-2xl font-black flex items-center gap-3 text-slate-900 dark:text-white"><CreditCard className="text-emerald-500 w-6 h-6 lg:w-8 h-8" /> Liquidar Pago</DialogTitle></DialogHeader>
                 <div className="space-y-4 lg:space-y-6 py-2 lg:py-4">
                     <div className="bg-emerald-50 dark:bg-emerald-500/5 p-4 lg:p-8 rounded-2xl lg:rounded-[2rem] text-center border border-emerald-100 dark:border-emerald-500/10">
                         <h2 className="text-3xl lg:text-5xl font-black text-emerald-600 tracking-tighter">${item?.amount.toFixed(2)}</h2>
                         <p className="text-sm lg:text-xl font-black mt-1 text-slate-700 dark:text-slate-300 tracking-tighter">Bs. {((item?.amount || 0) * effectiveRate).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                     </div>
-                    
-                    {/* SELECCIÓN DE MÉTODO DE PAGO */}
                     <div className="grid grid-cols-2 gap-3 lg:gap-4">
-                        <div className="space-y-1">
-                            <Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Cuenta de Salida</Label>
-                            <Select value={form.metodo} onValueChange={v => setForm({...form, metodo: v})}>
-                                <SelectTrigger className="rounded-xl h-10 lg:h-12 bg-slate-100 dark:bg-slate-800 border-none font-bold text-xs">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {PAYMENT_METHODS.map(m => (
-                                        <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-1"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Ref.</Label><Input value={form.referencia} onChange={e => setForm({...form, referencia: e.target.value})} className="rounded-xl h-10 lg:h-12 bg-slate-100 dark:bg-slate-800 border-none font-black text-xs" /></div>
+                        <div className="space-y-1"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Cuenta de Salida</Label><Select value={form.metodo} onValueChange={v => setForm({...form, metodo: v})}><SelectTrigger className="rounded-xl h-10 lg:h-12 bg-slate-100 dark:bg-slate-800 border-none font-bold text-xs text-slate-900 dark:text-white"><SelectValue /></SelectTrigger><SelectContent>{PAYMENT_METHODS.map(m => (<SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>))}</SelectContent></Select></div>
+                        <div className="space-y-1"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Ref.</Label><Input value={form.referencia} onChange={e => setForm({...form, referencia: e.target.value})} className="rounded-xl h-10 lg:h-12 bg-slate-100 dark:bg-slate-800 border-none font-black text-xs text-slate-900 dark:text-white" /></div>
                     </div>
-
                     <div className="grid grid-cols-2 gap-3 lg:gap-4">
-                        <div className="space-y-1"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Tasa</Label><Select value={form.monedaTasa} onValueChange={v => setForm({...form, monedaTasa: v})}><SelectTrigger className="rounded-xl h-10 lg:h-12 bg-slate-100 dark:bg-slate-800 border-none font-bold text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="BCV">Dólar BCV</SelectItem><SelectItem value="EUR">Euro BCV</SelectItem><SelectItem value="MANUAL">Manual</SelectItem></SelectContent></Select></div>
-                        <div className="space-y-1">
-                            <Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Valor</Label>
-                            {form.monedaTasa === "MANUAL" ? <Input type="number" value={form.customRate} onChange={e => setForm({...form, customRate: e.target.value})} className="rounded-xl h-10 lg:h-12 bg-slate-100 dark:bg-slate-800 border-none font-black text-orange-600 text-xs" /> : <div className="h-10 lg:h-12 bg-slate-50 dark:bg-slate-900 rounded-xl flex items-center px-4 font-black text-slate-500 border border-slate-100 dark:border-slate-800 text-xs">{effectiveRate.toFixed(2)}</div>}
-                        </div>
+                        <div className="space-y-1"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Tasa</Label><Select value={form.monedaTasa} onValueChange={v => setForm({...form, monedaTasa: v})}><SelectTrigger className="rounded-xl h-10 lg:h-12 bg-slate-100 dark:bg-slate-800 border-none font-bold text-xs text-slate-900 dark:text-white"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="BCV">Dólar BCV</SelectItem><SelectItem value="EUR">Euro BCV</SelectItem><SelectItem value="MANUAL">Manual</SelectItem></SelectContent></Select></div>
+                        <div className="space-y-1"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Valor</Label>{form.monedaTasa === "MANUAL" ? <Input type="number" value={form.customRate} onChange={e => setForm({...form, customRate: e.target.value})} className="rounded-xl h-10 lg:h-12 bg-slate-100 dark:bg-slate-800 border-none font-black text-orange-600 text-xs" /> : <div className="h-10 lg:h-12 bg-slate-50 dark:bg-slate-900 rounded-xl flex items-center px-4 font-black text-slate-500 border border-slate-100 dark:border-slate-800 text-xs">{effectiveRate.toFixed(2)}</div>}</div>
                     </div>
                     <div className="space-y-1">
                         <Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Voucher</Label>
@@ -631,33 +596,20 @@ function ImagePreviewModal({ imageUrl, onClose, onDownload }: any) {
 }
 
 function AssignmentModal({ isOpen, onClose, designers, onConfirm, loading }: any) {
-    const [localForm, setLocalForm] = useState({ 
-        cliente: "", 
-        detalles: "", 
-        designerId: "sin_asignar", 
-        precioDiseno: "", 
-        facturarDiseno: true, 
-        ancho: "", 
-        alto: "", 
-        material: "Vinil", 
-        precioM2: "10", 
-        incluirMaterial: true 
-    })
-
+    const [localForm, setLocalForm] = useState({ cliente: "", detalles: "", designerId: "sin_asignar", precioDiseno: "", facturarDiseno: true, ancho: "", alto: "", material: "Vinil", precioM2: "10", incluirMaterial: true })
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="max-w-2xl rounded-[2rem] lg:rounded-[2.5rem] p-6 lg:p-10 bg-white dark:bg-slate-950 border-none shadow-2xl overflow-y-auto max-h-[90vh] w-[95vw] lg:w-full">
-                <DialogHeader><DialogTitle className="text-xl lg:text-3xl font-black uppercase italic tracking-tighter flex items-center gap-2 lg:gap-3"><Plus className="w-6 h-6 lg:w-8 h-8 text-blue-500"/> Nueva Tarea Express</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle className="text-xl lg:text-3xl font-black uppercase italic tracking-tighter flex items-center gap-2 lg:gap-3 text-slate-900 dark:text-white"><Plus className="w-6 h-6 lg:w-8 h-8 text-blue-500"/> Nueva Tarea Express</DialogTitle></DialogHeader>
                 <div className="grid grid-cols-2 gap-4 lg:gap-6 py-4 lg:py-6">
-                    <div className="space-y-1 col-span-2"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Cliente</Label><Input value={localForm.cliente} onChange={e => setLocalForm({...localForm, cliente: e.target.value})} className="rounded-xl lg:rounded-2xl bg-slate-100 dark:bg-slate-800 border-none h-11 lg:h-14 font-bold text-sm" /></div>
-                    <div className="space-y-1 col-span-2"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Descripción</Label><Input value={localForm.detalles} onChange={e => setLocalForm({...localForm, detalles: e.target.value})} className="rounded-xl lg:rounded-2xl bg-slate-100 dark:bg-slate-800 border-none h-11 lg:h-14 font-bold text-sm" /></div>
+                    <div className="space-y-1 col-span-2"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Cliente</Label><Input value={localForm.cliente} onChange={e => setLocalForm({...localForm, cliente: e.target.value})} className="rounded-xl lg:rounded-2xl bg-slate-100 dark:bg-slate-800 border-none h-11 lg:h-14 font-bold text-sm text-slate-900 dark:text-white" /></div>
+                    <div className="space-y-1 col-span-2"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Descripción</Label><Input value={localForm.detalles} onChange={e => setLocalForm({...localForm, detalles: e.target.value})} className="rounded-xl lg:rounded-2xl bg-slate-100 dark:bg-slate-800 border-none h-11 lg:h-14 font-bold text-sm text-slate-900 dark:text-white" /></div>
                     <div className="space-y-1">
                         <Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Diseñador</Label>
-                        <Select value={localForm.designerId} onValueChange={v => setLocalForm({...localForm, designerId: v})}><SelectTrigger className="rounded-xl lg:rounded-2xl bg-slate-100 dark:bg-slate-800 border-none h-11 lg:h-14 font-bold text-xs"><SelectValue placeholder="Seleccionar..." /></SelectTrigger><SelectContent className="z-[150]"><SelectItem value="sin_asignar">Sin asignar</SelectItem>{designers.map((d: any) => (<SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>))}</SelectContent></Select>
+                        <Select value={localForm.designerId} onValueChange={v => setLocalForm({...localForm, designerId: v})}><SelectTrigger className="rounded-xl lg:rounded-2xl bg-slate-100 dark:bg-slate-800 border-none h-11 lg:h-14 font-bold text-xs text-slate-900 dark:text-white"><SelectValue placeholder="Seleccionar..." /></SelectTrigger><SelectContent className="z-[150]"><SelectItem value="sin_asignar">Sin asignar</SelectItem>{designers.map((d: any) => (<SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>))}</SelectContent></Select>
                     </div>
                     <div className="space-y-1"><Label className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 ml-1">Comisión Diseñador ($)</Label><Input type="number" value={localForm.precioDiseno} onChange={e => setLocalForm({...localForm, precioDiseno: e.target.value})} className="rounded-xl lg:rounded-2xl bg-slate-100 dark:bg-slate-800 border-none h-11 lg:h-14 font-black text-blue-600 text-xl lg:text-2xl" /></div>
                     
-                    {/* NUEVO CONTROL DE FACTURACIÓN */}
                     <div className="col-span-2 bg-blue-50 dark:bg-blue-900/10 rounded-2xl lg:rounded-[2rem] p-4 lg:p-6 border border-blue-100 dark:border-blue-900/20 flex items-center justify-between">
                         <div className="space-y-1">
                             <Label className="text-[10px] lg:text-xs font-black uppercase text-blue-600 dark:text-blue-400 flex items-center gap-2"><CreditCard className="w-4 h-4" /> ¿Facturar al Cliente?</Label>
@@ -670,10 +622,10 @@ function AssignmentModal({ isOpen, onClose, designers, onConfirm, loading }: any
                         <div className="flex justify-between items-center"><span className="font-black text-slate-600 dark:text-slate-400 flex items-center gap-2 text-[10px] lg:text-sm uppercase tracking-widest"><Layers className="w-4 h-4 lg:w-5 h-5"/> ¿Producción?</span><Checkbox checked={localForm.incluirMaterial} onCheckedChange={v => setLocalForm({...localForm, incluirMaterial: v as boolean})} /></div>
                         {localForm.incluirMaterial && (
                             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="grid grid-cols-2 gap-2 lg:gap-4 pt-1 lg:pt-2">
-                                <div className="space-y-1"><Label className="text-[8px] lg:text-[9px] font-black uppercase text-slate-400">Material</Label><Select value={localForm.material} onValueChange={v => setLocalForm({...localForm, material: v})}><SelectTrigger className="h-9 lg:h-11 rounded-lg lg:rounded-xl bg-white dark:bg-slate-800 border-slate-200 font-bold text-[10px]"><SelectValue /></SelectTrigger><SelectContent className="z-[150]"><SelectItem value="Vinil">Vinil</SelectItem><SelectItem value="Banner">Banner</SelectItem><SelectItem value="Microperforado">Microperforado</SelectItem><SelectItem value="Clear">Clear</SelectItem></SelectContent></Select></div>
-                                <div className="space-y-1"><Label className="text-[8px] lg:text-[9px] font-black uppercase text-slate-400">Ancho (cm)</Label><Input type="number" value={localForm.ancho} onChange={e => setLocalForm({...localForm, ancho: e.target.value})} className="h-9 lg:h-11 rounded-lg lg:rounded-xl bg-white dark:bg-slate-800 border-slate-200 text-xs" /></div>
-                                <div className="space-y-1"><Label className="text-[8px] lg:text-[9px] font-black uppercase text-slate-400">Alto (cm)</Label><Input type="number" value={localForm.alto} onChange={e => setLocalForm({...localForm, alto: e.target.value})} className="h-9 lg:h-11 rounded-lg lg:rounded-xl bg-white dark:bg-slate-800 border-slate-200 text-xs" /></div>
-                                <div className="space-y-1"><Label className="text-[8px] lg:text-[9px] font-black uppercase text-slate-400">Precio m²</Label><Input type="number" value={localForm.precioM2} onChange={e => setLocalForm({...localForm, precioM2: e.target.value})} className="h-9 lg:h-11 rounded-lg lg:rounded-xl bg-white dark:bg-slate-800 border-slate-200 font-bold text-xs" /></div>
+                                <div className="space-y-1"><Label className="text-[8px] lg:text-[9px] font-black uppercase text-slate-400">Material</Label><Select value={localForm.material} onValueChange={v => setLocalForm({...localForm, material: v})}><SelectTrigger className="h-9 lg:h-11 rounded-lg lg:rounded-xl bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 font-bold text-[10px] text-slate-900 dark:text-white"><SelectValue /></SelectTrigger><SelectContent className="z-[150]"><SelectItem value="Vinil">Vinil</SelectItem><SelectItem value="Banner">Banner</SelectItem><SelectItem value="Microperforado">Microperforado</SelectItem><SelectItem value="Clear">Clear</SelectItem></SelectContent></Select></div>
+                                <div className="space-y-1"><Label className="text-[8px] lg:text-[9px] font-black uppercase text-slate-400">Ancho (cm)</Label><Input type="number" value={localForm.ancho} onChange={e => setLocalForm({...localForm, ancho: e.target.value})} className="h-9 lg:h-11 rounded-lg lg:rounded-xl bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white" /></div>
+                                <div className="space-y-1"><Label className="text-[8px] lg:text-[9px] font-black uppercase text-slate-400">Alto (cm)</Label><Input type="number" value={localForm.alto} onChange={e => setLocalForm({...localForm, alto: e.target.value})} className="h-9 lg:h-11 rounded-lg lg:rounded-xl bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white" /></div>
+                                <div className="space-y-1"><Label className="text-[8px] lg:text-[9px] font-black uppercase text-slate-400">Precio m²</Label><Input type="number" value={localForm.precioM2} onChange={e => setLocalForm({...localForm, precioM2: e.target.value})} className="h-9 lg:h-11 rounded-lg lg:rounded-xl bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 font-bold text-xs text-slate-900 dark:text-white" /></div>
                             </motion.div>
                         )}
                     </div>

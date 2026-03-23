@@ -123,7 +123,6 @@ export function EstadisticasDashboard({
   const [localPagos, setLocalPagos] = useState<any[]>([]);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
 
-  // ✨ CORRECCIÓN CRÍTICA: BUSCADOR DOBLE (TIMESTAMP Y STRING) PARA NUNCA PERDER DATOS ✨
   useEffect(() => {
     const fetchMonthlyData = async () => {
         setIsLoadingStats(true);
@@ -134,7 +133,6 @@ export function EstadisticasDashboard({
             const ventanaInicio = new Date(year, month - 2, 1);
             const fin = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
-            // 1. Órdenes (Se guardan como String ISO)
             const qOrdenes = query(
                 collection(db, "ordenes"),
                 where("fecha", ">=", ventanaInicio.toISOString()),
@@ -146,7 +144,6 @@ export function EstadisticasDashboard({
             const startTs = Timestamp.fromDate(ventanaInicio);
             const endTs = Timestamp.fromDate(fin);
             
-            // 2. Gastos (Doble Búsqueda)
             const qGastosTs = query(collection(db, "gastos_insumos"), where("fecha", ">=", startTs), where("fecha", "<=", endTs));
             const qGastosStr = query(collection(db, "gastos_insumos"), where("fecha", ">=", ventanaInicio.toISOString()), where("fecha", "<=", fin.toISOString()));
             
@@ -157,10 +154,9 @@ export function EstadisticasDashboard({
             
             const fetchedGastos = Array.from(gastosMap.values()).map((g: any) => {
                 const d = g.fecha?.toDate ? g.fecha.toDate() : new Date(g.fecha);
-                return { ...g, fecha: d.toISOString() }; // Normalizado a String ISO
+                return { ...g, fecha: d.toISOString() }; 
             });
 
-            // 3. Pagos de Nómina (Doble Búsqueda - Resuelve el problema del $0)
             const qPagosTs = query(collection(db, "pagos"), where("fecha", ">=", startTs), where("fecha", "<=", endTs));
             const qPagosStr = query(collection(db, "pagos"), where("fecha", ">=", ventanaInicio.toISOString()), where("fecha", "<=", fin.toISOString()));
             
@@ -172,7 +168,7 @@ export function EstadisticasDashboard({
             const fetchedPagos = Array.from(pagosMap.values()).map((p: any) => {
                 const rawDate = p.fecha || p.fechaPago;
                 const d = rawDate?.toDate ? rawDate.toDate() : new Date(rawDate);
-                return { ...p, fecha: d.toISOString() }; // Normalizado a String ISO
+                return { ...p, fecha: d.toISOString() }; 
             });
 
             setLocalOrdenes(fetchedOrdenes);
@@ -240,11 +236,13 @@ export function EstadisticasDashboard({
       return counts;
   }, [localOrdenes]);
 
+  // --- SOLUCIÓN DE PROTECCIÓN DE ARRAYS APLICADA ---
   const orderBreakdown = useMemo(() => {
     const map = new Map<string, { pctImp: number, pctCorte: number, pctOtros: number }>();
     localOrdenes.forEach(o => {
         let totalImp = 0, totalCorte = 0, totalOtros = 0;
-        (o.items || []).forEach((item: any) => {
+        const safeItems = Array.isArray(o.items) ? o.items : [];
+        safeItems.forEach((item: any) => {
             const sub = Number(item.subtotal) || 0;
             const servicioReal = identificarServicio(item);
             if (servicioReal === 'IMPRESION') totalImp += sub;
@@ -379,7 +377,8 @@ export function EstadisticasDashboard({
 
               return true;
           }).forEach(o => {
-              (o.items || []).forEach((item: any) => {
+              const safeItems = Array.isArray(o.items) ? o.items : [];
+              safeItems.forEach((item: any) => {
                   const servicio = identificarServicio(item);
                   const nombreLower = (item.nombre || '').toLowerCase();
                   const totalSubtotal = Number(item.subtotal) || 0;
@@ -539,7 +538,8 @@ export function EstadisticasDashboard({
         let gastosDiseno = 0;
         if (viewMode === 'GENERAL') { 
              localOrdenes.forEach(o => {
-                (o.items || []).forEach((item: any) => {
+                const safeItems = Array.isArray(o.items) ? o.items : [];
+                safeItems.forEach((item: any) => {
                     const tipo = identificarServicio(item);
                     const isPaid = (item.designPaymentStatus === 'PAGADO' || !!item.paymentReference);
                     if (tipo === 'DISENO' && isPaid) {
@@ -563,9 +563,8 @@ export function EstadisticasDashboard({
 
     const fijosAplicables = actual.gastosFijosPagados; 
 
-    // ✨ NÓMINA CORREGIDA: NUNCA PIERDE DATOS NI MARCA $0 ✨
     const nominaFiltrada = (localPagos || []).filter(p => {
-        const f = new Date(p.fecha); // Seguro porque normalizamos todo a ISO string en el fetch
+        const f = new Date(p.fecha); 
         const enFecha = f >= fechas.inicio && f <= fechas.fin;
         if (!enFecha) return false;
 
@@ -761,7 +760,8 @@ export function EstadisticasDashboard({
 
     if (viewMode === 'GENERAL') { 
          localOrdenes.forEach(o => {
-            (o.items || []).forEach((item: any) => {
+            const safeItems = Array.isArray(o.items) ? o.items : [];
+            safeItems.forEach((item: any) => {
                 const tipo = identificarServicio(item);
                 const isPaid = (item.designPaymentStatus === 'PAGADO' || !!item.paymentReference);
                 
@@ -896,7 +896,8 @@ export function EstadisticasDashboard({
 
       if (viewMode === 'GENERAL') {
           localOrdenes.forEach(o => {
-            (o.items || []).forEach((item: any) => {
+            const safeItems = Array.isArray(o.items) ? o.items : [];
+            safeItems.forEach((item: any) => {
                 const tipo = identificarServicio(item);
                 const isPaid = (item.designPaymentStatus === 'PAGADO' || !!item.paymentReference);
                 if (tipo === 'DISENO' && isPaid) {
@@ -974,7 +975,8 @@ export function EstadisticasDashboard({
           const disenoItems: any[] = [];
           if (viewMode === 'GENERAL') {
                localOrdenes.forEach(o => {
-                  (o.items || []).forEach((item: any) => {
+                  const safeItems = Array.isArray(o.items) ? o.items : [];
+                  safeItems.forEach((item: any) => {
                       const tipo = identificarServicio(item);
                       const isPaid = (item.designPaymentStatus === 'PAGADO' || !!item.paymentReference);
                       if (tipo === 'DISENO' && isPaid) {

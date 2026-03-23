@@ -79,8 +79,16 @@ export function PaymentAuditView({
     const ingresosData = useMemo(() => {
         const pagos: any[] = []
         ordenes.forEach(orden => {
-            if (orden.registroPagos && orden.registroPagos.length > 0) {
-                orden.registroPagos.forEach((pago: any, index: number) => {
+            // Protección contra arrays convertidos en objetos por Firebase
+            let pagosArray: any[] = [];
+            if (Array.isArray(orden.registroPagos)) {
+                pagosArray = orden.registroPagos;
+            } else if (orden.registroPagos && typeof orden.registroPagos === 'object') {
+                pagosArray = Object.values(orden.registroPagos);
+            }
+
+            if (pagosArray.length > 0) {
+                pagosArray.forEach((pago: any, index: number) => {
                     const rawDate = pago.fechaRegistro || pago.fecha || pago.timestamp;
                     if (filterByDate(rawDate)) {
                         const cliente = orden.cliente?.nombreRazonSocial || "Desconocido";
@@ -249,7 +257,16 @@ export function PaymentAuditView({
         const list: any[] = [];
         ordenes.forEach(o => {
             if (o.estado === 'ANULADO') return;
-            (o.items || []).forEach((item: any, idx: number) => {
+            
+            // Protección contra arrays convertidos en objetos por Firebase
+            let itemsArray: any[] = [];
+            if (Array.isArray(o.items)) {
+                itemsArray = o.items;
+            } else if (o.items && typeof o.items === 'object') {
+                itemsArray = Object.values(o.items);
+            }
+
+            itemsArray.forEach((item: any, idx: number) => {
                 const esDiseno = (item.tipoServicio === 'DISENO' || item.tipoServicio === 'DISEÑO');
                 const estaPagado = (item.designPaymentStatus === 'PAGADO' || !!item.paymentReference);
                 if (esDiseno && estaPagado) {
@@ -283,9 +300,8 @@ export function PaymentAuditView({
                 if (ordenSnap.exists()) {
                     const data = ordenSnap.data();
                     const newPagos = [...(data.registroPagos || [])];
-                    newPagos.splice(item.index, 1); // Borrar el pago
+                    newPagos.splice(item.index, 1); 
                     
-                    // RECALCULAR DEUDA TOTAL DE LA ORDEN
                     const totalUSD = Number(data.totalUSD) || 0;
                     const nuevoMontoPagado = newPagos.reduce((sum, p) => sum + (Number(p.montoUSD) || 0), 0);
                     let nuevoEstado = "PENDIENTE";
@@ -334,7 +350,6 @@ export function PaymentAuditView({
                     const data = ordenSnap.data();
                     const newPagos = [...(data.registroPagos || [])];
                     if(newPagos[item.index]) {
-                        // Modificar los valores del pago
                         newPagos[item.index] = { 
                             ...newPagos[item.index], 
                             montoUSD: editForm.monto, 
@@ -342,7 +357,6 @@ export function PaymentAuditView({
                             imagenUrl: editForm.imagenUrl
                         };
                         
-                        // RECALCULAR DEUDA TOTAL DE LA ORDEN
                         const totalUSD = Number(data.totalUSD) || 0;
                         const nuevoMontoPagado = newPagos.reduce((sum, p) => sum + (Number(p.montoUSD) || 0), 0);
                         let nuevoEstado = "PENDIENTE";

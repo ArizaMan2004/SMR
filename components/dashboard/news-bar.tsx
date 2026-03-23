@@ -12,6 +12,9 @@ import {
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 
+// IMPORTAMOS LA NUEVA FUNCIÓN OPTIMIZADA (Ajusta la ruta si es necesario)
+import { subscribeToDeudasActivas } from "@/lib/services/ordenes-service";
+
 export type NewsAction = 
     | { type: 'NAVIGATE', payload: string }
     | { type: 'OPEN_ORDER', payload: any }
@@ -26,10 +29,10 @@ interface AlertAction {
 
 interface AlertItem {
     id: string;
-    title: string;          // Usado ahora para el Nombre del Cliente (Principal)
-    subtitle?: string;      // Usado para el Número de Orden
-    description: string;    // Usado para Montos y Atrasos
-    summary?: string;       // Usado para el desglose completo de ítems
+    title: string;          
+    subtitle?: string;      
+    description: string;    
+    summary?: string;       
     icon: any;
     color: string;
     action?: NewsAction;
@@ -50,13 +53,12 @@ interface NewsBarProps {
     rates?: { usd: number, eur: number, usdt: number };
     gastosFijos?: any[];
     empleados?: any[];
-    ordenes?: any[];
+    ordenes?: any[]; // Esta se sigue usando para los Diseños
     designers?: any[];
     gastos?: any[];
     onAction?: (action: NewsAction) => void; 
 }
 
-// --- VARIANTES DE ANIMACIÓN ---
 const containerVariants = {
     hidden: { opacity: 0 },
     visible: { opacity: 1, transition: { staggerChildren: 0.05, delayChildren: 0.1 } }
@@ -79,6 +81,9 @@ export function NewsBar({
     const [isExpanded, setIsExpanded] = useState(false);
     const [selectedModule, setSelectedModule] = useState<ModuleData | null>(null);
     const [prevRates, setPrevRates] = useState<{ usd: number, eur: number, usdt: number }>({ usd: 0, eur: 0, usdt: 0 });
+    
+    // --- NUEVO ESTADO PARA ALMACENAR TODAS LAS DEUDAS HISTÓRICAS ---
+    const [deudasHistoricas, setDeudasHistoricas] = useState<any[]>([]);
 
     useEffect(() => {
         const stored = localStorage.getItem("lastKnownRates");
@@ -88,6 +93,14 @@ export function NewsBar({
     useEffect(() => {
         if (rates.usd > 0) localStorage.setItem("lastKnownRates", JSON.stringify(rates));
     }, [rates]);
+
+    // --- NUEVO EFECTO: SUSCRIBIRSE SOLO A LAS DEUDAS ACTIVAS ---
+    useEffect(() => {
+        const unsubscribe = subscribeToDeudasActivas((deudas) => {
+            setDeudasHistoricas(deudas);
+        });
+        return () => unsubscribe();
+    }, []);
 
     const modulos = useMemo(() => {
         const result: ModuleData[] = [];
@@ -113,15 +126,15 @@ export function NewsBar({
             result.push({ id: 'tasas', title: 'Cambios de Moneda', summary: `${alertasMoneda.length} actualizaciones en tasas`, icon: TrendingUp, color: 'text-emerald-600', bgColor: 'bg-emerald-50 dark:bg-emerald-500/10', alerts: alertasMoneda });
         }
 
-        // 2. DEUDAS CRÍTICAS
+        // 2. DEUDAS CRÍTICAS (Ahora lee del query optimizado 'deudasHistoricas')
         const alertasDeuda: AlertItem[] = [];
-        ordenes.forEach(o => {
+        deudasHistoricas.forEach(o => {
             if (o.estadoPago === 'ANULADO') return;
             const deuda = (Number(o.totalUSD) || 0) - (Number(o.montoPagadoUSD) || 0);
             
             if (deuda > 0.01) {
                 let lastDate = new Date(o.fecha || 0);
-                if (o.registroPagos && o.registroPagos.length > 0) {
+                if (o.registroPagos && Array.isArray(o.registroPagos) && o.registroPagos.length > 0) {
                     const latestPayment = o.registroPagos.reduce((latest: Date, p: any) => {
                         const pDate = new Date(p.fecha || p.fechaRegistro || 0);
                         return pDate > latest ? pDate : latest;
@@ -130,9 +143,11 @@ export function NewsBar({
                 }
                 const diffDays = Math.floor((hoy.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
                 
+                // Si la factura tiene más de 15 días de atraso, se considera crítica
                 if (diffDays > 15) {
-                    // Resumen visual de ítems
-                    const itemsSummary = o.items?.map((i: any) => `${i.cantidad}x ${i.nombre}`).join(' • ') || 'Sin ítems registrados';
+                    const itemsSummary = Array.isArray(o.items) 
+                        ? o.items.map((i: any) => `${i.cantidad}x ${i.nombre}`).join(' • ') 
+                        : 'Sin ítems registrados';
 
                     alertasDeuda.push({ 
                         id: `critica-${o.id}`, 
@@ -204,7 +219,7 @@ export function NewsBar({
                     diffDays = Math.ceil((fechaPago.getTime() - hoy.getTime()) / 86400000);
                 }
 
-                const comisiones = emp.comisiones?.reduce((a:number,c:any)=>a+c.monto,0) || 0;
+                const comisiones = Array.isArray(emp.comisiones) ? emp.comisiones.reduce((a:number,c:any)=>a+c.monto,0) : 0;
                 const total = emp.montoSueldo + comisiones;
 
                 if (diffDays < 0) {
@@ -220,10 +235,12 @@ export function NewsBar({
             result.push({ id: 'nomina', title: 'Nómina General', summary: `${alertasEmpleado.length} pagos de personal por atender`, icon: Users, color: 'text-blue-600', bgColor: 'bg-blue-50 dark:bg-blue-500/10', alerts: alertasEmpleado });
         }
 
-        // 5. DISEÑO
+        // 5. DISEÑO (Este sí usa las 'ordenes' recientes del prop porque son trabajos vivos)
         const alertasDiseno: AlertItem[] = [];
         ordenes.forEach(orden => {
-            (orden.items || []).forEach((item: any, idx: number) => {
+            const safeItems = Array.isArray(orden.items) ? orden.items : [];
+            
+            safeItems.forEach((item: any, idx: number) => {
                 const serviceType = (item.tipoServicio || "").toUpperCase();
                 const isPaid = item.designPaymentStatus?.toUpperCase() === 'PAGADO' || !!item.paymentReference;
                 const assigned = item.empleadoAsignado && item.empleadoAsignado !== "Sin Asignar" && item.empleadoAsignado !== "N/A";
@@ -277,7 +294,7 @@ export function NewsBar({
             return b.alerts.length - a.alerts.length;
         });
 
-    }, [rates, prevRates, gastosFijos, empleados, ordenes, gastos]);
+    }, [rates, prevRates, gastosFijos, empleados, ordenes, gastos, deudasHistoricas]);
 
     const marqueeText = modulos.length > 0 
         ? modulos.map(m => `🔔 ${m.title}: ${m.summary}`).join("   •   ")
@@ -389,7 +406,7 @@ export function NewsBar({
                 </AnimatePresence>
             </motion.div>
 
-            {/* MODAL DETALLADO DEL MÓDULO SELECCIONADO (MÁS ANCHO Y DISEÑO LIMPIO) */}
+            {/* MODAL DETALLADO DEL MÓDULO SELECCIONADO */}
             <Dialog open={!!selectedModule} onOpenChange={(open) => !open && setSelectedModule(null)}>
                 <DialogContent className="w-[95vw] sm:max-w-4xl lg:max-w-5xl bg-slate-50 dark:bg-[#121212] rounded-[2rem] border-0 p-0 shadow-2xl flex flex-col h-[85vh] overflow-hidden">
                     <AnimatePresence mode="wait">
@@ -441,20 +458,16 @@ export function NewsBar({
                                                         isClickableRow && "cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-md"
                                                     )}
                                                 >
-                                                    {/* LADO IZQUIERDO: ICONO Y TEXTOS */}
                                                     <div className="flex items-start gap-4 flex-1 w-full min-w-0">
                                                         <div className={cn("shrink-0 p-3 rounded-xl", alert.color)}>
                                                             <AlertIcon className="w-5 h-5" />
                                                         </div>
                                                         
-                                                        {/* CONTENEDOR DE TEXTO (Asegura el truncado sin romper el Flexbox) */}
                                                         <div className="flex flex-col w-full min-w-0 pr-2">
-                                                            {/* NOMBRE DEL CLIENTE GRANDE (Y Truncado si es súper largo) */}
                                                             <h6 className="font-black text-lg md:text-xl text-slate-900 dark:text-white uppercase leading-tight truncate">
                                                                 {alert.title}
                                                             </h6>
                                                             
-                                                            {/* SUBTÍTULO (Orden y Deuda inline) */}
                                                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
                                                                 {alert.subtitle && (
                                                                     <span className="text-[11px] md:text-xs font-bold text-slate-400 uppercase tracking-widest">
@@ -467,7 +480,6 @@ export function NewsBar({
                                                                 </span>
                                                             </div>
 
-                                                            {/* RESUMEN DE ÍTEMS (Cajita gris debajo) */}
                                                             {alert.summary && (
                                                                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-2 bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800/80 w-fit line-clamp-2 max-w-full">
                                                                     {alert.summary}
@@ -476,7 +488,6 @@ export function NewsBar({
                                                         </div>
                                                     </div>
 
-                                                    {/* LADO DERECHO: BOTONES */}
                                                     {alert.actions && alert.actions.length > 0 && (
                                                         <div className="flex items-center gap-2 shrink-0 self-end md:self-center mt-2 md:mt-0">
                                                             {alert.actions.map((act, idx) => {
@@ -503,7 +514,6 @@ export function NewsBar({
                                                         </div>
                                                     )}
 
-                                                    {/* Flecha simple si es fila navegable (Ej. Nómina) */}
                                                     {isClickableRow && (
                                                         <div className="shrink-0 text-slate-300 group-hover:text-blue-500 transition-colors self-end md:self-center">
                                                             <ChevronRight className="w-5 h-5" />

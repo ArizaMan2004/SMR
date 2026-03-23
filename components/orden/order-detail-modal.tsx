@@ -1,7 +1,7 @@
 // @/components/orden/order-detail-modal.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -20,14 +20,14 @@ import {
     X, User, Calendar, FileText, MapPin, Phone, 
     Mail, Box, Layers, Hammer, Receipt, ArrowRight, 
     Timer, Scissors, Printer, Star, ShieldCheck,
-    ChevronDown, DollarSign, Euro, Coins 
+    ChevronDown, DollarSign, Euro, Coins, Building2, Users 
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface OrderDetailModalProps {
   open: boolean;
   onClose: () => void;
-  orden: OrdenServicio | null;
+  orden: any | null; 
   rates: {
     usd: number;
     eur: number;
@@ -39,13 +39,9 @@ interface OrderDetailModalProps {
 const getItemSubtotal = (item: ItemOrden) => {
   const itemExtra = item as any;
   
-  // 1. Prioridad: Si se ajustó manualmente
   if (itemExtra.totalAjustado !== undefined) return parseFloat(itemExtra.totalAjustado);
-  
-  // 2. Prioridad: Si el wizard ya guardó el subtotal procesado
   if (itemExtra.subtotal !== undefined) return parseFloat(itemExtra.subtotal);
 
-  // 3. Fallback: Recalcular con toda la nueva lógica (Laminado, Pegado, etc.)
   const x = parseFloat(itemExtra.medidaXCm) || 0;
   const y = parseFloat(itemExtra.medidaYCm) || 0;
   const p = parseFloat(item.precioUnitario.toString()) || 0;
@@ -76,9 +72,24 @@ const getItemSubtotal = (item: ItemOrden) => {
 export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailModalProps) {
   const [selectedCurrency, setSelectedCurrency] = useState<'USD' | 'EUR' | 'USDT'>('USD');
 
+  // AGRUPAR ÍTEMS DINÁMICAMENTE (Para Empresas Matrices)
+  const groupedItems = useMemo(() => {
+      if (!orden) return {};
+      if (!orden.isMaster) return { 'General': orden.items };
+      
+      const groups: any = {};
+      orden.items.forEach((item: any) => {
+          const sc = item.subCliente?.trim() || 'General';
+          if (!groups[sc]) groups[sc] = [];
+          groups[sc].push(item);
+      });
+      return groups;
+  }, [orden]);
+
   if (!orden) return null;
 
   const isAliado = orden.cliente?.tipoCliente === "ALIADO";
+  const isMaster = orden.isMaster === true; 
   const totalBaseUSD = orden.totalUSD || 0;
   const montoPagadoUSD = orden.montoPagadoUSD || 0;
   const montoPendiente = totalBaseUSD - montoPagadoUSD;
@@ -109,10 +120,17 @@ export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailMod
                     {isAliado ? <Star className="w-7 h-7 md:w-8 md:h-8 fill-current" /> : <Receipt className="w-7 h-7 md:w-8 md:h-8" />}
                 </div>
                 <div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-2 md:gap-3">
                         <DialogTitle className="text-xl md:text-3xl font-black tracking-tighter text-slate-900 dark:text-white uppercase leading-none">
                             Orden #{orden.ordenNumero}
                         </DialogTitle>
+                        
+                        {isMaster && (
+                            <Badge className="bg-indigo-600 text-white rounded-full px-3 py-1 text-[9px] md:text-[10px] font-black uppercase tracking-widest border-none flex items-center gap-1">
+                                <Building2 className="w-3 h-3" /> Matriz
+                            </Badge>
+                        )}
+
                         {isAliado && (
                             <Badge className="bg-purple-600 text-white animate-pulse rounded-full px-3 py-1 text-[9px] md:text-[10px] font-black uppercase tracking-widest border-none">
                                 Aliado 🤝
@@ -125,10 +143,10 @@ export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailMod
                             {orden.estado}
                         </Badge>
                     </div>
-                    <p className="text-slate-500 font-bold text-xs md:text-sm uppercase tracking-wide mt-1">{formatDate(orden.fecha)}</p>
+                    <p className="text-slate-500 font-bold text-xs md:text-sm uppercase tracking-wide mt-2">{formatDate(orden.fecha)}</p>
                 </div>
             </div>
-            <Button variant="outline" size="icon" onClick={onClose} className="rounded-full h-10 w-10 md:h-12 md:w-12 border-slate-200 bg-white shadow-sm hover:bg-slate-50">
+            <Button variant="outline" size="icon" onClick={onClose} className="rounded-full h-10 w-10 md:h-12 md:w-12 border-slate-200 bg-white shadow-sm hover:bg-slate-50 shrink-0">
                 <X className="h-5 w-5" />
             </Button>
         </header>
@@ -137,7 +155,7 @@ export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailMod
             <ScrollArea className="h-full">
                 <div className="px-6 md:px-10 py-8 max-w-5xl mx-auto space-y-8 pb-24">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <SectionCard title="Cliente" icon={<User className={isAliado ? "text-purple-500 w-4 h-4" : "text-blue-500 w-4 h-4"}/>} className="md:col-span-2">
+                        <SectionCard title={isMaster ? "Empresa Matriz" : "Cliente"} icon={isMaster ? <Building2 className="text-indigo-500 w-4 h-4"/> : <User className={isAliado ? "text-purple-500 w-4 h-4" : "text-blue-500 w-4 h-4"}/>} className="md:col-span-2">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-6 gap-x-8">
                                 <InfoField label="Razón Social" value={orden.cliente.nombreRazonSocial} primary className="sm:col-span-2" />
                                 <div className="flex flex-col gap-1.5">
@@ -178,14 +196,45 @@ export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailMod
                         </SectionCard>
                     </div>
 
-                    <div className="space-y-4">
+                    <div className="space-y-6">
                         <div className="flex items-center gap-2 px-2">
                             <Layers className="w-5 h-5 text-slate-400" />
                             <h3 className="font-black text-lg tracking-tighter uppercase text-slate-800 dark:text-slate-200">Detalle de Producción</h3>
                         </div>
-                        <div className="space-y-3">
-                            {orden.items.map((item, idx) => (
-                                <ItemRow key={idx} item={item} />
+                        
+                        <div className="space-y-8">
+                            {Object.entries(groupedItems).map(([subCliente, items]: [string, any], groupIdx) => (
+                                <div key={groupIdx} className="space-y-3">
+                                    
+                                    {/* CABECERA DEL SUB-CLIENTE (Solo si es Matriz) */}
+                                    {isMaster && (
+                                        <div className="flex items-center justify-between bg-indigo-50/80 dark:bg-indigo-900/20 px-5 py-3 rounded-2xl border border-indigo-100/50 dark:border-indigo-800/30">
+                                            <span className="font-black text-[11px] md:text-xs uppercase tracking-widest text-indigo-700 dark:text-indigo-400 flex items-center gap-2">
+                                                <Users className="w-4 h-4" /> Sub-Cliente: {subCliente}
+                                            </span>
+                                            <Badge className="bg-white text-indigo-600 border-none font-bold text-[9px] shadow-sm uppercase">{items.length} ítems</Badge>
+                                        </div>
+                                    )}
+
+                                    {/* ITEMS */}
+                                    <div className="space-y-3">
+                                        {items.map((item: any, idx: number) => (
+                                            <ItemRow key={idx} item={item} isMaster={isMaster} />
+                                        ))}
+                                    </div>
+
+                                    {/* SUBTOTAL DEL SUB-CLIENTE (Solo si es Matriz) */}
+                                    {isMaster && (
+                                        <div className="flex justify-end pr-4 pt-1">
+                                            <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-3">
+                                                Subtotal {subCliente} 
+                                                <span className="text-sm md:text-base font-black text-slate-800 dark:text-slate-200">
+                                                    ${items.reduce((acc: number, item: any) => acc + getItemSubtotal(item), 0).toFixed(2)}
+                                                </span>
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
                             ))}
                         </div>
                     </div>
@@ -285,7 +334,7 @@ function InfoField({ label, value, icon: Icon, primary, className }: any) {
     )
 }
 
-function ItemRow({ item }: { item: ItemOrden }) {
+function ItemRow({ item, isMaster }: { item: ItemOrden, isMaster?: boolean }) {
     const subtotal = getItemSubtotal(item); 
     const qty = parseFloat(item.cantidad.toString()) || 1;
     const precioUnitarioReal = subtotal / qty;
@@ -294,7 +343,6 @@ function ItemRow({ item }: { item: ItemOrden }) {
     const isImpresion = item.tipoServicio === 'IMPRESION';
     const isCorte = item.tipoServicio === 'CORTE';
 
-    // Desarmamos la cadena "Mat: Vinil | Corte | Laminado" para mostrarla bonita
     const detallesList = isImpresion && itemExtra.materialDetalleCorte 
         ? itemExtra.materialDetalleCorte.split(" | ") 
         : [];
@@ -314,6 +362,10 @@ function ItemRow({ item }: { item: ItemOrden }) {
                             <Badge variant="secondary" className="bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-none text-[9px] font-black uppercase px-2 py-0">
                                 {item.tipoServicio}
                             </Badge>
+                            
+                            {/* Ocultamos el badge individual si ya está agrupado por cabecera, pero lo mostramos si quieres extra claridad */}
+                            {/* {itemExtra.subCliente && !isMaster && ( ... )} */}
+
                             {itemExtra.empleadoAsignado && itemExtra.empleadoAsignado !== "N/A" && (
                                 <Badge variant="outline" className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 text-[9px] font-black uppercase px-2 py-0 gap-1">
                                     <User className="w-2.5 h-2.5" /> {itemExtra.empleadoAsignado}
@@ -322,24 +374,20 @@ function ItemRow({ item }: { item: ItemOrden }) {
                         </div>
 
                         <div className="space-y-1.5">
-                            {/* Visualización para CORTE LÁSER */}
                             {isCorte && itemExtra.materialDetalleCorte && (
                                 <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1.5 leading-none bg-orange-50 dark:bg-orange-500/10 w-fit px-2 py-1 rounded-md">
                                     <Scissors className="w-3 h-3 text-orange-500" /> {itemExtra.materialDetalleCorte}
                                 </p>
                             )}
                             
-                            {/* Visualización detallada para IMPRESIÓN */}
                             {isImpresion && (
                                 <div className="space-y-2">
-                                    {/* Material Base */}
                                     {(materialPrincipal || itemExtra.materialDeImpresion) && (
                                         <p className="text-[11px] font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5 leading-none bg-blue-50 dark:bg-blue-500/10 w-fit px-2 py-1 rounded-md">
                                             <Printer className="w-3 h-3" /> 
                                             {materialPrincipal ? materialPrincipal.replace("Mat: ", "Material: ") : `Material: ${itemExtra.materialDeImpresion}`}
                                         </p>
                                     )}
-                                    {/* Insignias de Acabados (Ojales, PVC, Laminado, etc.) */}
                                     {acabados.length > 0 && (
                                         <div className="flex flex-wrap gap-1.5 mt-1">
                                             {acabados.map((acabado: string, i: number) => (
