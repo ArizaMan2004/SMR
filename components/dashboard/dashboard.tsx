@@ -62,7 +62,8 @@ import {
 import { type OrdenServicio } from "@/lib/types/orden"
 import { 
     subscribeToOrdenes, deleteOrden, createOrden, actualizarOrden, 
-    getTotalOrdenesCount, buscarOrdenEspecifica, getOrdenesStatsFromServer 
+    getTotalOrdenesCount, buscarOrdenEspecifica, getOrdenesStatsFromServer,
+    buscarOrdenesHistoricas // <-- NUEVA IMPORTACIÓN
 } from "@/lib/services/ordenes-service"
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
 import { 
@@ -383,25 +384,41 @@ useEffect(() => {
 
     const handleDeepSearch = async (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter' && searchTerm.trim() !== '') {
-            const num = Number(searchTerm.trim());
-            if (!isNaN(num)) {
-                const isAlreadyVisible = ordenes.some(o => String(o.ordenNumero) === searchTerm.trim());
-                if (!isAlreadyVisible) {
-                    setIsSearchingDeep(true);
-                    try {
-                        const ordenEncontrada = await buscarOrdenEspecifica(searchTerm.trim());
-                        if (ordenEncontrada) {
-                            toast.success(`Orden #${searchTerm} recuperada del archivo histórico.`);
-                            handleOpenOrderDetails(ordenEncontrada);
-                        } else {
-                            toast.error(`La orden #${searchTerm} no se encuentra registrada.`);
-                        }
-                    } catch (error) {
-                        toast.error("Error al conectar con la base de datos.");
-                    } finally {
-                        setIsSearchingDeep(false);
+            setIsSearchingDeep(true);
+            try {
+                // Buscamos en toda la base de datos (por número, cliente o RIF)
+                const resultados = await buscarOrdenesHistoricas(searchTerm);
+
+                if (resultados && resultados.length > 0) {
+                    toast.success(`Se encontraron ${resultados.length} coincidencias en el historial.`);
+                    
+                    // Inyectamos los resultados en el estado actual de la tabla
+                    setOrdenes(prevOrdenes => {
+                        const nuevasOrdenes = [...prevOrdenes];
+                        
+                        resultados.forEach(res => {
+                            // Evitamos duplicados si la orden ya estaba en las 150 iniciales
+                            if (!nuevasOrdenes.find(o => o.id === res.id)) {
+                                nuevasOrdenes.push(res);
+                            }
+                        });
+                        
+                        return nuevasOrdenes;
+                    });
+
+                    // Si es solo una orden exacta y es un número, abrimos el detalle por comodidad
+                    if (resultados.length === 1 && !isNaN(Number(searchTerm))) {
+                        handleOpenOrderDetails(resultados[0]);
                     }
+
+                } else {
+                    toast.error(`No se encontraron registros históricos para "${searchTerm}".`);
                 }
+            } catch (error) {
+                console.error("Error en búsqueda profunda:", error);
+                toast.error("Error al conectar con la base de datos histórica.");
+            } finally {
+                setIsSearchingDeep(false);
             }
         }
     };

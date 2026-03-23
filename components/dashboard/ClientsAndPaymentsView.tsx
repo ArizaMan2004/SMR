@@ -39,6 +39,7 @@ import { OrderDetailModal } from '@/components/orden/order-detail-modal'
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
 import { generateGeneralAccountStatusPDF } from "@/lib/services/pdf-generator"
 import { createNotification } from "@/lib/services/gastos-service"
+import { buscarOrdenesHistoricas } from "@/lib/services/ordenes-service" // <-- NUEVA IMPORTACIÓN
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -93,6 +94,7 @@ export function ClientsAndPaymentsView({
 
     // --- ESTADOS DE UI Y FILTROS ---
     const [searchTerm, setSearchTerm] = useState('')
+    const [isSearchingDeep, setIsSearchingDeep] = useState(false) // <-- NUEVO ESTADO PARA BÚSQUEDA PROFUNDA
     const [currentPage, setCurrentPage] = useState(1)
     const itemsPerPage = 5
     const [expandedOrdenId, setExpandedOrdenId] = useState<string | null>(null);
@@ -128,7 +130,6 @@ export function ClientsAndPaymentsView({
         setIsLoadingCobranzas(true);
         
         // 1. CARTERA EN MORA: Descargamos SOLO las que deben dinero usando su etiqueta. 
-        // Si hay 1,000 facturas pero solo 40 deben, gastamos 40 lecturas.
         const qUnpaid = query(
             collection(db, "ordenes"), 
             where("estadoPago", "in", ["PENDIENTE", "ABONADO"])
@@ -153,6 +154,65 @@ export function ClientsAndPaymentsView({
 
         return () => { unsubUnpaid(); unsubPaid(); };
     }, []);
+
+    // ==============================================================
+    // BÚSQUEDA PROFUNDA EN HISTORIAL 
+    // ==============================================================
+    const handleDeepSearch = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter' && searchTerm.trim() !== '') {
+            setIsSearchingDeep(true);
+            try {
+                const resultados = await buscarOrdenesHistoricas(searchTerm);
+
+                if (resultados && resultados.length > 0) {
+                    toast.success(`Se encontraron ${resultados.length} facturas históricas.`);
+                    
+                    const newUnpaid: any[] = [];
+                    const newPaid: any[] = [];
+
+                    // Clasificamos los resultados
+                    resultados.forEach(res => {
+                        if (res.estadoPago === 'PAGADO') {
+                            newPaid.push(res);
+                        } else if (res.estadoPago === 'PENDIENTE' || res.estadoPago === 'ABONADO') {
+                            newUnpaid.push(res);
+                        }
+                    });
+
+                    // Inyectamos morosas históricas
+                    if (newUnpaid.length > 0) {
+                        setLocalUnpaidOrders(prev => {
+                            const updated = [...prev];
+                            newUnpaid.forEach(res => {
+                                if (!updated.find(o => o.id === res.id)) updated.push(res);
+                            });
+                            return updated;
+                        });
+                    }
+
+                    // Inyectamos liquidadas históricas (Aquí es donde ocurre la magia)
+                    if (newPaid.length > 0) {
+                        setLocalPaidOrders(prev => {
+                            const updated = [...prev];
+                            newPaid.forEach(res => {
+                                if (!updated.find(o => o.id === res.id)) updated.push(res);
+                            });
+                            // Ordenamos para que las históricas queden bien posicionadas
+                            return updated.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+                        });
+                    }
+
+                } else {
+                    toast.error(`No hay registros históricos para "${searchTerm}".`);
+                }
+            } catch (error) {
+                console.error("Error en búsqueda profunda:", error);
+                toast.error("Error al buscar en la base de datos.");
+            } finally {
+                setIsSearchingDeep(false);
+            }
+        }
+    };
 
     // ==============================================================
     // LÓGICA INTELIGENTE DE BILLETERAS Y TASAS
@@ -212,7 +272,8 @@ export function ClientsAndPaymentsView({
         const pagadas = localPaidOrders
             .filter((o: any) => {
                 const nombreCliente = (o.cliente?.nombreRazonSocial || '').toLowerCase();
-                const coincideBusqueda = !lowerCaseSearch || nombreCliente.includes(lowerCaseSearch);
+                const numOrden = String(o.ordenNumero || '');
+                const coincideBusqueda = !lowerCaseSearch || nombreCliente.includes(lowerCaseSearch) || numOrden.includes(lowerCaseSearch);
                 return coincideBusqueda && o.estadoPago !== 'ANULADO';
             });
 
@@ -225,7 +286,8 @@ export function ClientsAndPaymentsView({
             const pendiente = Math.max(0, total - pagado);
             
             const nombreCliente = (orden.cliente?.nombreRazonSocial || '').toLowerCase();
-            const coincideBusqueda = !lowerCaseSearch || nombreCliente.includes(lowerCaseSearch);
+            const numOrden = String(orden.ordenNumero || '');
+            const coincideBusqueda = !lowerCaseSearch || nombreCliente.includes(lowerCaseSearch) || numOrden.includes(lowerCaseSearch);
 
             if (pendiente > 0.01 && coincideBusqueda) {
                 totalPendGlobal += pendiente;
@@ -362,7 +424,7 @@ export function ClientsAndPaymentsView({
                 }
             }
 
-            await batch.commit(); // MAGIC: Esto actualizará Firebase, y onSnapshot moverá las facturas a "Pagadas" al instante en la UI
+            await batch.commit(); 
 
             toast.dismiss(); toast.success("Abono global aplicado correctamente");
             closeGlobalModal();
@@ -375,7 +437,7 @@ export function ClientsAndPaymentsView({
         setGlobalCurrencyMode('USD'); setGlobalCalculationBase('USD'); setGlobalWallet('cash_usd'); 
     };
 
-    // --- REVERSIÓN DE ABONOS (Recibe datos completos del Modal de Historial) ---
+    // --- REVERSIÓN DE ABONOS ---
     const handleRevertGlobalBatch = async (group: any, fullOrdersReference: any[]) => {
         if (!confirm(`¿Estás seguro de revertir este abono global de ${formatCurrency(group.totalMonto)}?\n\nSe restará el saldo de ${group.distribucion.length} órdenes y se eliminará este registro.`)) return;
     
@@ -408,7 +470,7 @@ export function ClientsAndPaymentsView({
             if (operationsCount > 0) {
                 await batch.commit();
                 toast.dismiss(); toast.success("Abono global revertido correctamente");
-                setIsHistoryModalOpen(false); // Cierra el modal para forzar refresco
+                setIsHistoryModalOpen(false); 
             } else { toast.dismiss(); toast.error("No se encontraron órdenes para revertir."); }
     
         } catch (error) { toast.dismiss(); toast.error("Error al revertir el abono"); }
@@ -436,21 +498,26 @@ export function ClientsAndPaymentsView({
                     <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Siskoven SMR - Entorno Shared</p>
                 </div>
                 
-                <div className="bg-white/40 dark:bg-white/5 backdrop-blur-xl p-2 rounded-[2rem] border border-white/20 shadow-2xl flex gap-2">
-                    <div className="relative">
+                {/* BUSCADOR CON SOPORTE DE BÚSQUEDA PROFUNDA */}
+                <div className="bg-white/40 dark:bg-white/5 backdrop-blur-xl p-2 rounded-[2rem] border border-white/20 shadow-2xl flex gap-2 w-full md:w-auto">
+                    <div className="relative flex-1 md:w-[350px]">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 opacity-30" />
                         <input
-                            placeholder="Buscar cliente..."
+                            placeholder="Buscar cliente... (Enter para historial)"
                             value={searchTerm}
                             onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-                            className="pl-12 pr-6 py-3 w-full md:w-[300px] bg-white dark:bg-slate-900 border-0 rounded-[1.5rem] shadow-inner text-sm font-bold outline-none"
+                            onKeyDown={handleDeepSearch}
+                            className="pl-12 pr-10 py-3 w-full bg-white dark:bg-slate-900 border-0 rounded-[1.5rem] shadow-inner text-sm font-bold outline-none transition-all focus:ring-2 focus:ring-blue-500/20"
                         />
+                        {isSearchingDeep && (
+                            <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-blue-500 animate-spin" />
+                        )}
                     </div>
                     <Button 
                         size="icon" 
                         variant="ghost" 
                         onClick={() => setIsHistoryModalOpen(true)}
-                        className="rounded-full w-12 h-12 bg-white dark:bg-black/20 text-blue-600 hover:scale-105 transition-transform"
+                        className="rounded-full w-12 h-12 bg-white dark:bg-black/20 text-blue-600 hover:scale-105 transition-transform shrink-0"
                         title="Historial de Abonos Globales"
                     >
                         <History className="w-6 h-6" />
@@ -701,7 +768,8 @@ export function ClientsAndPaymentsView({
                         </TableHeader>
                         <TableBody>
                             <AnimatePresence>
-                                {pagadasCompletamente.slice(0, 10).map((orden: any) => (
+                                {/* Si hay una búsqueda activa, mostramos todas. Si no, solo las últimas 10 para no saturar la UI */}
+                                {pagadasCompletamente.slice(0, searchTerm ? undefined : 10).map((orden: any) => (
                                     <React.Fragment key={orden.id}>
                                         <TableRow className="border-b border-slate-100 dark:border-white/5 hover:bg-white dark:hover:bg-white/5 transition-all">
                                             <TableCell className="pl-10 font-black text-slate-900 dark:text-white text-xs">#{orden.ordenNumero}</TableCell>

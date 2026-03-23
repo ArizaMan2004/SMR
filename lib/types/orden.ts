@@ -25,6 +25,8 @@ export interface ClienteData {
     domicilioFiscal: string;
     correo: string;
     personaContacto: string;
+    // ✅ AGREGADO: Usado en el dashboard para los badges de cliente
+    tipoCliente?: 'REGULAR' | 'ALIADO' | string; 
 }
 
 export interface ServiciosSolicitados {
@@ -41,11 +43,16 @@ export interface ServiciosSolicitados {
 // --- Interfaz de Registro de Pagos / Transacciones ---
 export interface PaymentLog {
     montoUSD: number;
-    fechaRegistro: string; // ISO String
-    metodo: 'Transferencia' | 'Efectivo' | 'Pago Móvil' | 'Tarjeta Débito/Crédito' | 'Otro';
-    referencia: string;
+    fechaRegistro?: string; // ISO String (A veces el dashboard manda 'fecha' en vez de 'fechaRegistro')
+    fecha?: string; 
+    // ✅ CORREGIDO: Ampliado para aceptar "Efectivo USD" o "DESCUENTO" que envía el dashboard
+    metodo: 'Transferencia' | 'Efectivo' | 'Pago Móvil' | 'Tarjeta Débito/Crédito' | 'Otro' | 'Efectivo USD' | 'DESCUENTO' | string;
+    referencia?: string;
     bancoOrigen?: string;
     bancoDestino?: string;
+    nota?: string; // ✅ AGREGADO: El dashboard manda notas al pagar
+    imagenUrl?: string; // ✅ AGREGADO: Soporte para comprobantes
+    tasaBCV?: number;
 }
 
 // Alias para compatibilidad con el servicio
@@ -100,7 +107,8 @@ export interface ItemOrden {
 
 export interface OrdenServicio {
     id?: string; // Opcional porque al crearla no existe aún
-    ordenNumero: string;
+    // ✅ CORREGIDO: Soporte para números (Firebase suele guardar el autoincremental como número)
+    ordenNumero: string | number; 
     fecha: string; // Fecha de creación
     fechaEntrega: string; // Fecha límite original
     
@@ -118,13 +126,12 @@ export interface OrdenServicio {
     
     // Pagos
     montoPagadoUSD: number; 
-    estadoPago: EstadoPago;
+    estadoPago: EstadoPago | string; // Añadido string para evitar choques
     
-    // ✅ CORRECCIÓN: Estandarizado con el nombre usado en el servicio
     registroPagos: PaymentLog[]; 
     
     // Estado General
-    estado: EstadoOrden; 
+    estado: EstadoOrden | string; 
     
     // Seguimiento
     fechaFinalizacion?: string; 
