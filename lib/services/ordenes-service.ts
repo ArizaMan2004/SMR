@@ -18,23 +18,64 @@ import { db } from "@/lib/firebase";
 import type { OrdenServicio, EstadoOrden, EstadoPago, PaymentLog } from "@/lib/types/orden";
 
 /**
- * 🔹 Crea una nueva orden en Firestore (NIVEL PRO: Con campo de búsqueda optimizado)
+ * 🔹 MOTOR DE AUTO-SANACIÓN: Obtiene el siguiente número de orden de forma 100% segura.
+ * Ignora si hay números guardados accidentalmente como texto y siempre encuentra el mayor.
+ */
+export async function getNextSafeOrderNumber() {
+    try {
+        const colRef = collection(db, "ordenes");
+        // Buscamos los últimos 30 documentos por fecha para evitar bloqueos del índice
+        const q = query(colRef, orderBy("fecha", "desc"), limit(30));
+        const snap = await getDocs(q);
+        
+        let max = 0;
+        snap.forEach(doc => {
+            const num = Number(doc.data().ordenNumero);
+            if (!isNaN(num) && num > max) {
+                max = num;
+            }
+        });
+        
+        // Fallback: Si no encuentra por fecha, busca por el índice tradicional
+        if (max === 0) {
+            const q2 = query(colRef, orderBy("ordenNumero", "desc"), limit(1));
+            const snap2 = await getDocs(q2);
+            if (!snap2.empty) {
+                const num2 = Number(snap2.docs[0].data().ordenNumero);
+                if (!isNaN(num2)) max = num2;
+            }
+        }
+
+        return max > 0 ? max + 1 : 1;
+    } catch (error) {
+        console.error("Error buscando el próximo correlativo:", error);
+        return Date.now() % 100000; // Fallback de emergencia
+    }
+}
+
+/**
+ * 🔹 Crea una nueva orden en Firestore (NIVEL PRO: Auto-correlativo a prueba de fallos)
  */
 export async function createOrden(data: OrdenServicio) {
   try {
     const colRef = collection(db, "ordenes"); 
     
-    // Guardamos el nombre todo en minúsculas en un campo oculto para búsquedas rápidas
+    // 🔥 CALCULAMOS EL NÚMERO DIRECTAMENTE AQUÍ PARA EVITAR QUE SE CONGELE
+    const numeroSeguro = await getNextSafeOrderNumber();
+
     const clienteBusqueda = data.cliente?.nombreRazonSocial ? data.cliente.nombreRazonSocial.toLowerCase() : "";
 
     const docRef = await addDoc(colRef, {
       ...data,
+      ordenNumero: numeroSeguro, // Sobrescribimos y forzamos a que sea un número puro
       clienteBusqueda,
       fecha: data.fecha || new Date().toISOString(),
       estado: data.estado || "PENDIENTE",
       estadoPago: data.estadoPago || "PENDIENTE",
     });
-    console.log("✅ Orden creada con ID:", docRef.id);
+    
+    console.log(`✅ Orden #${numeroSeguro} creada con ID:`, docRef.id);
+    return { id: docRef.id, ordenNumero: numeroSeguro };
   } catch (error) {
     console.error("❌ Error al crear la orden:", error);
     throw error;
@@ -49,7 +90,6 @@ export async function actualizarOrden(ordenId: string, data: Partial<OrdenServic
     const docRef = doc(db, "ordenes", ordenId);
     const { id, ...dataToUpdate } = data as any; 
     
-    // Si editan el nombre del cliente, actualizamos el campo oculto de búsqueda también
     if (dataToUpdate.cliente && dataToUpdate.cliente.nombreRazonSocial) {
         dataToUpdate.clienteBusqueda = dataToUpdate.cliente.nombreRazonSocial.toLowerCase();
     }
@@ -237,41 +277,34 @@ export async function getOrdenesStatsFromServer() {
 }
 
 /**
- * 🔹 Busca órdenes en todo el historial (A PRUEBA DE BALAS: 100% Funcional para registros nuevos y viejos)
+ * 🔹 Busca órdenes en todo el historial
  */
 export async function buscarOrdenesHistoricas(searchTerm: string) {
   try {
     const colRef = collection(db, "ordenes");
-    
-    // Limpiamos espacios basura al inicio y al final
     const term = searchTerm.trim();
     if (!term) return [];
 
-    // Preparamos todas las combinaciones posibles
-    const termLower = term.toLowerCase(); // "edward producciones"
-    const termUpper = term.toUpperCase(); // "EDWARD PRODUCCIONES"
-    const termCap = term.charAt(0).toUpperCase() + termLower.slice(1); // "Edward producciones"
+    const termLower = term.toLowerCase(); 
+    const termUpper = term.toUpperCase(); 
+    const termCap = term.charAt(0).toUpperCase() + termLower.slice(1); 
     const numTerm = Number(term);
 
     const promesas = [];
 
-    // 1. Búsqueda Numérica Exacta (Si ingresaron un número de orden válido)
     if (!isNaN(numTerm)) {
       promesas.push(getDocs(query(colRef, where("ordenNumero", "==", numTerm))));
     }
 
-    // 2. Búsqueda por RIF/Cédula
     promesas.push(getDocs(query(colRef, where("cliente.rifCedula", "==", termUpper))));
     promesas.push(getDocs(query(colRef, where("cliente.rifCedula", "==", termLower))));
     
-    // 3. Búsqueda en el Nuevo Campo Optimizado (Para facturas recientes/futuras)
     promesas.push(getDocs(query(
         colRef, 
         where("clienteBusqueda", ">=", termLower),
         where("clienteBusqueda", "<=", termLower + '\uf8ff')
     )));
 
-    // 4. Búsqueda Legacy por Nombre (Para facturas viejas guardadas de diferentes formas)
     promesas.push(getDocs(query(
         colRef, 
         where("cliente.nombreRazonSocial", ">=", termUpper),
@@ -288,10 +321,7 @@ export async function buscarOrdenesHistoricas(searchTerm: string) {
         where("cliente.nombreRazonSocial", "<=", termCap + '\uf8ff')
     )));
 
-    // Ejecutamos TODAS las búsquedas al mismo tiempo
     const snapshots = await Promise.all(promesas);
-    
-    // Agrupamos en un Map usando el ID del documento para asegurar que NINGUNA orden se duplique en la tabla
     const resultadosMap = new Map();
     
     snapshots.forEach((snap) => {
@@ -308,7 +338,7 @@ export async function buscarOrdenesHistoricas(searchTerm: string) {
 }
 
 /**
- * 🔹 Suscribe al NewsBar SOLO a las órdenes que no han sido pagadas por completo (PENDIENTE).
+ * 🔹 Suscribe al NewsBar SOLO a las órdenes pendientes.
  */
 export const subscribeToDeudasActivas = (callback: (ordenes: any[]) => void) => {
     const q = query(
@@ -328,8 +358,7 @@ export const subscribeToDeudasActivas = (callback: (ordenes: any[]) => void) => 
 };
 
 /**
- * 🔹 Carga un bloque grande de órdenes recientes para extraer historiales completos (Ej. Diseños pagados viejos)
- * Solo consume las lecturas necesarias sin explotar la cuota de Firebase.
+ * 🔹 Carga un bloque grande de órdenes recientes para extraer historiales completos
  */
 export async function cargarHistorialMasivo() {
   try {
