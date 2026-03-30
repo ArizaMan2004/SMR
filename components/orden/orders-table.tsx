@@ -40,7 +40,7 @@ interface OrdersTableProps {
   ordenes: OrdenServicio[]
   onDelete: (ordenId: string) => void
   onEdit: (orden: OrdenServicio) => void
-  onRegisterPayment: (ordenId: string) => void
+  onRegisterPayment: (orden: OrdenServicio) => void // <--- AQUÍ ESTÁ EL CAMBIO CLAVE
   currentUserId: string
   rates: {
     usd: number;
@@ -225,7 +225,14 @@ export function OrdersTable({
                         <CardContent className="p-0">
                             <OrdersSubTable 
                                 data={unpaidOrders} 
-                                actions={{ onDelete, onEdit, handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, handleOpenPayment: (o:any)=>{ onRegisterPayment(o.id); }, handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, handleDownloadPDF }} 
+                                actions={{ 
+                                    onDelete, 
+                                    onEdit, 
+                                    handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, 
+                                    handleOpenPayment: (o:any)=>{ onRegisterPayment(o); }, // <--- CAMBIO: ENVIAR OBJETO COMPLETO
+                                    handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, 
+                                    handleDownloadPDF 
+                                }} 
                                 rates={rates} 
                             />
                         </CardContent>
@@ -254,7 +261,14 @@ export function OrdersTable({
                         <CardContent className="p-0">
                             <OrdersSubTable 
                                 data={paidOrders} 
-                                actions={{ onDelete, onEdit, handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, handleOpenPayment: (o:any)=>{ onRegisterPayment(o.id); }, handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, handleDownloadPDF }} 
+                                actions={{ 
+                                    onDelete, 
+                                    onEdit, 
+                                    handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, 
+                                    handleOpenPayment: (o:any)=>{ onRegisterPayment(o); }, // <--- CAMBIO: ENVIAR OBJETO COMPLETO
+                                    handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, 
+                                    handleDownloadPDF 
+                                }} 
                                 rates={rates} 
                             />
                         </CardContent>

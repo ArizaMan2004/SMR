@@ -39,11 +39,11 @@ import { OrderDetailModal } from '@/components/orden/order-detail-modal'
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
 import { generateGeneralAccountStatusPDF } from "@/lib/services/pdf-generator"
 import { createNotification } from "@/lib/services/gastos-service"
-import { buscarOrdenesHistoricas } from "@/lib/services/ordenes-service" // <-- NUEVA IMPORTACIÓN
+import { buscarOrdenesHistoricas } from "@/lib/services/ordenes-service" 
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
-// FIREBASE (Nuevas importaciones para la autonomía)
+// FIREBASE
 import { db } from "@/lib/firebase"
 import { collection, doc, updateDoc, arrayUnion, writeBatch, query, where, orderBy, limit, onSnapshot, getDocs } from "firebase/firestore"
 
@@ -57,7 +57,7 @@ interface ClientSummary {
 }
 
 interface ClientsAndPaymentsViewProps {
-    ordenes?: any[]; // La mantenemos por compatibilidad con el dashboard, pero usaremos nuestra propia data
+    ordenes?: any[]; 
     rates: {
         usd: number;
         eur: number;
@@ -90,11 +90,12 @@ export function ClientsAndPaymentsView({
     // --- ESTADOS AUTÓNOMOS DE LA VISTA (Ahorro de Cuota) ---
     const [localUnpaidOrders, setLocalUnpaidOrders] = useState<any[]>([]);
     const [localPaidOrders, setLocalPaidOrders] = useState<any[]>([]);
+    const [historicasBusqueda, setHistoricasBusqueda] = useState<any[]>([]); // <-- ESTADO BLINDADO PARA HISTÓRICAS
     const [isLoadingCobranzas, setIsLoadingCobranzas] = useState(true);
 
     // --- ESTADOS DE UI Y FILTROS ---
     const [searchTerm, setSearchTerm] = useState('')
-    const [isSearchingDeep, setIsSearchingDeep] = useState(false) // <-- NUEVO ESTADO PARA BÚSQUEDA PROFUNDA
+    const [isSearchingDeep, setIsSearchingDeep] = useState(false)
     const [currentPage, setCurrentPage] = useState(1)
     const itemsPerPage = 5
     const [expandedOrdenId, setExpandedOrdenId] = useState<string | null>(null);
@@ -156,6 +157,25 @@ export function ClientsAndPaymentsView({
     }, []);
 
     // ==============================================================
+    // TIEMPO REAL PARA ÓRDENES HISTÓRICAS (BLINDAJE)
+    // ==============================================================
+    useEffect(() => {
+        if (historicasBusqueda.length === 0) return;
+        
+        const unsubs = historicasBusqueda.map(ord => 
+            onSnapshot(doc(db, "ordenes", ord.id), (docSnap) => {
+                if (docSnap.exists()) {
+                    const dataActualizada = { id: docSnap.id, ...docSnap.data() };
+                    setHistoricasBusqueda(prev => prev.map(o => o.id === ord.id ? dataActualizada : o));
+                }
+            })
+        );
+
+        return () => unsubs.forEach(unsub => unsub());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [historicasBusqueda.map(o => o.id).join(',')]);
+
+    // ==============================================================
     // BÚSQUEDA PROFUNDA EN HISTORIAL 
     // ==============================================================
     const handleDeepSearch = async (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -167,40 +187,14 @@ export function ClientsAndPaymentsView({
                 if (resultados && resultados.length > 0) {
                     toast.success(`Se encontraron ${resultados.length} facturas históricas.`);
                     
-                    const newUnpaid: any[] = [];
-                    const newPaid: any[] = [];
-
-                    // Clasificamos los resultados
-                    resultados.forEach(res => {
-                        if (res.estadoPago === 'PAGADO') {
-                            newPaid.push(res);
-                        } else if (res.estadoPago === 'PENDIENTE' || res.estadoPago === 'ABONADO') {
-                            newUnpaid.push(res);
-                        }
+                    // Guardamos TODAS las históricas encontradas en su propio estado protegido
+                    setHistoricasBusqueda(prev => {
+                        const updated = [...prev];
+                        resultados.forEach(res => {
+                            if (!updated.find(o => o.id === res.id)) updated.push(res);
+                        });
+                        return updated;
                     });
-
-                    // Inyectamos morosas históricas
-                    if (newUnpaid.length > 0) {
-                        setLocalUnpaidOrders(prev => {
-                            const updated = [...prev];
-                            newUnpaid.forEach(res => {
-                                if (!updated.find(o => o.id === res.id)) updated.push(res);
-                            });
-                            return updated;
-                        });
-                    }
-
-                    // Inyectamos liquidadas históricas (Aquí es donde ocurre la magia)
-                    if (newPaid.length > 0) {
-                        setLocalPaidOrders(prev => {
-                            const updated = [...prev];
-                            newPaid.forEach(res => {
-                                if (!updated.find(o => o.id === res.id)) updated.push(res);
-                            });
-                            // Ordenamos para que las históricas queden bien posicionadas
-                            return updated.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
-                        });
-                    }
 
                 } else {
                     toast.error(`No hay registros históricos para "${searchTerm}".`);
@@ -268,8 +262,19 @@ export function ClientsAndPaymentsView({
         let totalPendGlobal = 0;
         const lowerCaseSearch = searchTerm.toLowerCase().trim();
 
-        // Las pagadas vienen directo de la base filtrada
-        const pagadas = localPaidOrders
+        // 1. UNIFICAR LISTAS (Firebase + Históricas Ancladas)
+        const mapUnpaid = new Map<string, any>();
+        localUnpaidOrders.forEach(o => mapUnpaid.set(o.id, o));
+        historicasBusqueda.filter(o => o.estadoPago === 'PENDIENTE' || o.estadoPago === 'ABONADO').forEach(o => mapUnpaid.set(o.id, o));
+        const todasUnpaid = Array.from(mapUnpaid.values());
+
+        const mapPaid = new Map<string, any>();
+        localPaidOrders.forEach(o => mapPaid.set(o.id, o));
+        historicasBusqueda.filter(o => o.estadoPago === 'PAGADO').forEach(o => mapPaid.set(o.id, o));
+        const todasPaid = Array.from(mapPaid.values());
+
+        // 2. PROCESAR PAGADAS
+        const pagadas = todasPaid
             .filter((o: any) => {
                 const nombreCliente = (o.cliente?.nombreRazonSocial || '').toLowerCase();
                 const numOrden = String(o.ordenNumero || '');
@@ -277,8 +282,8 @@ export function ClientsAndPaymentsView({
                 return coincideBusqueda && o.estadoPago !== 'ANULADO';
             });
 
-        // Las morosas (todas las históricas sin límite) vienen de localUnpaidOrders
-        localUnpaidOrders.forEach((orden: any) => {
+        // 3. PROCESAR MOROSAS
+        todasUnpaid.forEach((orden: any) => {
             if (orden.estado === 'ANULADO' || orden.estadoPago === 'ANULADO') return;
 
             const total = Number(orden.totalUSD) || 0;
@@ -310,7 +315,7 @@ export function ClientsAndPaymentsView({
             pagadasCompletamente: pagadas, 
             totalPendienteGlobal: totalPendGlobal 
         };
-    }, [localUnpaidOrders, localPaidOrders, searchTerm]);
+    }, [localUnpaidOrders, localPaidOrders, historicasBusqueda, searchTerm]);
 
     const totalPages = Math.ceil(clientSummaries.length / itemsPerPage);
     const paginatedClients = useMemo(() => clientSummaries.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage), [clientSummaries, currentPage]);
@@ -1090,9 +1095,20 @@ export function ClientsAndPaymentsView({
 // COMPONENTE BILLETERAS
 function WalletOption({ id, label, icon: Icon, active, onClick, color }: any) {
     const isSelected = active === id;
-    const colors: any = { emerald: "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", blue: "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400", purple: "border-purple-500 bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400", orange: "border-orange-500 bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-400" }
+    const colors: any = { 
+        emerald: "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", 
+        blue: "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400", 
+        purple: "border-purple-500 bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400", 
+        orange: "border-orange-500 bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-400" 
+    }
     return (
-        <div onClick={() => onClick(id)} className={cn("cursor-pointer flex flex-col items-center justify-center gap-1 p-2 rounded-xl border-2 transition-all h-20 hover:scale-105 active:scale-95", isSelected ? colors[color] : "bg-slate-50 dark:bg-black/20 border-transparent hover:bg-slate-100 dark:hover:bg-white/5 text-slate-400 shadow-sm")}>
+        <div 
+            onClick={() => onClick(id)} 
+            className={cn(
+                "cursor-pointer flex flex-col items-center justify-center gap-1 p-2 rounded-xl border-2 transition-all h-20 hover:scale-105 active:scale-95", 
+                isSelected ? colors[color] : "bg-slate-50 dark:bg-black/20 border-transparent hover:bg-slate-100 dark:hover:bg-white/5 text-slate-400 shadow-sm"
+            )}
+        >
             <Icon size={20} />
             <span className="text-[9px] font-black uppercase text-center leading-none">{label}</span>
         </div>
