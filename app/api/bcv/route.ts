@@ -78,7 +78,7 @@ async function fetchPublicFallback() {
     const res = await fetch("https://api.dolarvzla.com/public/exchange-rate", {
       cache: "no-store",
       headers: {
-        "x-dolarvzla-key": "b3b36dc6c6422f643b87670250016ef59dd5d1de22699c63e928e184bcb19369",
+        "x-dolarvzla-key": "ae5f692da2747269674ea2cacb0ce98c02173ebd7d6cb940933a96b3a4c5e34c",
       }
     });
     

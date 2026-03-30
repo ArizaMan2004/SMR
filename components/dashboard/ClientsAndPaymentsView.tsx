@@ -38,8 +38,8 @@ import { PaymentHistoryView } from '@/components/orden/PaymentHistoryView'
 import { OrderDetailModal } from '@/components/orden/order-detail-modal' 
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
 import { generateGeneralAccountStatusPDF } from "@/lib/services/pdf-generator"
-import { createNotification } from "@/lib/services/gastos-service"
 import { buscarOrdenesHistoricas } from "@/lib/services/ordenes-service" 
+import { getFrequentClients } from "@/lib/firebase/clientes" // <-- NUEVA IMPORTACIÓN
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -90,7 +90,7 @@ export function ClientsAndPaymentsView({
     // --- ESTADOS AUTÓNOMOS DE LA VISTA (Ahorro de Cuota) ---
     const [localUnpaidOrders, setLocalUnpaidOrders] = useState<any[]>([]);
     const [localPaidOrders, setLocalPaidOrders] = useState<any[]>([]);
-    const [historicasBusqueda, setHistoricasBusqueda] = useState<any[]>([]); // <-- ESTADO BLINDADO PARA HISTÓRICAS
+    const [historicasBusqueda, setHistoricasBusqueda] = useState<any[]>([]); 
     const [isLoadingCobranzas, setIsLoadingCobranzas] = useState(true);
 
     // --- ESTADOS DE UI Y FILTROS ---
@@ -99,6 +99,8 @@ export function ClientsAndPaymentsView({
     const [currentPage, setCurrentPage] = useState(1)
     const itemsPerPage = 5
     const [expandedOrdenId, setExpandedOrdenId] = useState<string | null>(null);
+    const [frequentClients, setFrequentClients] = useState<any[]>([]); // <-- NUEVO ESTADO
+    const [isDropdownOpen, setIsDropdownOpen] = useState(false); // <-- NUEVO ESTADO
 
     // --- ESTADOS DE PRIVACIDAD ---
     const [showTotalDeuda, setShowTotalDeuda] = useState(false);
@@ -125,12 +127,21 @@ export function ClientsAndPaymentsView({
     const globalFileInputRef = useRef<HTMLInputElement>(null)
 
     // ==============================================================
-    // FETCH AUTÓNOMO (LA PIEZA MAESTRA DEL AHORRO)
+    // FETCH AUTÓNOMO (LA PIEZA MAESTRA DEL AHORRO) Y CLIENTES
     // ==============================================================
     useEffect(() => {
         setIsLoadingCobranzas(true);
         
-        // 1. CARTERA EN MORA: Descargamos SOLO las que deben dinero usando su etiqueta. 
+        // Cargar clientes frecuentes para el autocompletado
+        getFrequentClients().then(clients => {
+            setFrequentClients(clients.map(c => ({
+                id: c.id!, nombreRazonSocial: c.nombreRazonSocial, 
+                tipoCliente: c.tipoCliente || "REGULAR", rifCedula: c.rifCedulaCompleto, 
+                telefono: c.telefonoCompleto
+            })));
+        }).catch(err => console.error("Error al cargar clientes:", err));
+
+        // 1. CARTERA EN MORA
         const qUnpaid = query(
             collection(db, "ordenes"), 
             where("estadoPago", "in", ["PENDIENTE", "ABONADO"])
@@ -141,7 +152,7 @@ export function ClientsAndPaymentsView({
             setIsLoadingCobranzas(false);
         });
 
-        // 2. LIQUIDADAS: Descargamos solo las últimas 50 pagadas para el historial.
+        // 2. LIQUIDADAS
         const qPaid = query(
             collection(db, "ordenes"), 
             where("estadoPago", "==", "PAGADO"), 
@@ -180,6 +191,7 @@ export function ClientsAndPaymentsView({
     // ==============================================================
     const handleDeepSearch = async (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter' && searchTerm.trim() !== '') {
+            setIsDropdownOpen(false); // Cierra el menú al hacer Enter
             setIsSearchingDeep(true);
             try {
                 const resultados = await buscarOrdenesHistoricas(searchTerm);
@@ -187,7 +199,6 @@ export function ClientsAndPaymentsView({
                 if (resultados && resultados.length > 0) {
                     toast.success(`Se encontraron ${resultados.length} facturas históricas.`);
                     
-                    // Guardamos TODAS las históricas encontradas en su propio estado protegido
                     setHistoricasBusqueda(prev => {
                         const updated = [...prev];
                         resultados.forEach(res => {
@@ -207,6 +218,16 @@ export function ClientsAndPaymentsView({
             }
         }
     };
+
+    // --- AUTOCOMPLETADO DE CLIENTES ---
+    const filteredClientsDropdown = useMemo(() => {
+        if (!searchTerm.trim()) return [];
+        const lowerTerm = searchTerm.toLowerCase();
+        return frequentClients.filter(c => 
+            (c.nombreRazonSocial && c.nombreRazonSocial.toLowerCase().includes(lowerTerm)) ||
+            (c.rifCedula && c.rifCedula.toLowerCase().includes(lowerTerm))
+        ).slice(0, 8); // Top 8 resultados para no saturar
+    }, [frequentClients, searchTerm]);
 
     // ==============================================================
     // LÓGICA INTELIGENTE DE BILLETERAS Y TASAS
@@ -503,20 +524,60 @@ export function ClientsAndPaymentsView({
                     <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Siskoven SMR - Entorno Shared</p>
                 </div>
                 
-                {/* BUSCADOR CON SOPORTE DE BÚSQUEDA PROFUNDA */}
-                <div className="bg-white/40 dark:bg-white/5 backdrop-blur-xl p-2 rounded-[2rem] border border-white/20 shadow-2xl flex gap-2 w-full md:w-auto">
+                {/* BUSCADOR CON SOPORTE DE BÚSQUEDA PROFUNDA Y AUTOCOMPLETADO */}
+                <div className="bg-white/40 dark:bg-white/5 backdrop-blur-xl p-2 rounded-[2rem] border border-white/20 shadow-2xl flex gap-2 w-full md:w-auto relative z-50">
                     <div className="relative flex-1 md:w-[350px]">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 opacity-30" />
                         <input
                             placeholder="Buscar cliente... (Enter para historial)"
                             value={searchTerm}
-                            onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                            onChange={(e) => { 
+                                setSearchTerm(e.target.value); 
+                                setCurrentPage(1); 
+                                setIsDropdownOpen(true);
+                            }}
                             onKeyDown={handleDeepSearch}
-                            className="pl-12 pr-10 py-3 w-full bg-white dark:bg-slate-900 border-0 rounded-[1.5rem] shadow-inner text-sm font-bold outline-none transition-all focus:ring-2 focus:ring-blue-500/20"
+                            onFocus={() => setIsDropdownOpen(true)}
+                            onBlur={() => setTimeout(() => setIsDropdownOpen(false), 200)}
+                            className={cn(
+                                "pl-12 pr-10 py-3 w-full bg-white dark:bg-slate-900 border-0 shadow-inner text-sm font-bold outline-none transition-all focus:ring-2 focus:ring-blue-500/20",
+                                isDropdownOpen && filteredClientsDropdown.length > 0 ? "rounded-t-[1.5rem]" : "rounded-[1.5rem]"
+                            )}
                         />
                         {isSearchingDeep && (
                             <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-blue-500 animate-spin" />
                         )}
+
+                        {/* MENÚ DESPLEGABLE DE CLIENTES */}
+                        <AnimatePresence>
+                            {isDropdownOpen && filteredClientsDropdown.length > 0 && (
+                                <motion.div 
+                                    initial={{ opacity: 0, y: -5 }} 
+                                    animate={{ opacity: 1, y: 0 }} 
+                                    exit={{ opacity: 0, y: -5 }} 
+                                    className="absolute top-full left-0 w-full bg-white dark:bg-slate-900 border border-t-0 shadow-xl rounded-b-[1.5rem] overflow-hidden max-h-60 overflow-y-auto"
+                                >
+                                    <div className="p-1">
+                                        {filteredClientsDropdown.map(c => (
+                                            <div 
+                                                key={c.id} 
+                                                onClick={() => { 
+                                                    setSearchTerm(c.nombreRazonSocial); 
+                                                    setIsDropdownOpen(false);
+                                                    setCurrentPage(1);
+                                                }} 
+                                                className="flex justify-between items-center px-4 py-3 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl cursor-pointer transition-colors"
+                                            >
+                                                <span className="truncate">{c.nombreRazonSocial}</span>
+                                                {c.tipoCliente === 'ALIADO' && (
+                                                    <Badge className="h-4 bg-purple-100 text-purple-600 border-none text-[8px] uppercase">Aliado</Badge>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </div>
                     <Button 
                         size="icon" 
@@ -531,7 +592,7 @@ export function ClientsAndPaymentsView({
             </div>
 
             {/* KPI ISLAND */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 relative z-10">
                 <motion.div variants={itemVariants} className="md:col-span-1">
                     <Card className="rounded-[3rem] border-0 bg-gradient-to-br from-rose-500 to-rose-700 text-white shadow-2xl relative p-8 space-y-4">
                         <Activity className="absolute -right-6 -bottom-6 w-32 h-32 opacity-10 rotate-12" />
