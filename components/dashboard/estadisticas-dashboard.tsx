@@ -19,7 +19,7 @@ import {
   Target, BarChart3, Activity, Clock, ShieldAlert,
   Percent, Image as ImageIcon, Layers, Ruler,
   Zap, Timer, FileDown, Loader2, Palette, Eye, CalendarDays, ArrowUpRight, ArrowDownLeft,
-  Search
+  Search, Banknote, Landmark, CreditCard, Coins, Receipt
 } from "lucide-react"
 import { toPng } from 'html-to-image'
 import jsPDF from 'jspdf'
@@ -236,7 +236,6 @@ export function EstadisticasDashboard({
       return counts;
   }, [localOrdenes]);
 
-  // --- SOLUCIÓN DE PROTECCIÓN DE ARRAYS APLICADA ---
   const orderBreakdown = useMemo(() => {
     const map = new Map<string, { pctImp: number, pctCorte: number, pctOtros: number }>();
     localOrdenes.forEach(o => {
@@ -275,6 +274,27 @@ export function EstadisticasDashboard({
 
           if (Array.isArray(historial) && historial.length > 0) {
               historial.forEach((pago: any, index: number) => {
+                  const metodoLower = (pago.metodo || '').toLowerCase();
+                  let wallet = 'cash_usd';
+                  let currency = 'USD';
+                  const tasaAplicada = Number(pago.tasaBCV) || rates?.usd || 1;
+                  let montoOriginal = Number(pago.montoUSD) || 0;
+
+                  if (metodoLower.includes('movil') || metodoLower.includes('transferencia') || metodoLower.includes('bs')) {
+                      wallet = 'bank_bs';
+                      currency = 'VES';
+                      montoOriginal = (pago.montoBs && Number(pago.montoBs) > 0) ? Number(pago.montoBs) : (Number(pago.montoUSD) * tasaAplicada);
+                  } else if (metodoLower.includes('zelle')) {
+                      wallet = 'zelle';
+                      currency = 'USD';
+                  } else if (metodoLower.includes('usdt') || metodoLower.includes('binance')) {
+                      wallet = 'usdt';
+                      currency = 'USDT';
+                  }
+
+                  const safeItems = Array.isArray(orden.items) ? orden.items : [];
+                  const itemsResumen = safeItems.map((i:any) => `${i.cantidad}x ${i.nombre || i.descripcion}`).join(', ') || 'Varios';
+
                   list.push({
                       id: `${orden.id}_pago_${index}`,
                       ordenId: orden.id,
@@ -286,12 +306,19 @@ export function EstadisticasDashboard({
                       tipo: 'ABONO',
                       metodo: pago.metodo,
                       nota: pago.nota,
-                      imagenUrl: pago.imagenUrl || null
+                      imagenUrl: pago.imagenUrl || pago.comprobante || null,
+                      wallet,
+                      currency,
+                      montoOriginal,
+                      itemsResumen
                   });
               });
           } else {
               const cobroLegacy = cobranzas.find(c => c.id === orden.id);
               if (cobroLegacy && cobroLegacy.estado === 'pagado') {
+                   const safeItems = Array.isArray(orden.items) ? orden.items : [];
+                   const itemsResumen = safeItems.map((i:any) => `${i.cantidad}x ${i.nombre || i.descripcion}`).join(', ') || 'Varios';
+
                    list.push({
                       id: `${orden.id}_legacy`,
                       ordenId: orden.id,
@@ -301,13 +328,18 @@ export function EstadisticasDashboard({
                       fechaReal: getFechaRealPago(cobroLegacy),
                       monto: Number(cobroLegacy.montoUSD) || 0,
                       tipo: 'TOTAL_LEGACY',
-                      imagenUrl: (cobroLegacy as any).imagenUrl || null
+                      imagenUrl: (cobroLegacy as any).imagenUrl || null,
+                      wallet: 'cash_usd', 
+                      currency: 'USD',
+                      montoOriginal: Number(cobroLegacy.montoUSD) || 0,
+                      itemsResumen,
+                      metodo: 'Legacy'
                   });
               }
           }
       });
       return list;
-  }, [localOrdenes, cobranzas]);
+  }, [localOrdenes, cobranzas, rates]);
 
   const productionMetrics = useMemo(() => {
       const calcularStats = (inicio: Date, fin: Date) => {
@@ -1612,39 +1644,132 @@ export function EstadisticasDashboard({
                         )}
 
                         {selectedDetail === 'INGRESOS' && (
-                            <div className="space-y-3">
-                                {(modalData as any)?.map((c:any, i:number) => (
-                                    <motion.div 
-                                        key={i}
-                                        initial={{ opacity: 0, y: 10 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ delay: i * 0.03 }}
-                                        className="flex justify-between items-center p-4 bg-white border border-slate-100 rounded-[1.5rem] shadow-sm hover:shadow-md transition-all"
-                                    >
-                                        <div className="flex items-center gap-4">
-                                            <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center font-black text-sm">{i+1}</div>
-                                            <div>
-                                                <p className="text-sm font-bold text-slate-800 uppercase">{c.nombreCliente}</p>
-                                                <div className="flex items-center gap-2 mt-1">
-                                                    <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full">{new Date(c.fecha).toLocaleDateString()}</span>
-                                                    {c.esRecurrente && (
-                                                        <span className="text-[9px] font-black text-blue-600 uppercase tracking-wider">
-                                                            Recurrente
-                                                        </span>
+                            <div className="space-y-4">
+                                {(() => {
+                                    const md = modalData as any[];
+                                    const totals = { bank_bs: 0, cash_usd: 0, zelle: 0, usdt: 0, todos_usd: 0 };
+                                    
+                                    md.forEach(c => {
+                                        totals.todos_usd += (c.montoRelevante || 0);
+                                        if (c.wallet === 'bank_bs') totals.bank_bs += c.montoOriginal;
+                                        if (c.wallet === 'cash_usd') totals.cash_usd += c.montoOriginal;
+                                        if (c.wallet === 'zelle') totals.zelle += c.montoOriginal;
+                                        if (c.wallet === 'usdt') totals.usdt += c.montoOriginal;
+                                    });
+
+                                    return (
+                                        <Tabs defaultValue="todos" className="w-full">
+                                            <TabsList className="bg-slate-100 dark:bg-white/5 p-1.5 rounded-full mb-6 h-auto flex flex-wrap gap-1">
+                                                <TabsTrigger value="todos" className="rounded-full px-4 py-2 font-bold uppercase text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1 text-slate-700">
+                                                    Todos (${totals.todos_usd.toFixed(2)})
+                                                </TabsTrigger>
+                                                <TabsTrigger value="bank_bs" className="rounded-full px-4 py-2 font-bold uppercase text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1 text-blue-600">
+                                                    Banco (Bs {totals.bank_bs.toLocaleString(undefined, {minimumFractionDigits: 2})})
+                                                </TabsTrigger>
+                                                <TabsTrigger value="cash_usd" className="rounded-full px-4 py-2 font-bold uppercase text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1 text-emerald-600">
+                                                    Efectivo (${totals.cash_usd.toLocaleString(undefined, {minimumFractionDigits: 2})})
+                                                </TabsTrigger>
+                                                <TabsTrigger value="zelle" className="rounded-full px-4 py-2 font-bold uppercase text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1 text-purple-600">
+                                                    Zelle (${totals.zelle.toLocaleString(undefined, {minimumFractionDigits: 2})})
+                                                </TabsTrigger>
+                                                <TabsTrigger value="usdt" className="rounded-full px-4 py-2 font-bold uppercase text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1 text-orange-600">
+                                                    USDT (₮{totals.usdt.toLocaleString(undefined, {minimumFractionDigits: 2})})
+                                                </TabsTrigger>
+                                            </TabsList>
+
+                                            {['todos', 'bank_bs', 'cash_usd', 'zelle', 'usdt'].map(tabKey => (
+                                                <TabsContent key={tabKey} value={tabKey} className="space-y-3">
+                                                    {md.filter(c => tabKey === 'todos' || c.wallet === tabKey).map((c, i) => (
+                                                        <motion.div 
+                                                            key={i}
+                                                            initial={{ opacity: 0, y: 10 }}
+                                                            animate={{ opacity: 1, y: 0 }}
+                                                            transition={{ delay: i * 0.03 }}
+                                                            className="flex flex-col md:flex-row md:items-center justify-between p-5 bg-white dark:bg-black/20 border border-slate-100 dark:border-white/10 rounded-[1.5rem] shadow-sm hover:shadow-md transition-all gap-4"
+                                                        >
+                                                            <div className="flex items-start gap-4">
+                                                                <div className={cn(
+                                                                    "w-12 h-12 rounded-2xl flex items-center justify-center font-black shrink-0 text-white shadow-sm",
+                                                                    c.wallet === 'bank_bs' ? "bg-blue-500" : c.wallet === 'zelle' ? "bg-purple-500" : c.wallet === 'usdt' ? "bg-orange-500" : "bg-emerald-500"
+                                                                )}>
+                                                                    {c.wallet === 'bank_bs' ? <Landmark size={20}/> : c.wallet === 'zelle' ? <CreditCard size={20}/> : c.wallet === 'usdt' ? <Coins size={20}/> : <Banknote size={20}/>}
+                                                                </div>
+                                                                <div className="min-w-0 flex-1">
+                                                                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                                                                        <p className="text-sm font-black text-slate-800 dark:text-slate-100 uppercase truncate">{c.nombreCliente}</p>
+                                                                        <span className="text-[10px] font-bold text-slate-500 bg-slate-100 dark:bg-white/5 px-2 py-0.5 rounded-lg border border-slate-200 dark:border-white/10">
+                                                                            #{c.ordenNumero || 'S/N'}
+                                                                        </span>
+                                                                        {c.esRecurrente && (
+                                                                            <span className="text-[9px] font-black text-blue-600 uppercase tracking-wider">Recurrente</span>
+                                                                        )}
+                                                                    </div>
+                                                                    
+                                                                    <p className="text-[10px] font-bold text-slate-500 line-clamp-2 max-w-md">
+                                                                        <span className="text-slate-400">Items:</span> {c.itemsResumen}
+                                                                    </p>
+                                                                    
+                                                                    <div className="flex items-center gap-3 mt-2 flex-wrap">
+                                                                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                                                                            <CalendarDays size={10}/> {new Date(c.fecha).toLocaleDateString()}
+                                                                        </span>
+                                                                        <span className="text-[9px] font-black uppercase bg-slate-50 dark:bg-white/5 text-slate-500 px-2 py-0.5 rounded-md border border-slate-100 dark:border-white/5">
+                                                                            {c.metodo || 'S/E'}
+                                                                        </span>
+                                                                        {c.nota && <span className="text-[9px] italic text-slate-400 max-w-[150px] truncate">"{c.nota}"</span>}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="flex items-center justify-between md:justify-end gap-6 md:w-auto w-full border-t md:border-t-0 pt-3 md:pt-0 border-slate-100 dark:border-white/10">
+                                                                <div className="text-right">
+                                                                    <span className={cn(
+                                                                        "text-xl font-black block leading-none", 
+                                                                        c.wallet === 'bank_bs' ? "text-blue-600" : c.wallet === 'usdt' ? "text-orange-600" : c.wallet === 'zelle' ? "text-purple-600" : "text-emerald-600"
+                                                                    )}>
+                                                                        {c.currency === 'USD' ? '$' : c.currency === 'USDT' ? '₮' : 'Bs.'}
+                                                                        {c.montoOriginal?.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                                                    </span>
+                                                                    {c.currency !== 'USD' && (
+                                                                        <span className="text-[10px] font-bold text-slate-400 uppercase mt-1 block tracking-wider">
+                                                                            ≈ ${c.montoRelevante?.toFixed(2)} USD
+                                                                        </span>
+                                                                    )}
+                                                                    {viewMode !== 'GENERAL' && (
+                                                                        <span className="text-[9px] font-bold text-slate-400 uppercase mt-0.5 block">
+                                                                            ({c.porcentaje.toFixed(0)}% imputado)
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                
+                                                                {c.imagenUrl ? (
+                                                                    <a 
+                                                                        href={c.imagenUrl} 
+                                                                        target="_blank" 
+                                                                        rel="noopener noreferrer" 
+                                                                        className="w-12 h-12 flex items-center justify-center bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-colors shadow-sm shrink-0" 
+                                                                        title="Ver Comprobante Adjunto"
+                                                                    >
+                                                                        <ImageIcon size={20} />
+                                                                    </a>
+                                                                ) : (
+                                                                    <div className="w-12 h-12 flex items-center justify-center bg-slate-50 dark:bg-white/5 text-slate-300 dark:text-slate-500 rounded-xl shrink-0" title="Cobro sin comprobante">
+                                                                        <Receipt size={20} />
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </motion.div>
+                                                    ))}
+                                                    {md.filter(c => tabKey === 'todos' || c.wallet === tabKey).length === 0 && (
+                                                        <div className="text-center py-12 text-slate-400 text-xs font-bold uppercase tracking-widest bg-slate-50/50 dark:bg-white/5 rounded-[2rem] border border-dashed border-slate-200 dark:border-white/10">
+                                                            No hay ingresos registrados en esta divisa para el periodo seleccionado.
+                                                        </div>
                                                     )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="text-right">
-                                            <span className="text-lg font-black text-emerald-600 block">+${c.montoRelevante?.toFixed(2)}</span>
-                                            {viewMode !== 'GENERAL' && (
-                                                <span className="text-[9px] font-bold text-slate-400 uppercase">
-                                                    ({c.porcentaje.toFixed(0)}% del total)
-                                                </span>
-                                            )}
-                                        </div>
-                                    </motion.div>
-                                ))}
+                                                </TabsContent>
+                                            ))}
+                                        </Tabs>
+                                    );
+                                })()}
                             </div>
                         )}
 

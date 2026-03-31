@@ -14,13 +14,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from 'sonner' 
 import { cn } from "@/lib/utils"
 
-// ÍCONOS - SE INCLUYE 'Layers' PARA EVITAR EL REFERENCE ERROR
+// ÍCONOS - SE INCLUYE 'Layers' PARA EVITAR EL REFERENCE ERROR Y 'Wand2' PARA EL REDONDEO
 import { 
     Plus, X, User, Receipt, 
     Users, Loader2, Pencil, Trash2, Save, 
     Palette, Scissors, Printer, Calendar, Box, ShoppingCart, 
     DollarSign, ChevronRight, CheckCircle2, Sparkles,
-    Coins, RotateCcw, Clock, Search, Building2, Layers
+    Coins, RotateCcw, Clock, Search, Building2, Layers, Wand2
 } from "lucide-react" 
 
 import { ItemFormModal } from "@/components/orden/item-form-modal"
@@ -67,6 +67,11 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
     
     const [clientSearchTerm, setClientSearchTerm] = useState("");
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const [shouldRoundTotal, setShouldRoundTotal] = useState(false);
+
+    // Estados para la edición de precio manual (override)
+    const [editingPriceIndex, setEditingPriceIndex] = useState<number | null>(null);
+    const [tempPrice, setTempPrice] = useState<string>("");
 
     useEffect(() => {
         const unsubDesigners = subscribeToDesigners(setDesignersList);
@@ -154,8 +159,9 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
     }, []);
 
     const currentTotal = useMemo(() => {
-        return formData.items.reduce((sum: number, item: any) => sum + getItemSubtotal(item), 0);
-    }, [formData.items, getItemSubtotal]);
+        const sum = formData.items.reduce((sum: number, item: any) => sum + getItemSubtotal(item), 0);
+        return shouldRoundTotal ? Math.ceil(sum) : sum;
+    }, [formData.items, getItemSubtotal, shouldRoundTotal]);
 
     const addNewGroup = () => {
         const nombre = window.prompt("Nombre del Sub-Cliente / Sucursal:");
@@ -240,6 +246,25 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
         } catch { toast.error("Error al procesar"); } finally { setIsLoading(false); }
     };
 
+    // Funciones para manejar el ajuste manual de precios (Override)
+    const handleSavePriceOverride = (index: number) => {
+        const val = parseFloat(tempPrice);
+        const nextItems = [...formData.items];
+        if (!isNaN(val) && val >= 0) {
+            nextItems[index].totalAjustado = val;
+        } else {
+            delete nextItems[index].totalAjustado;
+        }
+        handleChange('items', nextItems);
+        setEditingPriceIndex(null);
+    };
+
+    const handleRemovePriceOverride = (index: number) => {
+        const nextItems = [...formData.items];
+        delete nextItems[index].totalAjustado;
+        handleChange('items', nextItems);
+    };
+
     return (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="relative w-full h-full bg-[#f8fafc] dark:bg-black flex flex-col overflow-hidden rounded-[2rem] border dark:border-white/5 shadow-2xl">
             <header className="h-14 shrink-0 bg-white dark:bg-slate-900 border-b flex items-center justify-between px-6 z-20">
@@ -297,12 +322,74 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                                                         <p className="text-[10px] text-slate-400 mt-1 font-medium">{item.cantidad} {item.unidad} • {item.unidad === 'm2' ? `${item.medidaXCm}x${item.medidaYCm}cm` : `$${item.precioUnitario}`}</p>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-4">
-                                                    <span className="font-black text-sm text-slate-900 dark:text-white">${getItemSubtotal(item).toFixed(2)}</span>
-                                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setTargetSubCliente(subC); setEditingItemIndex(item.originalIndex); setIsItemModalOpen(true); }}><Pencil size={14}/></Button>
-                                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleChange('items', formData.items.filter((_:any, i:number) => i !== item.originalIndex))}><Trash2 size={14}/></Button>
-                                                    </div>
+                                                
+                                                <div className="flex items-center gap-2">
+                                                    {/* Interfaz de Visualización / Edición de Precio */}
+                                                    {editingPriceIndex === item.originalIndex ? (
+                                                        <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-800 p-1 rounded-xl border border-blue-200 dark:border-blue-900">
+                                                            <Input
+                                                                autoFocus
+                                                                type="number"
+                                                                className="h-8 w-20 text-right font-black text-sm border-none focus-visible:ring-0 bg-transparent"
+                                                                value={tempPrice}
+                                                                onChange={(e) => setTempPrice(e.target.value)}
+                                                                onKeyDown={(e) => e.key === 'Enter' && handleSavePriceOverride(item.originalIndex)}
+                                                            />
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7 text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900" onClick={() => handleSavePriceOverride(item.originalIndex)}>
+                                                                <CheckCircle2 size={16} />
+                                                            </Button>
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:bg-red-100 dark:hover:bg-red-900" onClick={() => setEditingPriceIndex(null)}>
+                                                                <X size={16} />
+                                                            </Button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className={cn(
+                                                            "flex items-center gap-1 px-3 py-1.5 rounded-xl border shadow-sm",
+                                                            item.totalAjustado !== undefined 
+                                                                ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-500" 
+                                                                : "border-slate-100 bg-slate-50 text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                                                        )}>
+                                                            {item.totalAjustado !== undefined && <Wand2 className="w-3 h-3" />}
+                                                            <span className="font-black text-sm">${getItemSubtotal(item).toFixed(2)}</span>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Menú de Acciones (Hover) */}
+                                                    {editingPriceIndex !== item.originalIndex && (
+                                                        <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
+                                                            <Button 
+                                                                variant="ghost" 
+                                                                size="icon" 
+                                                                className="h-8 w-8 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-500 dark:hover:bg-emerald-900/30" 
+                                                                onClick={() => {
+                                                                    setTempPrice(getItemSubtotal(item).toString());
+                                                                    setEditingPriceIndex(item.originalIndex);
+                                                                }}
+                                                                title="Ajustar precio de este ítem"
+                                                            >
+                                                                <DollarSign size={16}/>
+                                                            </Button>
+
+                                                            {item.totalAjustado !== undefined && (
+                                                                <Button 
+                                                                    variant="ghost" 
+                                                                    size="icon" 
+                                                                    className="h-8 w-8 text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30" 
+                                                                    onClick={() => handleRemovePriceOverride(item.originalIndex)}
+                                                                    title="Restaurar precio calculado"
+                                                                >
+                                                                    <RotateCcw size={14}/>
+                                                                </Button>
+                                                            )}
+
+                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30" onClick={() => { setTargetSubCliente(subC); setEditingItemIndex(item.originalIndex); setIsItemModalOpen(true); }}>
+                                                                <Pencil size={14}/>
+                                                            </Button>
+                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30" onClick={() => handleChange('items', formData.items.filter((_:any, i:number) => i !== item.originalIndex))}>
+                                                                <Trash2 size={14}/>
+                                                            </Button>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}
@@ -369,9 +456,23 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                     </ScrollArea>
 
                     <div className="p-4 bg-white dark:bg-slate-900 border-t space-y-3 shrink-0">
-                        <div className="flex justify-between items-center px-1">
-                            <div><p className="text-[8px] font-black text-slate-400 uppercase leading-none mb-1">Monto de la Factura</p>{formData.cliente.tipoCliente === 'ALIADO' && <Badge className="bg-purple-600 text-[6px] h-3.5 px-1.5 font-black text-white uppercase">Socio Estratégico</Badge>}</div>
-                            <p className="text-2xl font-black tracking-tighter leading-none">${currentTotal.toFixed(2)}</p>
+                        <div className="flex justify-between items-end px-1 pb-1">
+                            <div>
+                                <div className="flex items-center gap-2 mb-1.5">
+                                    <p className="text-[8px] font-black text-slate-400 uppercase leading-none">Monto de la Factura</p>
+                                    <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        onClick={() => setShouldRoundTotal(!shouldRoundTotal)} 
+                                        className={cn("h-4 w-4 rounded p-0 transition-colors", shouldRoundTotal ? "bg-amber-100 text-amber-600" : "bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-amber-500")}
+                                        title="Redondear Total"
+                                    >
+                                        <Wand2 className="w-2.5 h-2.5" />
+                                    </Button>
+                                </div>
+                                {formData.cliente.tipoCliente === 'ALIADO' && <Badge className="bg-purple-600 text-[6px] h-3.5 px-1.5 font-black text-white uppercase">Socio Estratégico</Badge>}
+                            </div>
+                            <p className="text-2xl font-black tracking-tighter leading-none text-slate-900 dark:text-white">${currentTotal.toFixed(2)}</p>
                         </div>
                         <Button disabled={isLoading} onClick={handleSaveOrder} className={cn("w-full h-11 rounded-xl text-white font-black text-[11px] shadow-lg transition-all", formData.cliente.tipoCliente === 'ALIADO' ? "bg-purple-600" : "bg-slate-900 dark:bg-blue-600")}>{isLoading ? <Loader2 className="animate-spin" /> : <span className="flex items-center gap-2 uppercase tracking-widest">Generar Orden <ChevronRight className="w-4 h-4" /></span>}</Button>
                     </div>
