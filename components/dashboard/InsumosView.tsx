@@ -9,7 +9,8 @@ import {
   ArrowUpRight,
   PlusCircle,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  CalendarDays
 } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { GastosForm } from "./gastos-form"
@@ -23,6 +24,12 @@ interface InsumosViewProps {
   onDeleteGasto: (id: string) => Promise<void>
 }
 
+// Función auxiliar para obtener el mes actual en formato YYYY-MM
+const getCurrentMonthYear = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+
 export function InsumosView({ 
   gastos, 
   currentBcvRate, 
@@ -33,10 +40,36 @@ export function InsumosView({
   
   const [isSaving, setIsSaving] = useState(false)
   const [editingInsumo, setEditingInsumo] = useState<any>(null)
+  
+  // Por defecto inicializa en el mes actual
+  const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthYear())
 
-  // --- 1. FILTRO MAESTRO: SOLO INSUMOS ---
-  // Esto elimina de la vista cualquier registro que sea pago de servicios, nómina o fijo.
-  const gastosFiltrados = useMemo(() => {
+  // Funciones auxiliares para manejar fechas
+  const getMonthYear = (fecha: any) => {
+    if (!fecha) return null;
+    let d;
+    if (fecha.toDate) {
+      d = fecha.toDate();
+    } else if (fecha.seconds) {
+      d = new Date(fecha.seconds * 1000);
+    } else {
+      d = new Date(fecha);
+    }
+    if (isNaN(d.getTime())) return null;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const formatMonthYear = (yyyyMm: string) => {
+    if (yyyyMm === "ALL") return "Todos los meses";
+    const [year, month] = yyyyMm.split('-');
+    const d = new Date(parseInt(year), parseInt(month) - 1, 1);
+    const formatter = new Intl.DateTimeFormat('es-VE', { month: 'long', year: 'numeric' });
+    const formatted = formatter.format(d);
+    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+  };
+
+  // --- 1. FILTRO BASE MAESTRO: SOLO INSUMOS ---
+  const gastosBase = useMemo(() => {
     return gastos.filter(g => {
         const cat = (g.categoria || "").toLowerCase();
         const tipo = (g.tipo || "").toUpperCase();
@@ -51,7 +84,28 @@ export function InsumosView({
     });
   }, [gastos]);
 
-  // --- 2. KPI CALCULADOS SOBRE LOS FILTRADOS ---
+  // --- 2. EXTRAER MESES DISPONIBLES ---
+  const availableMonths = useMemo(() => {
+    const months = new Set<string>();
+    
+    // Aseguramos que el mes actual siempre esté disponible en las opciones
+    months.add(getCurrentMonthYear());
+
+    gastosBase.forEach(g => {
+        const m = getMonthYear(g.fecha);
+        if (m) months.add(m);
+    });
+    // Ordenar de más reciente a más antiguo
+    return Array.from(months).sort().reverse();
+  }, [gastosBase]);
+
+  // --- 3. APLICAR FILTRO POR MES ---
+  const gastosFiltrados = useMemo(() => {
+    if (selectedMonth === "ALL") return gastosBase;
+    return gastosBase.filter(g => getMonthYear(g.fecha) === selectedMonth);
+  }, [gastosBase, selectedMonth]);
+
+  // --- 4. KPI CALCULADOS SOBRE LOS FILTRADOS ---
   const stats = useMemo(() => {
     const totalUSD = gastosFiltrados.reduce((acc, g) => acc + (Number(g.monto) || Number(g.montoUSD) || 0), 0);
     const totalBs = totalUSD * currentBcvRate;
@@ -116,6 +170,37 @@ export function InsumosView({
   return (
     <div className="max-w-7xl mx-auto space-y-8 pb-24 px-6 animate-in fade-in duration-700">
       
+      {/* SELECTOR DE MESES */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+        <div className="flex items-center gap-2 text-slate-400 mr-2 shrink-0">
+          <CalendarDays className="w-4 h-4 text-blue-500" />
+          <span className="text-[9px] font-black uppercase tracking-widest">Periodo:</span>
+        </div>
+        <button
+          onClick={() => setSelectedMonth("ALL")}
+          className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase whitespace-nowrap transition-all ${
+            selectedMonth === "ALL" 
+              ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" 
+              : "bg-white dark:bg-[#1c1c1e] text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5 border border-black/5 dark:border-white/5"
+          }`}
+        >
+          Todos
+        </button>
+        {availableMonths.map(m => (
+          <button
+            key={m}
+            onClick={() => setSelectedMonth(m)}
+            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase whitespace-nowrap transition-all ${
+              selectedMonth === m 
+                ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" 
+                : "bg-white dark:bg-[#1c1c1e] text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5 border border-black/5 dark:border-white/5"
+            }`}
+          >
+            {formatMonthYear(m)}
+          </button>
+        ))}
+      </div>
+
       {/* HEADER SECTION */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Título */}
@@ -131,14 +216,16 @@ export function InsumosView({
             </div>
           </div>
           <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 opacity-70">
-            Control de Operaciones SMR
+            {selectedMonth === "ALL" ? "Control de Operaciones SMR" : `Inversión - ${formatMonthYear(selectedMonth)}`}
           </p>
         </div>
 
         {/* Total Inversión */}
         <div className="bg-blue-600 p-8 rounded-[2.5rem] text-white flex flex-col justify-between relative overflow-hidden group">
           <TrendingUp className="absolute right-[-10px] top-[-10px] w-32 h-32 text-white/10 -rotate-12 group-hover:rotate-0 transition-transform duration-700" />
-          <p className="text-[10px] font-black uppercase tracking-widest text-blue-100 opacity-80">Inversión Total (USD)</p>
+          <p className="text-[10px] font-black uppercase tracking-widest text-blue-100 opacity-80">
+            {selectedMonth === "ALL" ? "Inversión Total (USD)" : `Inversión del Mes (USD)`}
+          </p>
           <div className="mt-4">
             <h3 className="text-4xl font-black tracking-tighter">${stats.usd}</h3>
             <p className="text-blue-200 text-[10px] font-bold mt-1">≈ {stats.bs} Bs.</p>
