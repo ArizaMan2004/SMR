@@ -34,13 +34,15 @@ import {
 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
 import { PaymentHistoryView } from "@/components/orden/PaymentHistoryView" 
+import { PaymentEditModal } from "@/components/dashboard/PaymentEditModal" // <-- IMPORTACIÓN AÑADIDA
 import { cn } from "@/lib/utils"
 
 interface OrdersTableProps {
   ordenes: OrdenServicio[]
   onDelete: (ordenId: string) => void
   onEdit: (orden: OrdenServicio) => void
-  onRegisterPayment: (orden: OrdenServicio) => void // <--- CAMBIO CRUCIAL: AHORA RECIBE EL OBJETO COMPLETO
+  onRegisterPayment: (orden: OrdenServicio) => void 
+  onSavePayment?: (ordenId: string, abonoUSD: number, nota: string | undefined, imagenUrl: string | undefined, metodo: string, descuento?: number, fechaPago?: string) => Promise<void> | void // <-- NUEVO PROP PARA GUARDAR EL PAGO
   currentUserId: string
   rates: {
     usd: number;
@@ -54,10 +56,8 @@ interface OrdersTableProps {
   onFixPayments?: () => Promise<{ success: boolean; message: string }>; 
 }
 
-// COMPONENTE DE ESTATUS CON CORRECCIÓN DE PRECISIÓN
 function PaymentStatusBadge({ total, abonado }: { total: number, abonado: number }) {
     const saldoPendiente = total - abonado;
-    // Si la deuda es menor a 0.01 USD, se considera pagado
     const isPagado = saldoPendiente <= 0.01 && total > 0;
     const isAbonado = abonado > 0.01 && !isPagado;
 
@@ -81,7 +81,7 @@ function PaymentStatusBadge({ total, abonado }: { total: number, abonado: number
 }
 
 export function OrdersTable({ 
-    ordenes, onDelete, onEdit, onRegisterPayment, 
+    ordenes, onDelete, onEdit, onRegisterPayment, onSavePayment,
     currentUserId, rates, pdfLogoBase64, firmaBase64, selloBase64, onSyncStatus, onFixPayments 
 }: OrdersTableProps) {
   
@@ -90,13 +90,17 @@ export function OrdersTable({
   
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
   const [orderForHistory, setOrderForHistory] = useState<OrdenServicio | null>(null)
+
+  // <-- ESTADOS NUEVOS PARA EL MODAL DE PAGOS
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
+  const [orderForPayment, setOrderForPayment] = useState<OrdenServicio | null>(null)
+  
   const [isSyncing, setIsSyncing] = useState(false)
   const [isFixing, setIsFixing] = useState(false) 
 
   const [showUnpaid, setShowUnpaid] = useState(true)
   const [showPaid, setShowPaid] = useState(false)
 
-  // FILTRADO CON CORRECCIÓN DE PRECISIÓN
   const { unpaidOrders, paidOrders } = useMemo(() => {
     const unpaid: OrdenServicio[] = [];
     const paid: OrdenServicio[] = [];
@@ -106,7 +110,6 @@ export function OrdersTable({
         const abonado = o.montoPagadoUSD || 0;
         const saldoPendiente = total - abonado;
         
-        // Si el saldo pendiente es prácticamente cero, mover a pagados
         if (saldoPendiente <= 0.01 && total > 0) {
             paid.push(o);
         } else {
@@ -143,7 +146,6 @@ export function OrdersTable({
     }
   };
 
-  // --- MANEJADOR DEL NUEVO BOTÓN ---
   const handleFixPayments = async () => {
     if (!onFixPayments) return toast.error("Función de reparación no configurada en el dashboard");
     setIsFixing(true);
@@ -160,7 +162,6 @@ export function OrdersTable({
   return (
     <div className="space-y-10 pb-24">
       <div className="flex justify-end gap-2 px-6 -mb-6">
-          
           <AlertDialog>
               <AlertDialogTrigger asChild>
                   <Button variant="ghost" disabled={isFixing} className={cn("h-8 px-3 rounded-xl font-bold text-[9px] uppercase tracking-tight transition-all gap-2", "text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10", isFixing && "opacity-50")}>
@@ -225,7 +226,18 @@ export function OrdersTable({
                         <CardContent className="p-0">
                             <OrdersSubTable 
                                 data={unpaidOrders} 
-                                actions={{ onDelete, onEdit, handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, handleOpenPayment: (o:any)=>{ onRegisterPayment(o); }, handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, handleDownloadPDF }} 
+                                actions={{ 
+                                    onDelete, 
+                                    onEdit, 
+                                    handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, 
+                                    handleOpenPayment: (o:any)=>{ 
+                                        onRegisterPayment(o); // Conservamos la prop por compatibilidad
+                                        setOrderForPayment(o); 
+                                        setIsPaymentModalOpen(true); 
+                                    }, 
+                                    handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, 
+                                    handleDownloadPDF 
+                                }} 
                                 rates={rates} 
                             />
                         </CardContent>
@@ -254,7 +266,18 @@ export function OrdersTable({
                         <CardContent className="p-0">
                             <OrdersSubTable 
                                 data={paidOrders} 
-                                actions={{ onDelete, onEdit, handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, handleOpenPayment: (o:any)=>{ onRegisterPayment(o); }, handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, handleDownloadPDF }} 
+                                actions={{ 
+                                    onDelete, 
+                                    onEdit, 
+                                    handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, 
+                                    handleOpenPayment: (o:any)=>{ 
+                                        onRegisterPayment(o); // Conservamos la prop por compatibilidad
+                                        setOrderForPayment(o); 
+                                        setIsPaymentModalOpen(true); 
+                                    }, 
+                                    handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, 
+                                    handleDownloadPDF 
+                                }} 
                                 rates={rates} 
                             />
                         </CardContent>
@@ -285,6 +308,25 @@ export function OrdersTable({
               </div>
           </DialogContent>
       </Dialog>
+
+      {/* --- AQUÍ RENDERIZAMOS EL MODAL DE PAGOS --- */}
+      {orderForPayment && (
+          <PaymentEditModal
+              isOpen={isPaymentModalOpen}
+              orden={orderForPayment}
+              onClose={() => setIsPaymentModalOpen(false)}
+              onSave={async (abonoUSD, nota, imagenUrl, metodo, descuento, fechaPago) => {
+                  if (onSavePayment) {
+                      await onSavePayment(orderForPayment.id, abonoUSD, nota, imagenUrl, metodo, descuento, fechaPago);
+                  } else {
+                      toast.error("Por favor, configura onSavePayment en el componente padre para procesar este pago.");
+                  }
+                  setIsPaymentModalOpen(false);
+              }}
+              currentUserId={currentUserId}
+              rates={rates}
+          />
+      )}
     </div>
   )
 }
@@ -377,7 +419,6 @@ function OrdersSubTable({ data, actions, rates }: any) {
                                         <div className="flex flex-wrap items-center gap-2">
                                             <span className="font-bold text-slate-800 dark:text-slate-200 text-sm truncate max-w-[200px] leading-tight uppercase italic">{o.cliente?.nombreRazonSocial || "Cliente S/N"}</span>
                                             
-                                            {/* BADGE DE EMPRESA MATRIZ */}
                                             {o.isMaster && (
                                                 <Badge className="bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400 border-none text-[7px] font-black uppercase px-2 h-4 gap-1 flex items-center">
                                                     <Building2 className="w-2 h-2" /> Matriz
@@ -398,7 +439,6 @@ function OrdersSubTable({ data, actions, rates }: any) {
                                         <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1 rounded-xl border border-emerald-100 dark:border-emerald-500/20 shadow-sm">
                                             {formatCurrency(o.totalUSD)}
                                         </span>
-                                        {/* CORRECCIÓN DE PRECISIÓN EN TEXTO DE ABONADO */}
                                         {o.montoPagadoUSD > 0.01 && (o.totalUSD - o.montoPagadoUSD) > 0.01 && (
                                             <span className="text-[9px] font-black text-amber-600 dark:text-amber-500 uppercase italic leading-none">Abonado: {formatCurrency(o.montoPagadoUSD)}</span>
                                         )}
@@ -440,7 +480,6 @@ function OrdersSubTable({ data, actions, rates }: any) {
 
                                         <ActionButton icon={<History />} color="indigo" onClick={() => actions.handleOpenHistory(o)} label="Historial" />
                                         
-                                        {/* CORRECCIÓN DE PRECISIÓN EN BOTÓN ABONAR */}
                                         {(o.totalUSD - (o.montoPagadoUSD || 0)) > 0.01 && (
                                             <ActionButton icon={<Wallet />} color="green" onClick={() => actions.handleOpenPayment(o)} label="Abonar" />
                                         )}
