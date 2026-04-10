@@ -344,7 +344,8 @@ export default function Dashboard() {
         nota?: string, 
         imagenUrl?: string,
         metodo?: string,
-        descuento?: number 
+        descuento?: number,
+        fechaPago?: string 
     ) => {
         try {
             const ordenActual = ordenes.find(o => o.id === ordenId);
@@ -360,7 +361,7 @@ export default function Dashboard() {
 
             const nuevoRecibo = {
                 montoUSD: monto,
-                fecha: new Date().toISOString(),
+                fecha: fechaPago || new Date().toISOString(),
                 nota: nota || "",
                 imagenUrl: imagenUrl || "",
                 tasaBCV: currentBcvRate,
@@ -395,12 +396,43 @@ export default function Dashboard() {
                 type: 'success',
                 category: 'system'
             });
+
+            // ACTUALIZACIÓN LOCAL OPTIMISTA PARA ÓRDENES ANTIGUAS
+            setOrdenes(prevOrdenes => prevOrdenes.map(o => {
+                if (o.id === ordenId) {
+                    return {
+                        ...o,
+                        montoPagadoUSD: nuevoMontoTotalPagado,
+                        estadoPago: nuevoEstadoPago,
+                        registroPagos: [...((o as any).registroPagos || []), ...pagosAGuardar]
+                    };
+                }
+                return o;
+            }));
             
             toast.success("Pago registrado correctamente");
             setIsPaymentModalOpen(false); 
         } catch (error) {
             console.error("❌ Error al registrar pago:", error);
             toast.error("Error al registrar el pago");
+        }
+    };
+
+    // --- NUEVOS INTERCEPTORES PARA ELIMINAR Y EDITAR ÓRDENES ---
+    const handleDeleteOrden = async (id: string) => {
+        await deleteOrden(id);
+        // Actualizamos estado local optimista
+        setOrdenes(prev => prev.filter(o => o.id !== id));
+    };
+
+    const handleUpdateOrden = async (...args: any[]) => {
+        await actualizarOrden(...args);
+        // Si editamos una orden antigua, buscamos su versión fresca para la tabla local
+        if (editingOrder?.id) {
+            const orderUpdated = await buscarOrdenEspecifica(editingOrder.id);
+            if (orderUpdated) {
+                setOrdenes(prev => prev.map(o => o.id === editingOrder?.id ? orderUpdated : o));
+            }
         }
     };
 
@@ -482,7 +514,13 @@ export default function Dashboard() {
         let unsubClientes = () => {};
 
         if (requiresOrders) {
-            unsubOrdenes = subscribeToOrdenes("", (data) => setOrdenes(data));
+            unsubOrdenes = subscribeToOrdenes("", (newData) => {
+                setOrdenes(prevOrdenes => {
+                    const newDataIds = new Set(newData.map(o => o.id));
+                    const ordenesHistoricas = prevOrdenes.filter(o => !newDataIds.has(o.id));
+                    return [...newData, ...ordenesHistoricas];
+                });
+            });
             unsubClientes = subscribeToClients((data) => setClientes(data));
         }
 
@@ -782,12 +820,12 @@ export default function Dashboard() {
                         <motion.div layout className="bg-white dark:bg-[#1c1c1e] rounded-[2rem] border border-black/5 shadow-2xl overflow-hidden">
                             <OrdersTable 
                                 ordenes={filteredOrdenes} 
-                                onDelete={deleteOrden} 
+                                onDelete={handleDeleteOrden} 
                                 onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}} 
-                                onRegisterPayment={(id) => { 
-                                    const ord = ordenes.find(o => o.id === id); 
-                                    if(ord) handleOpenPaymentModal(ord); 
-                                }} 
+                                onRegisterPayment={handleOpenPaymentModal} 
+                                onSavePayment={async (ordenId, amount, note, img, method, discount, fechaPago) => {
+                                    await handleRegisterOrderPayment(ordenId, amount, note, img, method, discount, fechaPago);
+                                }}
                                 currentUserId={currentUserId || ""}
                                 rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
                                 pdfLogoBase64={assets.logo}
@@ -902,7 +940,7 @@ export default function Dashboard() {
                 initialData={editingOrder || undefined} 
                 currentUserId={currentUserId || ""} 
                 onCreate={createOrden} 
-                onUpdate={actualizarOrden} 
+                onUpdate={handleUpdateOrden} 
                 bcvRate={currentBcvRate} 
             />
           </DialogContent>
@@ -918,8 +956,8 @@ export default function Dashboard() {
                 }}
                 orden={selectedOrdenForPayment}
                 rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
-                onSave={async (amount, note, img, method, discount) => {
-                    await handleRegisterOrderPayment(selectedOrdenForPayment.id, amount, note, img, method, discount); 
+                onSave={async (amount, note, img, method, discount, fechaPago) => {
+                    await handleRegisterOrderPayment(selectedOrdenForPayment.id, amount, note, img, method, discount, fechaPago); 
                 }}
                 currentUserId={currentUserId || ""}
             />
