@@ -43,7 +43,7 @@ import {
     User, Calculator, TrendingUp, Sparkles, Layers, Zap, Wallet, X,
     DollarSign, CheckCircle2, Calendar, Pencil, RotateCcw, Check, 
     AlertCircle, Hourglass, Banknote, ChevronDown, Building2, Users,
-    Search, Filter
+    Search, Filter, ArrowUp, ArrowDown
 } from "lucide-react"; 
 
 import { cn } from "@/lib/utils";
@@ -98,7 +98,7 @@ export default function BudgetEntryView({
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [errors, setErrors] = useState<any>({}); 
     
-    // --- ESTADOS PARA FILTROS DEL HISTORIAL ---
+    // --- ESTADOS PARA FILTROS Y ORDENAMIENTO DEL HISTORIAL ---
     const [showFilters, setShowFilters] = useState(false);
     const [filters, setFilters] = useState({
         search: '',
@@ -106,7 +106,9 @@ export default function BudgetEntryView({
         minMonto: '',
         maxMonto: '',
         minItems: '',
-        date: 'ALL' // 'ALL', 'TODAY', 'WEEK', 'MONTH'
+        date: 'ALL', // 'ALL', 'TODAY', 'WEEK', 'MONTH'
+        sortBy: 'dateCreated', // 'dateCreated', 'clienteNombre', 'totalUSD', 'itemsCount'
+        sortOrder: 'desc' // 'asc', 'desc'
     });
 
     const suggestionRef = useRef<HTMLDivElement>(null);
@@ -139,11 +141,7 @@ export default function BudgetEntryView({
             const data = await loadBudgetsFromFirestore();
             if (data) {
                 const uniqueEntries = Array.from(new Map(data.map((item: any) => [item.id, item])).values());
-                uniqueEntries.sort((a: any, b: any) => {
-                    const dateA = a.dateCreated ? new Date(a.dateCreated).getTime() : 0;
-                    const dateB = b.dateCreated ? new Date(b.dateCreated).getTime() : 0;
-                    return dateB - dateA;
-                });
+                // El ordenamiento inicial lo hace la consulta, luego se encarga el filtro
                 setHistory(uniqueEntries);
             }
         } catch (e) { console.error("Error al cargar historial:", e); }
@@ -426,20 +424,16 @@ export default function BudgetEntryView({
         if (errors[field]) setErrors((prev: any) => ({ ...prev, [field]: false }));
     };
 
-    // --- FILTRADO DE HISTORIAL ---
+    // --- FILTRADO Y ORDENAMIENTO DE HISTORIAL ---
     const filteredHistory = useMemo(() => {
-        return history.filter(entry => {
-            // Nombre
+        let result = history.filter(entry => {
+            // Filtrado
             if (filters.search && !entry.clienteNombre.toLowerCase().includes(filters.search.toLowerCase())) return false;
-            // Tipo
             if (filters.type === 'MASTER' && !entry.isMaster) return false;
             if (filters.type === 'NORMAL' && entry.isMaster) return false;
-            // Monto
             if (filters.minMonto !== '' && entry.totalUSD < Number(filters.minMonto)) return false;
             if (filters.maxMonto !== '' && entry.totalUSD > Number(filters.maxMonto)) return false;
-            // Elementos
             if (filters.minItems !== '' && (entry.items?.length || 0) < Number(filters.minItems)) return false;
-            // Fecha
             if (filters.date !== 'ALL') {
                 const days = getDaysElapsed(entry.dateCreated);
                 if (filters.date === 'TODAY' && days > 0) return false;
@@ -448,9 +442,34 @@ export default function BudgetEntryView({
             }
             return true;
         });
+
+        // Ordenamiento
+        result.sort((a, b) => {
+            let comparison = 0;
+            switch (filters.sortBy) {
+                case 'clienteNombre':
+                    comparison = (a.clienteNombre || '').localeCompare(b.clienteNombre || '');
+                    break;
+                case 'totalUSD':
+                    comparison = (a.totalUSD || 0) - (b.totalUSD || 0);
+                    break;
+                case 'itemsCount':
+                    comparison = (a.items?.length || 0) - (b.items?.length || 0);
+                    break;
+                case 'dateCreated':
+                default:
+                    const dateA = a.dateCreated ? new Date(a.dateCreated).getTime() : 0;
+                    const dateB = b.dateCreated ? new Date(b.dateCreated).getTime() : 0;
+                    comparison = dateA - dateB;
+                    break;
+            }
+            return filters.sortOrder === 'asc' ? comparison : -comparison;
+        });
+
+        return result;
     }, [history, filters]);
 
-    const hasActiveFilters = filters.search || filters.type !== 'ALL' || filters.date !== 'ALL' || filters.minMonto || filters.maxMonto || filters.minItems;
+    const hasActiveFilters = filters.search || filters.type !== 'ALL' || filters.date !== 'ALL' || filters.minMonto || filters.maxMonto || filters.minItems || filters.sortBy !== 'dateCreated' || filters.sortOrder !== 'desc';
 
     return (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto space-y-8 pb-32 px-4">
@@ -865,8 +884,37 @@ export default function BudgetEntryView({
                                                 />
                                             </div>
                                         </div>
+                                        
+                                        {/* NUEVA SECCIÓN DE ORDENAMIENTO */}
+                                        <div className="grid grid-cols-12 gap-2 border-t border-slate-200 dark:border-slate-700 pt-3 mt-3">
+                                            <div className="col-span-8 flex items-center gap-2">
+                                                <span className="text-[10px] uppercase font-black text-slate-400 shrink-0">Ordenar:</span>
+                                                <select
+                                                    value={filters.sortBy}
+                                                    onChange={e => setFilters({...filters, sortBy: e.target.value})}
+                                                    className="h-8 rounded-xl border-none bg-white font-bold text-slate-600 text-[10px] uppercase px-2 dark:bg-slate-900 dark:text-slate-300 outline-none flex-1 w-full"
+                                                >
+                                                    <option value="dateCreated">Fecha</option>
+                                                    <option value="clienteNombre">Nombre</option>
+                                                    <option value="totalUSD">Monto</option>
+                                                    <option value="itemsCount">Cant. Elementos</option>
+                                                </select>
+                                            </div>
+                                            <div className="col-span-4">
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setFilters({...filters, sortOrder: filters.sortOrder === 'asc' ? 'desc' : 'asc'})}
+                                                    className="w-full h-8 text-[10px] font-black uppercase rounded-xl border-none bg-white dark:bg-slate-900 shadow-sm flex items-center justify-center gap-1 text-slate-600 dark:text-slate-300"
+                                                >
+                                                    {filters.sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                                                    {filters.sortOrder === 'asc' ? 'Asc' : 'Desc'}
+                                                </Button>
+                                            </div>
+                                        </div>
+
                                         {hasActiveFilters && (
-                                            <Button variant="ghost" size="sm" onClick={() => setFilters({ search: '', type: 'ALL', minMonto: '', maxMonto: '', minItems: '', date: 'ALL' })} className="w-full text-[10px] uppercase font-black text-red-500 hover:bg-red-50 h-8 rounded-xl mt-2">
+                                            <Button variant="ghost" size="sm" onClick={() => setFilters({ search: '', type: 'ALL', minMonto: '', maxMonto: '', minItems: '', date: 'ALL', sortBy: 'dateCreated', sortOrder: 'desc' })} className="w-full text-[10px] uppercase font-black text-red-500 hover:bg-red-50 h-8 rounded-xl mt-2">
                                                 Limpiar Filtros
                                             </Button>
                                         )}
