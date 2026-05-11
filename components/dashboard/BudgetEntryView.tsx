@@ -42,7 +42,8 @@ import {
     Plus, Trash2, FileText, Save, Clock, Download, 
     User, Calculator, TrendingUp, Sparkles, Layers, Zap, Wallet, X,
     DollarSign, CheckCircle2, Calendar, Pencil, RotateCcw, Check, 
-    AlertCircle, Hourglass, Banknote, ChevronDown, Building2, Users
+    AlertCircle, Hourglass, Banknote, ChevronDown, Building2, Users,
+    Search, Filter
 } from "lucide-react"; 
 
 import { cn } from "@/lib/utils";
@@ -97,6 +98,17 @@ export default function BudgetEntryView({
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [errors, setErrors] = useState<any>({}); 
     
+    // --- ESTADOS PARA FILTROS DEL HISTORIAL ---
+    const [showFilters, setShowFilters] = useState(false);
+    const [filters, setFilters] = useState({
+        search: '',
+        type: 'ALL', // 'ALL', 'MASTER', 'NORMAL'
+        minMonto: '',
+        maxMonto: '',
+        minItems: '',
+        date: 'ALL' // 'ALL', 'TODAY', 'WEEK', 'MONTH'
+    });
+
     const suggestionRef = useRef<HTMLDivElement>(null);
     const clientRef = useRef<HTMLDivElement>(null); // REF PARA CERRAR EL BUSCADOR DE CLIENTES
 
@@ -169,11 +181,9 @@ export default function BudgetEntryView({
     };
 
     // --- LÓGICA DE CLIENTES ---
-    // Filtramos la lista de la BD por lo que se va escribiendo
     const filteredClients = clientsList.filter(c => 
         c.nombreRazonSocial?.toLowerCase().includes(budgetData.clienteNombre.toLowerCase())
     );
-    // Verificamos si lo que está escrito es exactamente igual a un cliente para no mostrar el botón de "Guardar"
     const exactClientMatch = clientsList.some(c => 
         c.nombreRazonSocial?.toLowerCase() === budgetData.clienteNombre.trim().toLowerCase()
     );
@@ -288,19 +298,39 @@ export default function BudgetEntryView({
         setIsLoading(true);
         try {
             const { id, ...rest } = budgetData;
+            const newDateCreated = budgetData.id ? budgetData.dateCreated : new Date().toISOString();
+            
             const payload: any = {
                 ...rest,
                 totalUSD: totalUSD,
-                dateCreated: budgetData.id ? budgetData.dateCreated : new Date().toISOString(),
+                dateCreated: newDateCreated,
                 userId: "" 
             };
 
             if (id) payload.id = id;
 
-            await saveBudgetToFirestore(payload);
+            const resultId = await saveBudgetToFirestore(payload);
             toast.success(id ? "Cambios actualizados" : "Borrador guardado");
             
-            setBudgetData(initialBudgetState);
+            if (!id) {
+                let newDocId = typeof resultId === 'string' ? resultId : null;
+                if (!newDocId) {
+                    const updatedBudgets = await loadBudgetsFromFirestore();
+                    if (updatedBudgets) {
+                        const match = updatedBudgets.find((b: any) => 
+                            b.clienteNombre === budgetData.clienteNombre && 
+                            b.dateCreated === newDateCreated
+                        );
+                        if (match) newDocId = match.id;
+                    }
+                }
+                setBudgetData(prev => ({
+                    ...prev,
+                    id: newDocId,
+                    dateCreated: newDateCreated
+                }));
+            }
+            
             setErrors({});
             await fetchHistory();
         } catch (error) {
@@ -354,7 +384,7 @@ export default function BudgetEntryView({
             if (data.id) await deleteBudgetFromFirestore(data.id);
 
             toast.success(`Orden #${nextNumber} creada con éxito.`);
-            setBudgetData(initialBudgetState);
+            setBudgetData(initialBudgetState); 
             await fetchHistory();
         } catch (e) {
             toast.error("Error al facturar.");
@@ -383,6 +413,9 @@ export default function BudgetEntryView({
         try {
             await deleteBudgetFromFirestore(id);
             toast.success("Presupuesto eliminado");
+            if (budgetData.id === id) {
+                setBudgetData(initialBudgetState);
+            }
             await fetchHistory();
         } catch (error) {
             toast.error("Error al borrar el registro");
@@ -392,6 +425,32 @@ export default function BudgetEntryView({
     const clearError = (field: string) => {
         if (errors[field]) setErrors((prev: any) => ({ ...prev, [field]: false }));
     };
+
+    // --- FILTRADO DE HISTORIAL ---
+    const filteredHistory = useMemo(() => {
+        return history.filter(entry => {
+            // Nombre
+            if (filters.search && !entry.clienteNombre.toLowerCase().includes(filters.search.toLowerCase())) return false;
+            // Tipo
+            if (filters.type === 'MASTER' && !entry.isMaster) return false;
+            if (filters.type === 'NORMAL' && entry.isMaster) return false;
+            // Monto
+            if (filters.minMonto !== '' && entry.totalUSD < Number(filters.minMonto)) return false;
+            if (filters.maxMonto !== '' && entry.totalUSD > Number(filters.maxMonto)) return false;
+            // Elementos
+            if (filters.minItems !== '' && (entry.items?.length || 0) < Number(filters.minItems)) return false;
+            // Fecha
+            if (filters.date !== 'ALL') {
+                const days = getDaysElapsed(entry.dateCreated);
+                if (filters.date === 'TODAY' && days > 0) return false;
+                if (filters.date === 'WEEK' && days > 7) return false;
+                if (filters.date === 'MONTH' && days > 30) return false;
+            }
+            return true;
+        });
+    }, [history, filters]);
+
+    const hasActiveFilters = filters.search || filters.type !== 'ALL' || filters.date !== 'ALL' || filters.minMonto || filters.maxMonto || filters.minItems;
 
     return (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto space-y-8 pb-32 px-4">
@@ -724,85 +783,198 @@ export default function BudgetEntryView({
                 </div>
 
                 {/* HISTORIAL LATERAL */}
-                <aside className="lg:col-span-4 space-y-6">
-                    <div className="flex items-center justify-between px-4">
-                        <h2 className="text-xl font-black italic uppercase flex items-center gap-3 text-slate-900 dark:text-white">
-                            <Clock className="w-5 h-5 text-blue-600" /> Recientes
-                        </h2>
-                        <Badge className="rounded-full bg-blue-100 text-blue-600 px-3 border-none font-black">{history.length}</Badge>
+                <aside className="lg:col-span-4 space-y-4">
+                    {/* CABECERA Y FILTROS */}
+                    <div className="flex flex-col gap-3">
+                        <div className="flex items-center justify-between px-4">
+                            <h2 className="text-xl font-black italic uppercase flex items-center gap-3 text-slate-900 dark:text-white">
+                                <Clock className="w-5 h-5 text-blue-600" /> Recientes
+                            </h2>
+                            <div className="flex items-center gap-2">
+                                <Button 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    onClick={() => setShowFilters(!showFilters)} 
+                                    className={cn("h-8 w-8 rounded-xl transition-colors relative", showFilters ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-500 hover:bg-slate-200")}
+                                >
+                                    <Filter className="w-4 h-4" />
+                                    {hasActiveFilters && <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-white"></span>}
+                                </Button>
+                                <Badge className="rounded-full bg-blue-100 text-blue-600 px-3 border-none font-black">{filteredHistory.length}</Badge>
+                            </div>
+                        </div>
+
+                        <AnimatePresence>
+                            {showFilters && (
+                                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden px-2">
+                                    <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-[1.5rem] border border-slate-100 dark:border-slate-800 space-y-3">
+                                        <div className="relative">
+                                            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                            <Input 
+                                                placeholder="Buscar por cliente o empresa..." 
+                                                value={filters.search}
+                                                onChange={e => setFilters({...filters, search: e.target.value})}
+                                                className="pl-9 h-10 text-xs rounded-xl border-none bg-white dark:bg-slate-900 font-bold"
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <select 
+                                                value={filters.type} 
+                                                onChange={e => setFilters({...filters, type: e.target.value})}
+                                                className="h-10 rounded-xl border-none bg-white font-bold text-slate-600 text-xs px-3 dark:bg-slate-900 dark:text-slate-300 outline-none"
+                                            >
+                                                <option value="ALL">Todos los tipos</option>
+                                                <option value="NORMAL">Clientes Normales</option>
+                                                <option value="MASTER">Empresas Matrices</option>
+                                            </select>
+                                            <select 
+                                                value={filters.date} 
+                                                onChange={e => setFilters({...filters, date: e.target.value})}
+                                                className="h-10 rounded-xl border-none bg-white font-bold text-slate-600 text-xs px-3 dark:bg-slate-900 dark:text-slate-300 outline-none"
+                                            >
+                                                <option value="ALL">Cualquier Fecha</option>
+                                                <option value="TODAY">Hoy</option>
+                                                <option value="WEEK">Últimos 7 días</option>
+                                                <option value="MONTH">Últimos 30 días</option>
+                                            </select>
+                                        </div>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <div className="relative">
+                                                <DollarSign className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                <Input 
+                                                    type="number" placeholder="Min" 
+                                                    value={filters.minMonto} onChange={e => setFilters({...filters, minMonto: e.target.value})}
+                                                    className="h-9 pl-6 text-xs rounded-xl border-none bg-white dark:bg-slate-900 font-bold"
+                                                />
+                                            </div>
+                                            <div className="relative">
+                                                <DollarSign className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                <Input 
+                                                    type="number" placeholder="Max" 
+                                                    value={filters.maxMonto} onChange={e => setFilters({...filters, maxMonto: e.target.value})}
+                                                    className="h-9 pl-6 text-xs rounded-xl border-none bg-white dark:bg-slate-900 font-bold"
+                                                />
+                                            </div>
+                                            <div className="relative">
+                                                <Layers className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                <Input 
+                                                    type="number" placeholder="Items" 
+                                                    value={filters.minItems} onChange={e => setFilters({...filters, minItems: e.target.value})}
+                                                    className="h-9 pl-7 text-xs rounded-xl border-none bg-white dark:bg-slate-900 font-bold"
+                                                    title="Cantidad mínima de elementos"
+                                                />
+                                            </div>
+                                        </div>
+                                        {hasActiveFilters && (
+                                            <Button variant="ghost" size="sm" onClick={() => setFilters({ search: '', type: 'ALL', minMonto: '', maxMonto: '', minItems: '', date: 'ALL' })} className="w-full text-[10px] uppercase font-black text-red-500 hover:bg-red-50 h-8 rounded-xl mt-2">
+                                                Limpiar Filtros
+                                            </Button>
+                                        )}
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </div>
 
+                    {/* LISTA DE PRESUPUESTOS */}
                     <div className="space-y-3 overflow-y-auto max-h-[700px] pr-2 custom-scrollbar">
-                        {history.map((entry) => {
-                            const daysOld = getDaysElapsed(entry.dateCreated);
-                            let ageColor = "bg-emerald-100 text-emerald-600";
-                            if (daysOld > 3) ageColor = "bg-amber-100 text-amber-600";
-                            if (daysOld > 7) ageColor = "bg-rose-100 text-rose-600";
+                        {filteredHistory.length === 0 ? (
+                            <div className="text-center p-8 text-slate-400 text-sm font-bold uppercase italic">
+                                No se encontraron resultados
+                            </div>
+                        ) : (
+                            filteredHistory.map((entry) => {
+                                const daysOld = getDaysElapsed(entry.dateCreated);
+                                let ageColor = "bg-emerald-100 text-emerald-600";
+                                if (daysOld > 3) ageColor = "bg-amber-100 text-amber-600";
+                                if (daysOld > 7) ageColor = "bg-rose-100 text-rose-600";
 
-                            return (
-                                <motion.div key={entry.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                                    <Card className="p-5 rounded-[2.5rem] border-none shadow-lg bg-white dark:bg-slate-900 group relative overflow-hidden transition-all hover:scale-[1.02]">
-                                        <div className="flex justify-between items-start">
-                                            <div className="space-y-2 min-w-0 pr-4">
-                                                <h4 className="font-black text-slate-800 dark:text-slate-100 text-sm truncate uppercase italic tracking-tight flex items-center gap-2">
-                                                    {entry.isMaster && <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0"/>}
-                                                    {entry.clienteNombre}
-                                                </h4>
-                                                <div className="flex flex-wrap gap-2">
-                                                    <Badge variant="outline" className="border-slate-200 text-slate-400 font-bold text-[9px] h-5 px-1.5 flex gap-1">
-                                                        <Calendar className="w-2.5 h-2.5" /> 
-                                                        {entry.dateCreated ? new Date(entry.dateCreated).toLocaleDateString() : 'Hoy'}
-                                                    </Badge>
-                                                    {daysOld > 0 && (
-                                                        <Badge className={cn("border-none font-black text-[8px] h-5 px-1.5 flex gap-1", ageColor)}>
-                                                            <Hourglass className="w-2.5 h-2.5" /> 
-                                                            Hace {daysOld} días
+                                return (
+                                    <motion.div key={entry.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                                        <Card className="p-5 rounded-[2.5rem] border-none shadow-lg bg-white dark:bg-slate-900 group relative overflow-hidden transition-all hover:scale-[1.02]">
+                                            <div className="flex justify-between items-start mb-3">
+                                                <div className="space-y-2 min-w-0 pr-4">
+                                                    <h4 className="font-black text-slate-800 dark:text-slate-100 text-sm truncate uppercase italic tracking-tight flex items-center gap-2">
+                                                        {entry.isMaster && <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0"/>}
+                                                        {entry.clienteNombre}
+                                                    </h4>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        <Badge variant="outline" className="border-slate-200 text-slate-400 font-bold text-[9px] h-5 px-1.5 flex gap-1">
+                                                            <Calendar className="w-2.5 h-2.5" /> 
+                                                            {entry.dateCreated ? new Date(entry.dateCreated).toLocaleDateString() : 'Hoy'}
                                                         </Badge>
+                                                        {daysOld > 0 && (
+                                                            <Badge className={cn("border-none font-black text-[8px] h-5 px-1.5 flex gap-1", ageColor)}>
+                                                                <Hourglass className="w-2.5 h-2.5" /> 
+                                                                Hace {daysOld} días
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <p className="text-lg font-black text-blue-600 tracking-tighter leading-none">${entry.totalUSD?.toFixed(2)}</p>
+                                            </div>
+                                            
+                                            {/* PREVIEW DE ITEMS */}
+                                            {entry.items && entry.items.length > 0 && (
+                                                <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                                                    {entry.items.slice(0, 2).map((item: any, idx: number) => (
+                                                        <div key={idx} className="flex justify-between items-center text-[10px] text-slate-500 dark:text-slate-400">
+                                                            <span className="truncate pr-3 font-medium flex items-center gap-1.5">
+                                                                <span className="w-1 h-1 bg-slate-300 rounded-full shrink-0"></span>
+                                                                {item.descripcion}
+                                                            </span>
+                                                            <span className="font-black shrink-0 bg-slate-50 dark:bg-slate-800 px-1.5 rounded-md">x{item.cantidad}</span>
+                                                        </div>
+                                                    ))}
+                                                    {entry.items.length > 2 && (
+                                                        <div className="text-[9px] text-blue-500 font-black italic mt-1.5 flex items-center gap-1">
+                                                            <Plus className="w-3 h-3" /> {entry.items.length - 2} concepto(s) adicionales
+                                                        </div>
                                                     )}
                                                 </div>
+                                            )}
+                                            
+                                            {/* ACCIONES HOVER */}
+                                            <div className="absolute bottom-4 right-4 flex gap-2 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-1.5 rounded-2xl shadow-xl border border-black/5">
+                                                <Button size="icon" onClick={() => handleEditBudget(entry)} className="h-10 w-10 rounded-xl bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white transition-colors shadow-sm" title="Editar">
+                                                    <Pencil className="w-4 h-4" />
+                                                </Button>
+
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <Button size="icon" className="h-10 w-10 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-colors shadow-sm">
+                                                            <Download className="w-4 h-4" />
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end" className="rounded-2xl min-w-[200px] p-2">
+                                                        <DropdownMenuLabel className="text-[10px] uppercase font-black text-slate-400 px-2 py-1.5">Tasa PDF</DropdownMenuLabel>
+                                                        <DropdownMenuItem onClick={() => handleDownloadPDF(entry, 'USD')} className="gap-2 cursor-pointer text-xs font-bold p-2 rounded-xl text-emerald-700">
+                                                            BCV $ ({safeRates.usd.toFixed(2)})
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => handleDownloadPDF(entry, 'EUR')} className="gap-2 cursor-pointer text-xs font-bold p-2 rounded-xl text-blue-700">
+                                                            BCV € ({safeRates.eur.toFixed(2)})
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => handleDownloadPDF(entry, 'USDT')} className="gap-2 cursor-pointer text-xs font-bold p-2 rounded-xl text-orange-700">
+                                                            Monitor ({safeRates.usdt.toFixed(2)})
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => handleDownloadPDF(entry, 'USD_ONLY')} className="gap-2 cursor-pointer text-xs font-bold p-2 rounded-xl text-slate-600">
+                                                            Solo USD
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+
+                                                <Button size="icon" onClick={() => handleConvertToOrder(entry)} className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors shadow-sm" title="Facturar">
+                                                    <Zap className="w-4 h-4" />
+                                                </Button>
+                                                <Button size="icon" onClick={() => handleDeleteBudget(entry.id)} className="h-10 w-10 rounded-xl bg-red-50 text-red-400 hover:bg-red-500 hover:text-white transition-colors shadow-sm" title="Eliminar">
+                                                    <Trash2 className="w-4 h-4" />
+                                                </Button>
                                             </div>
-                                            <p className="text-lg font-black text-blue-600 tracking-tighter leading-none">${entry.totalUSD?.toFixed(2)}</p>
-                                        </div>
-                                        
-                                        <div className="mt-4 flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-all">
-                                            <Button size="icon" onClick={() => handleEditBudget(entry)} className="h-10 w-10 rounded-xl bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white transition-colors shadow-sm" title="Editar">
-                                                <Pencil className="w-4 h-4" />
-                                            </Button>
-
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <Button size="icon" className="h-10 w-10 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-colors shadow-sm">
-                                                        <Download className="w-4 h-4" />
-                                                    </Button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="end" className="rounded-2xl min-w-[200px] p-2">
-                                                    <DropdownMenuLabel className="text-[10px] uppercase font-black text-slate-400 px-2 py-1.5">Tasa PDF</DropdownMenuLabel>
-                                                    <DropdownMenuItem onClick={() => handleDownloadPDF(entry, 'USD')} className="gap-2 cursor-pointer text-xs font-bold p-2 rounded-xl text-emerald-700">
-                                                        BCV $ ({safeRates.usd.toFixed(2)})
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem onClick={() => handleDownloadPDF(entry, 'EUR')} className="gap-2 cursor-pointer text-xs font-bold p-2 rounded-xl text-blue-700">
-                                                        BCV € ({safeRates.eur.toFixed(2)})
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem onClick={() => handleDownloadPDF(entry, 'USDT')} className="gap-2 cursor-pointer text-xs font-bold p-2 rounded-xl text-orange-700">
-                                                        Monitor ({safeRates.usdt.toFixed(2)})
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem onClick={() => handleDownloadPDF(entry, 'USD_ONLY')} className="gap-2 cursor-pointer text-xs font-bold p-2 rounded-xl text-slate-600">
-                                                        Solo USD
-                                                    </DropdownMenuItem>
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-
-                                            <Button size="icon" onClick={() => handleConvertToOrder(entry)} className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors shadow-sm" title="Facturar">
-                                                <Zap className="w-4 h-4" />
-                                            </Button>
-                                            <Button size="icon" onClick={() => handleDeleteBudget(entry.id)} className="h-10 w-10 rounded-xl bg-red-50 text-red-400 hover:bg-red-500 hover:text-white transition-colors shadow-sm" title="Eliminar">
-                                                <Trash2 className="w-4 h-4" />
-                                            </Button>
-                                        </div>
-                                    </Card>
-                                </motion.div>
-                            )
-                        })}
+                                        </Card>
+                                    </motion.div>
+                                )
+                            })
+                        )}
                     </div>
                 </aside>
             </div>

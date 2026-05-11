@@ -153,14 +153,49 @@ const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: 
     ],
 });
 
-const getUnifiedFooterBlock = (firmaBase64: string | undefined, selloBase64: string | undefined) => ({
+const getPaymentBlock = () => ({
     stack: [
+        { text: "DATOS PARA PAGOS / TRANSFERENCIAS:", style: "contactName", margin: [0, 10, 0, 5] },
+        {
+            table: {
+                widths: ["auto", "*"],
+                body: [
+                    [{ text: "Banco:", style: "contactName" }, { text: "Banesco Banco Universal", style: "contactInfo" }],
+                    [{ text: "Tipo:", style: "contactName" }, { text: "Cuenta Corriente (VES)", style: "contactInfo" }],
+                    [{ text: "Cuenta:", style: "contactName" }, { text: "0134-0409-77-4091052723", style: "contactInfo" }],
+                    [{ text: "C.I:", style: "contactName" }, { text: "V-19448046", style: "contactInfo" }],
+                    [{ text: "Titular:", style: "contactName" }, { text: "JOSUE SAMUEL LEAL LOPEZ", style: "contactInfo" }]
+                ]
+            },
+            layout: {
+                defaultBorder: false,
+                paddingLeft: () => 0,
+                paddingTop: () => 2,
+                paddingBottom: () => 2
+            }
+        }
+    ],
+    margin: [0, 10, 0, 5]
+});
+
+const getUnifiedFooterBlock = (firmaBase64: string | undefined, selloBase64: string | undefined, currencyRate: number) => {
+    const stackElements: any[] = [];
+    
+    if (currencyRate > 1) {
+        stackElements.push(getPaymentBlock());
+    }
+
+    stackElements.push(
         { text: "SIN MAS QUE HACER REFERENCIA...", style: "farewellText", alignment: "center", margin: [0, 20, 0, 20] },
         getSignatureBlockContent(firmaBase64, selloBase64),
         getCompanyFooter()
-    ],
-    unbreakable: true 
-});
+    );
+
+    return {
+        stack: stackElements,
+        unbreakable: true 
+    };
+};
 
 const COMMON_STYLES = {
     title: { fontSize: 16, bold: true, color: "#333333" },
@@ -268,7 +303,7 @@ export async function generateOrderPDF(orden: any, SMRLogoBase64: string, option
       },
       { stack: [{ text: "NOTA:", bold: true, fontSize: 10 }, { ul: NOTAS_LEGALES, fontSize: 9 }] },
       
-      getUnifiedFooterBlock(firmaBase64, selloBase64)
+      getUnifiedFooterBlock(firmaBase64, selloBase64, currency.rate)
     ],
     styles: COMMON_STYLES,
     defaultStyle: { font: "Roboto" }
@@ -351,7 +386,7 @@ export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: s
                 margin: [0, 0, 0, 15]
             },
             
-            getUnifiedFooterBlock(firmaBase64, selloBase64)
+            getUnifiedFooterBlock(firmaBase64, selloBase64, currency.rate)
         ],
         styles: COMMON_STYLES,
         defaultStyle: { font: "Roboto" }
@@ -409,7 +444,7 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
                 margin: [0, 0, 0, 20]
             },
             
-            getUnifiedFooterBlock(firmaBase64, selloBase64)
+            getUnifiedFooterBlock(firmaBase64, selloBase64, currency.rate)
         ],
         styles: COMMON_STYLES,
         defaultStyle: { font: "Roboto" }
