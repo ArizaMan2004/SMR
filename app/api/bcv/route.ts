@@ -8,7 +8,7 @@ export async function GET() {
     const res = await fetch("https://api.dolarvzla.com/private/exchange-rate", {
       cache: "no-store",
       headers: {
-        "x-dolarvzla-key": "fd313f847b5b2502fe4718f764ea137feb6cac0fe989291a67c11671d38b4718",
+        "x-dolarvzla-key": "45b1a563bf91a9826c8e75c1ec7d2276f130b810ee4213ec551b7361579b2aaf",
         "Accept": "application/json",
         "User-Agent": "SystemaxApp/1.0", // Es buena práctica identificarte, aunque la Key es lo importante
       },
