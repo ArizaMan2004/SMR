@@ -12,7 +12,7 @@ import { doc, updateDoc, arrayUnion, collection, onSnapshot } from "firebase/fir
 // UI - Shadcn
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { toast } from "sonner" 
 
 // Componentes SMR
@@ -31,6 +31,7 @@ import { PaymentEditModal } from "@/components/dashboard/PaymentEditModal"
 import { PaymentAuditView } from "@/components/dashboard/PaymentAuditView"
 import { NewsBar, type NewsAction } from "@/components/dashboard/news-bar" 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal" 
+import { TaskControlView } from "@/components/dashboard/TaskControlView" // <-- NUEVO COMPONENTE
 
 // --- IMPORTACIONES DE HERRAMIENTAS IA Y DISEÑO ---
 import { BackgroundRemoverView } from "@/components/dashboard/BackgroundRemoverView" 
@@ -55,7 +56,7 @@ import { startTour } from "@/components/dashboard/TutorialController"
 import { 
     Plus, CheckCircle, Calculator, LayoutDashboard, FileSpreadsheet, Clock, 
     Building2, Bell, CheckCircle2, ChevronLeft, Menu, DollarSign, Euro, Coins, 
-    Wallet, Search, HelpCircle, AlertCircle, Loader2, ShieldCheck 
+    Wallet, Search, HelpCircle, AlertCircle, Loader2, ShieldCheck, Layers
 } from "lucide-react" 
 
 // Servicios
@@ -181,7 +182,13 @@ export default function Dashboard() {
             id: 'tasks_taller', 
             label: 'Taller de Producción', 
             icon: <CheckCircle className="w-4 h-4" /> 
-            // Libre para todos (El componente TasksView filtra internamente las pestañas)
+            // Libre para todos
+        },
+        { 
+            id: 'task_control', 
+            label: 'Control de Tareas (Bonos)', 
+            icon: <Layers className="w-4 h-4" /> 
+            // Libre para todos (Admin audita, empleados registran)
         },
         { 
             id: 'my_finances', 
@@ -348,15 +355,20 @@ export default function Dashboard() {
         fechaPago?: string 
     ) => {
         try {
-            const ordenActual = ordenes.find(o => o.id === ordenId);
-            if (!ordenActual) return;
+            const ordenActual = ordenes.find(o => o.id === ordenId) || selectedOrdenForPayment;
+            
+            if (!ordenActual) {
+                toast.error("No se pudo referenciar la orden para el pago.");
+                return;
+            }
             
             const ordenRef = doc(db, "ordenes", ordenId);
             const montoPagadoAnterior = Number(ordenActual.montoPagadoUSD) || 0;
             
             const descuentoAplicado = descuento || 0;
             const nuevoMontoTotalPagado = montoPagadoAnterior + monto + descuentoAplicado;
-            const saldoRestante = ordenActual.totalUSD - nuevoMontoTotalPagado;
+            
+            const saldoRestante = Number(ordenActual.totalUSD) - nuevoMontoTotalPagado;
             const nuevoEstadoPago = saldoRestante <= 0.01 ? "PAGADO" : "ABONADO";
 
             const nuevoRecibo = {
@@ -564,8 +576,8 @@ export default function Dashboard() {
         let unsubDesigners = () => {};
         let unsubMovimientosCaja = () => {};
 
-        // Ahora my_finances también necesita empleados y pagos
-        if (["orders", "employees_mgmt", "financial_stats", "wallets", "payment_audit", "my_finances"].includes(activeView)) {
+        // Ahora my_finances y task_control necesitan empleados y pagos
+        if (["orders", "employees_mgmt", "financial_stats", "wallets", "payment_audit", "my_finances", "task_control"].includes(activeView)) {
             unsubEmpleados = subscribeToEmpleados((data) => setEmpleados(data));
             unsubPagos = subscribeToPagos((data) => setPagos(data));
         }
@@ -622,8 +634,16 @@ export default function Dashboard() {
         const term = searchTerm.toLowerCase();
         return ordenes.filter((o) => {
             const nOrden = String(o.ordenNumero || "");
-            const cliente = String(o.cliente?.nombreRazonSocial || "").toLowerCase();
-            return nOrden.includes(term) || cliente.includes(term);
+            
+            // Buscamos en todas las posibles estructuras antiguas y nuevas
+            const clienteNombre = String(
+                o.cliente?.nombreRazonSocial || 
+                (o as any).clienteNombre || 
+                (o as any).nombreCliente || 
+                ""
+            ).toLowerCase();
+            
+            return nOrden.includes(term) || clienteNombre.includes(term);
         });
     }, [ordenes, searchTerm]);
 
@@ -870,6 +890,14 @@ export default function Dashboard() {
                     />
                 )}
 
+                {/* VISTA DE CONTROL DE TAREAS Y BONOS */}
+                {activeView === "task_control" && (
+                    <TaskControlView 
+                        currentUser={userData} 
+                        empleadosDb={empleados} 
+                    />
+                )}
+
                 {/* VISTA DEL TALLER DE PRODUCCIÓN (El componente en sí filtra las áreas) */}
                 {activeView === "tasks_taller" && (
                     <TasksView ordenes={ordenes} currentUserId={currentUserId || ""} />
@@ -991,6 +1019,7 @@ export default function Dashboard() {
                         {cardModalState.type === 'abonadas' && "Órdenes Abonadas"}
                         {cardModalState.type === 'pagadas' && "Órdenes Pagadas"}
                     </DialogTitle>
+                    <DialogDescription className="sr-only">Lista filtrada de órdenes para revisión administrativa</DialogDescription>
 
                     {/* Controles de Filtro */}
                     <div className="flex items-center gap-3 pb-4 border-b border-black/5 dark:border-white/5 overflow-x-auto custom-scrollbar">
