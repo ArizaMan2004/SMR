@@ -441,8 +441,26 @@ export default function Dashboard() {
             setIsSearchDropdownOpen(false); // Cerramos el dropdown al buscar
             setIsSearchingDeep(true);
             try {
-                // Buscamos en toda la base de datos (por número, cliente o RIF)
-                const resultados = await buscarOrdenesHistoricas(searchTerm);
+                // --- MAGIA: TRADUCTOR DE NOMBRES ---
+                let terminoExacto = searchTerm.trim();
+
+                // Si no es un número, adivinamos el cliente exacto usando la memoria de SMR
+                if (isNaN(Number(terminoExacto))) {
+                    const termLower = terminoExacto.toLowerCase();
+                    const clienteGuardado = clientes.find(c => 
+                        c.nombreRazonSocial?.toLowerCase().includes(termLower) || 
+                        c.rifCedula?.toLowerCase().includes(termLower)
+                    );
+                    
+                    if (clienteGuardado) {
+                        // Cambiamos "mely" por "DRA MELY LARRARTE" automáticamente
+                        terminoExacto = clienteGuardado.nombreRazonSocial;
+                        toast.info(`Buscando historial de: ${terminoExacto}`);
+                    }
+                }
+
+                // Buscamos en Firebase con el nombre exacto o el número perfecto
+                const resultados = await buscarOrdenesHistoricas(terminoExacto);
 
                 if (resultados && resultados.length > 0) {
                     toast.success(`Se encontraron ${resultados.length} coincidencias en el historial.`);
@@ -467,7 +485,7 @@ export default function Dashboard() {
                     }
 
                 } else {
-                    toast.error(`No se encontraron registros históricos para "${searchTerm}".`);
+                    toast.error(`No se encontraron registros para "${terminoExacto}".`);
                 }
             } catch (error) {
                 console.error("Error en búsqueda profunda:", error);

@@ -10,9 +10,7 @@ const pwaConfig = withPWA({
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // --- CORRECCIÓN PRINCIPAL ---
-  reactStrictMode: false, // <--- ESTO EVITA EL ERROR DE SHADERS/WEBGL
-  // ----------------------------
+  reactStrictMode: false,
   transpilePackages: ['upscaler', '@tensorflow/tfjs'],
   typescript: {
     ignoreBuildErrors: true,

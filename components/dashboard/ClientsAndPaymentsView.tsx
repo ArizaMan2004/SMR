@@ -39,13 +39,13 @@ import { OrderDetailModal } from '@/components/orden/order-detail-modal'
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
 import { generateGeneralAccountStatusPDF } from "@/lib/services/pdf-generator"
 import { buscarOrdenesHistoricas } from "@/lib/services/ordenes-service" 
-import { getFrequentClients } from "@/lib/firebase/clientes" // <-- NUEVA IMPORTACIÓN
+import { getFrequentClients } from "@/lib/firebase/clientes" 
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
 // FIREBASE
 import { db } from "@/lib/firebase"
-import { collection, doc, updateDoc, arrayUnion, writeBatch, query, where, orderBy, limit, onSnapshot, getDocs } from "firebase/firestore"
+import { collection, doc, updateDoc, arrayUnion, writeBatch, onSnapshot, getDocs } from "firebase/firestore"
 
 interface ClientSummary {
     key: string
@@ -80,6 +80,7 @@ const itemVariants = {
 }
 
 export function ClientsAndPaymentsView({ 
+    ordenes = [], // Recibimos las órdenes del Dashboard (Nuestra única fuente de verdad)
     rates, 
     onRegisterPayment,
     pdfLogoBase64,
@@ -87,11 +88,9 @@ export function ClientsAndPaymentsView({
     selloBase64 
 }: ClientsAndPaymentsViewProps) {
     
-    // --- ESTADOS AUTÓNOMOS DE LA VISTA (Ahorro de Cuota) ---
-    const [localUnpaidOrders, setLocalUnpaidOrders] = useState<any[]>([]);
-    const [localPaidOrders, setLocalPaidOrders] = useState<any[]>([]);
+    // --- ESTADOS DE DATOS HISTÓRICOS Y CLIENTES ---
     const [historicasBusqueda, setHistoricasBusqueda] = useState<any[]>([]); 
-    const [isLoadingCobranzas, setIsLoadingCobranzas] = useState(true);
+    const [frequentClients, setFrequentClients] = useState<any[]>([]); 
 
     // --- ESTADOS DE UI Y FILTROS ---
     const [searchTerm, setSearchTerm] = useState('')
@@ -99,8 +98,7 @@ export function ClientsAndPaymentsView({
     const [currentPage, setCurrentPage] = useState(1)
     const itemsPerPage = 5
     const [expandedOrdenId, setExpandedOrdenId] = useState<string | null>(null);
-    const [frequentClients, setFrequentClients] = useState<any[]>([]); // <-- NUEVO ESTADO
-    const [isDropdownOpen, setIsDropdownOpen] = useState(false); // <-- NUEVO ESTADO
+    const [isDropdownOpen, setIsDropdownOpen] = useState(false); 
 
     // --- ESTADOS DE PRIVACIDAD ---
     const [showTotalDeuda, setShowTotalDeuda] = useState(false);
@@ -127,12 +125,9 @@ export function ClientsAndPaymentsView({
     const globalFileInputRef = useRef<HTMLInputElement>(null)
 
     // ==============================================================
-    // FETCH AUTÓNOMO (LA PIEZA MAESTRA DEL AHORRO) Y CLIENTES
+    // CARGA DE CLIENTES FRECUENTES PARA EL TRADUCTOR
     // ==============================================================
     useEffect(() => {
-        setIsLoadingCobranzas(true);
-        
-        // Cargar clientes frecuentes para el autocompletado
         getFrequentClients().then(clients => {
             setFrequentClients(clients.map(c => ({
                 id: c.id!, nombreRazonSocial: c.nombreRazonSocial, 
@@ -140,35 +135,10 @@ export function ClientsAndPaymentsView({
                 telefono: c.telefonoCompleto
             })));
         }).catch(err => console.error("Error al cargar clientes:", err));
-
-        // 1. CARTERA EN MORA
-        const qUnpaid = query(
-            collection(db, "ordenes"), 
-            where("estadoPago", "in", ["PENDIENTE", "ABONADO"])
-        );
-        
-        const unsubUnpaid = onSnapshot(qUnpaid, (snap) => {
-            setLocalUnpaidOrders(snap.docs.map(d => ({id: d.id, ...d.data()})));
-            setIsLoadingCobranzas(false);
-        });
-
-        // 2. LIQUIDADAS
-        const qPaid = query(
-            collection(db, "ordenes"), 
-            where("estadoPago", "==", "PAGADO"), 
-            orderBy("fecha", "desc"), 
-            limit(50)
-        );
-
-        const unsubPaid = onSnapshot(qPaid, (snap) => {
-            setLocalPaidOrders(snap.docs.map(d => ({id: d.id, ...d.data()})));
-        });
-
-        return () => { unsubUnpaid(); unsubPaid(); };
     }, []);
 
     // ==============================================================
-    // TIEMPO REAL PARA ÓRDENES HISTÓRICAS (BLINDAJE)
+    // TIEMPO REAL PARA ÓRDENES HISTÓRICAS
     // ==============================================================
     useEffect(() => {
         if (historicasBusqueda.length === 0) return;
@@ -187,18 +157,32 @@ export function ClientsAndPaymentsView({
     }, [historicasBusqueda.map(o => o.id).join(',')]);
 
     // ==============================================================
-    // BÚSQUEDA PROFUNDA EN HISTORIAL 
+    // BÚSQUEDA PROFUNDA (CON TRADUCTOR INTELIGENTE)
     // ==============================================================
     const handleDeepSearch = async (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter' && searchTerm.trim() !== '') {
-            setIsDropdownOpen(false); // Cierra el menú al hacer Enter
+            setIsDropdownOpen(false);
             setIsSearchingDeep(true);
             try {
-                const resultados = await buscarOrdenesHistoricas(searchTerm);
+                // TRADUCTOR: Si pones "mely", te busca el nombre exacto
+                let terminoExacto = searchTerm.trim();
+
+                if (isNaN(Number(terminoExacto))) {
+                    const termLower = terminoExacto.toLowerCase();
+                    const clienteGuardado = frequentClients.find(c => 
+                        c.nombreRazonSocial?.toLowerCase().includes(termLower) || 
+                        c.rifCedula?.toLowerCase().includes(termLower)
+                    );
+                    if (clienteGuardado) {
+                        terminoExacto = clienteGuardado.nombreRazonSocial;
+                        toast.info(`Buscando historial de: ${terminoExacto}`);
+                    }
+                }
+
+                const resultados = await buscarOrdenesHistoricas(terminoExacto);
 
                 if (resultados && resultados.length > 0) {
                     toast.success(`Se encontraron ${resultados.length} facturas históricas.`);
-                    
                     setHistoricasBusqueda(prev => {
                         const updated = [...prev];
                         resultados.forEach(res => {
@@ -206,9 +190,8 @@ export function ClientsAndPaymentsView({
                         });
                         return updated;
                     });
-
                 } else {
-                    toast.error(`No hay registros históricos para "${searchTerm}".`);
+                    toast.error(`No hay registros históricos para "${terminoExacto}".`);
                 }
             } catch (error) {
                 console.error("Error en búsqueda profunda:", error);
@@ -219,14 +202,13 @@ export function ClientsAndPaymentsView({
         }
     };
 
-    // --- AUTOCOMPLETADO DE CLIENTES ---
     const filteredClientsDropdown = useMemo(() => {
         if (!searchTerm.trim()) return [];
         const lowerTerm = searchTerm.toLowerCase();
         return frequentClients.filter(c => 
             (c.nombreRazonSocial && c.nombreRazonSocial.toLowerCase().includes(lowerTerm)) ||
             (c.rifCedula && c.rifCedula.toLowerCase().includes(lowerTerm))
-        ).slice(0, 8); // Top 8 resultados para no saturar
+        ).slice(0, 8); 
     }, [frequentClients, searchTerm]);
 
     // ==============================================================
@@ -277,31 +259,45 @@ export function ClientsAndPaymentsView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedOrdersForGlobal]); 
 
-    // --- PROCESAMIENTO DE DATOS LOCALES ---
+    // ==============================================================
+    // PROCESAMIENTO UNIFICADO DE DATOS (UNICA FUENTE DE VERDAD)
+    // ==============================================================
     const { clientSummaries, pagadasCompletamente, totalPendienteGlobal } = useMemo(() => {
         const summaryMap = new Map<string, ClientSummary>()
         let totalPendGlobal = 0;
         const lowerCaseSearch = searchTerm.toLowerCase().trim();
 
-        // 1. UNIFICAR LISTAS (Firebase + Históricas Ancladas)
+        // 1. CLASIFICAMOS TODO DIRECTAMENTE DE 'ordenes' (Dashboard) y 'historicasBusqueda'
         const mapUnpaid = new Map<string, any>();
-        localUnpaidOrders.forEach(o => mapUnpaid.set(o.id, o));
-        historicasBusqueda.filter(o => o.estadoPago === 'PENDIENTE' || o.estadoPago === 'ABONADO').forEach(o => mapUnpaid.set(o.id, o));
-        const todasUnpaid = Array.from(mapUnpaid.values());
-
         const mapPaid = new Map<string, any>();
-        localPaidOrders.forEach(o => mapPaid.set(o.id, o));
-        historicasBusqueda.filter(o => o.estadoPago === 'PAGADO').forEach(o => mapPaid.set(o.id, o));
+
+        const procesarLista = (lista: any[]) => {
+            lista.forEach(o => {
+                if (o.estadoPago === 'PENDIENTE' || o.estadoPago === 'ABONADO') {
+                    mapUnpaid.set(o.id, o);
+                    mapPaid.delete(o.id); // Aseguramos que no esté en ambas
+                } else if (o.estadoPago === 'PAGADO') {
+                    mapPaid.set(o.id, o);
+                    mapUnpaid.delete(o.id); // Desaparece instantáneamente de morosos
+                }
+            });
+        };
+
+        procesarLista(ordenes);
+        procesarLista(historicasBusqueda);
+
+        const todasUnpaid = Array.from(mapUnpaid.values());
         const todasPaid = Array.from(mapPaid.values());
 
-        // 2. PROCESAR PAGADAS
+        // 2. PROCESAR PAGADAS (Historial)
         const pagadas = todasPaid
             .filter((o: any) => {
                 const nombreCliente = (o.cliente?.nombreRazonSocial || '').toLowerCase();
                 const numOrden = String(o.ordenNumero || '');
                 const coincideBusqueda = !lowerCaseSearch || nombreCliente.includes(lowerCaseSearch) || numOrden.includes(lowerCaseSearch);
                 return coincideBusqueda && o.estadoPago !== 'ANULADO';
-            });
+            })
+            .sort((a, b) => new Date(b.fecha || 0).getTime() - new Date(a.fecha || 0).getTime()); // Ordenar más recientes primero
 
         // 3. PROCESAR MOROSAS
         todasUnpaid.forEach((orden: any) => {
@@ -329,6 +325,7 @@ export function ClientsAndPaymentsView({
             }
         });
 
+        // Ordenamos las órdenes por fecha dentro de cada cliente
         summaryMap.forEach(s => s.ordenesPendientes.sort((a, b) => new Date(a.fecha || 0).getTime() - new Date(b.fecha || 0).getTime()));
 
         return { 
@@ -336,7 +333,7 @@ export function ClientsAndPaymentsView({
             pagadasCompletamente: pagadas, 
             totalPendienteGlobal: totalPendGlobal 
         };
-    }, [localUnpaidOrders, localPaidOrders, historicasBusqueda, searchTerm]);
+    }, [ordenes, historicasBusqueda, searchTerm]);
 
     const totalPages = Math.ceil(clientSummaries.length / itemsPerPage);
     const paginatedClients = useMemo(() => clientSummaries.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage), [clientSummaries, currentPage]);
@@ -506,14 +503,6 @@ export function ClientsAndPaymentsView({
 
     return (
         <motion.div initial="hidden" animate="visible" variants={containerVariants} className="relative space-y-10 p-2 font-sans selection:bg-blue-100 min-h-[500px]">
-            
-            {/* SPINNER DE PROTECCIÓN */}
-            {isLoadingCobranzas && (
-                <div className="absolute inset-0 z-50 bg-white/50 dark:bg-[#1c1c1e]/50 backdrop-blur-sm flex flex-col items-center justify-center rounded-[3rem]">
-                    <Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4" />
-                    <p className="text-sm font-black uppercase text-slate-500 tracking-widest">Sincronizando Cartera...</p>
-                </div>
-            )}
 
             {/* HEADER */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
@@ -878,6 +867,8 @@ export function ClientsAndPaymentsView({
             {/* MODAL ABONO GLOBAL */}
             <Dialog open={isGlobalModalOpen} onOpenChange={(open) => !isGlobalUploading && closeGlobalModal()}>
                 <DialogContent className="max-w-md md:max-w-5xl rounded-[2.5rem] border-0 shadow-2xl p-0 outline-none bg-white dark:bg-[#1c1c1e] flex flex-col max-h-[95vh] overflow-hidden">
+                    <DialogTitle className="sr-only">Abono General para Cliente</DialogTitle>
+                    <DialogDescription className="sr-only">Formulario para procesar un pago global o múltiple a un cliente</DialogDescription>
                     
                     <DialogHeader className="space-y-2 shrink-0 p-6 md:p-8 pb-4 border-b border-slate-100 dark:border-white/5">
                         <div className="flex items-center gap-4">
@@ -1128,6 +1119,8 @@ export function ClientsAndPaymentsView({
             <Dialog open={!!viewingImage} onOpenChange={(open) => !open && setViewingImage(null)}>
                 <DialogContent className="max-w-4xl p-0 bg-transparent border-none shadow-none flex justify-center items-center pointer-events-none">
                     <DialogTitle className="sr-only">Vista previa del comprobante</DialogTitle>
+                    <DialogDescription className="sr-only">Visor expandido del capture de pago</DialogDescription>
+                    
                     <div className="relative group max-h-[90vh] w-auto pointer-events-auto">
                         <div className="absolute top-4 right-4 z-50 opacity-0 group-hover:opacity-100 transition-opacity">
                             {viewingImage && (
@@ -1259,6 +1252,9 @@ function GlobalPaymentHistoryModal({ isOpen, onClose, onDeleteBatch, onViewImage
         return (
             <Dialog open={isOpen} onOpenChange={onClose}>
                 <DialogContent className="max-w-md bg-white dark:bg-[#1c1c1e] rounded-[3rem] border-0 p-10 flex flex-col items-center justify-center shadow-2xl outline-none">
+                    <DialogTitle className="sr-only">Cargando Historial</DialogTitle>
+                    <DialogDescription className="sr-only">Sincronizando registros globales de pago...</DialogDescription>
+                    
                     <Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4" />
                     <p className="text-sm font-black uppercase text-slate-500 tracking-widest text-center">Buscando historial global...</p>
                 </DialogContent>
