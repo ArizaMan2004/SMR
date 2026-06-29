@@ -223,8 +223,8 @@ export function AccountsPayableView({ bcvRate, initialData = [] }: Props) {
                                         <Badge className="bg-slate-900 dark:bg-white dark:text-slate-900 font-black text-[9px] uppercase px-3 rounded-lg">{r.categoria}</Badge>
                                     </TableCell>
                                     <TableCell className="text-right">
-                                        <div className="font-black text-2xl text-slate-900 dark:text-white leading-none">${r.monto.toFixed(2)}</div>
-                                        <div className="text-[11px] font-black text-amber-600 uppercase">Bs. {r.montoBs.toLocaleString()}</div>
+                                        <div className="font-black text-base sm:text-xl lg:text-2xl text-slate-900 dark:text-white leading-none break-all">${r.monto.toFixed(2)}</div>
+                                        <div className="text-[10px] font-black text-amber-600 uppercase break-all">Bs. {r.montoBs.toLocaleString()}</div>
                                     </TableCell>
                                     <TableCell className="px-10 text-right">
                                         {r.estado === 'PAGADO' ? (

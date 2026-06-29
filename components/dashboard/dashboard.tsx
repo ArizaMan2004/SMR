@@ -1265,7 +1265,7 @@ function StatCard({ label, value, icon, subtext, color, className, onClick }: an
                 </div>
                 <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase text-black/30 dark:text-white/30 truncate">{label}</p>
-                    <p className="text-3xl font-bold tracking-tighter truncate">{value}</p>
+                    <p className="text-lg sm:text-2xl lg:text-3xl font-bold tracking-tighter break-all leading-tight">{value}</p>
                     <p className="text-[9px] font-semibold text-black/40 dark:text-white/40 uppercase truncate">{subtext}</p>
                 </div>
             </CardContent>

@@ -112,7 +112,7 @@ export function EmployeeFinancesView({ empleados, pagos, tareas = [], currentUse
                 <Card className="md:col-span-2 rounded-[3rem] p-8 bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-none shadow-2xl relative overflow-hidden">
                     <div className="absolute -right-4 -top-4 opacity-10"><Clock size={120} /></div>
                     <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-2 relative z-10">Saldo Pendiente por Cobrar</p>
-                    <h3 className="text-6xl font-black tracking-tighter italic relative z-10">${totalPendienteUSD.toFixed(2)}</h3>
+                    <h3 className="text-3xl sm:text-5xl md:text-6xl font-black tracking-tighter italic relative z-10 break-all">${totalPendienteUSD.toFixed(2)}</h3>
                     {rates?.usd > 0 && (
                         <p className="text-sm font-bold mt-2 relative z-10 opacity-60">{formatBs(totalPendienteUSD, rates.usd)}</p>
                     )}
@@ -139,7 +139,7 @@ export function EmployeeFinancesView({ empleados, pagos, tareas = [], currentUse
                 <Card className="rounded-[3rem] p-8 bg-emerald-500 text-white border-none shadow-xl flex flex-col justify-center items-center text-center">
                     <CheckCircle2 size={40} className="mb-3 opacity-80" />
                     <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-1">Cobrado este mes</p>
-                    <h3 className="text-4xl font-black italic">${totalPagadoEsteMes.toFixed(2)}</h3>
+                    <h3 className="text-2xl sm:text-4xl font-black italic break-all">${totalPagadoEsteMes.toFixed(2)}</h3>
                     <p className="text-[9px] font-bold uppercase mt-4 opacity-70">Total de recibos liquidados</p>
                 </Card>
             </div>
@@ -263,7 +263,7 @@ export function EmployeeFinancesView({ empleados, pagos, tareas = [], currentUse
                                         </div>
                                     </div>
                                     <div className="text-left sm:text-right">
-                                        <p className="text-2xl font-black tracking-tighter text-slate-900 dark:text-white italic">+ ${Number(pago.totalUSD).toFixed(2)}</p>
+                                        <p className="text-lg sm:text-2xl font-black tracking-tighter text-slate-900 dark:text-white italic break-all">+ ${Number(pago.totalUSD).toFixed(2)}</p>
                                         {pago.totalVES > 0 && (
                                             <p className="text-[10px] font-bold text-slate-400 uppercase">Bs. {Number(pago.totalVES).toLocaleString('es-VE', { minimumFractionDigits: 2 })}</p>
                                         )}

@@ -515,7 +515,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                         <div className="absolute top-0 right-0 p-10 opacity-10"><TrendingUp size={100} /></div>
                         <h4 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-70 mb-4 sm:mb-6">Total Real (USD)</h4>
                         <div className="space-y-2 relative z-10">
-                            <p className="text-3xl sm:text-5xl font-black tracking-tighter">
+                            <p className="text-xl sm:text-3xl lg:text-5xl font-black tracking-tighter break-all">
                                 {formatCurrency(walletBalances.balances.cash_usd + walletBalances.balances.zelle + walletBalances.balances.usdt + (rates.usd > 0 ? walletBalances.balances.bank_bs / rates.usd : 0))}
                             </p>
                             <p className="text-[10px] font-bold opacity-50 uppercase">Sumando todas las cuentas</p>
@@ -704,7 +704,7 @@ function WalletCard({ config, balance, isActive, onClick, secondaryValue, rateAn
             </div>
             <div className="relative z-10">
                 <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.15em] sm:tracking-[0.2em] text-slate-400 mb-0.5 sm:mb-1 truncate">{config.label}</p>
-                <h3 className="text-lg sm:text-2xl md:text-3xl font-black tracking-tighter text-slate-900 leading-none">
+                <h3 className="text-base sm:text-xl md:text-2xl lg:text-3xl font-black tracking-tighter text-slate-900 leading-none break-all">
                     {config.currency === 'USD' ? '$' : config.currency === 'USDT' ? '₮' : 'Bs.'}
                     {balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </h3>

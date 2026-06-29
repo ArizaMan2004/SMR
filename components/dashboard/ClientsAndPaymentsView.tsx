@@ -748,7 +748,7 @@ export function ClientsAndPaymentsView({
                         </div>
 
                         <div className="relative z-10">
-                            <h3 className="text-3xl sm:text-5xl font-black tracking-tighter break-words">
+                            <h3 className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter break-all">
                                 {showTotalDeuda ? formatCurrency(totalPendienteGlobal) : "$***.**"}
                             </h3>
                             <p className="text-xs font-bold opacity-80 mt-2">
@@ -779,13 +779,13 @@ export function ClientsAndPaymentsView({
                         <div className="grid grid-cols-2 w-full gap-8">
                             <div className="border-r border-slate-200/50 dark:border-white/10 pr-8">
                                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2">Clientes en Mora</p>
-                                <p className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter">{clientSummaries.length}</p>
+                                <p className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tighter">{clientSummaries.length}</p>
                             </div>
                             <div>
                                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2">Estado Activo</p>
                                 <div className="flex items-center gap-2">
                                     <Sparkles className="w-5 h-5 text-blue-500" />
-                                    <p className="text-3xl font-black text-blue-600 tracking-tighter italic uppercase">Flujo OK</p>
+                                    <p className="text-xl sm:text-3xl font-black text-blue-600 tracking-tighter italic uppercase">Flujo OK</p>
                                 </div>
                             </div>
                         </div>
@@ -827,7 +827,7 @@ export function ClientsAndPaymentsView({
                                         <div className="flex flex-col md:flex-row items-center gap-4">
                                             <div className="text-center md:text-right mr-4">
                                                 <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-1">Saldo Total</p>
-                                                <p className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter">{formatCurrency(summary.totalPendienteUSD)}</p>
+                                                <p className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tighter break-all">{formatCurrency(summary.totalPendienteUSD)}</p>
                                             </div>
 
                                             <div className="flex gap-2">

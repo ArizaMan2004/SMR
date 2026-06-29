@@ -1492,7 +1492,7 @@ export function EstadisticasDashboard({
                 <div className="flex gap-3 sm:gap-4">
                     <div className="flex-1 p-3 sm:p-4 bg-slate-50 dark:bg-white/5 rounded-2xl sm:rounded-3xl border border-slate-100 dark:border-white/5">
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 sm:mb-2">&lt;30d</p>
-                        <p className="text-base sm:text-2xl font-black text-slate-700 dark:text-white">${analisisDeuda.deudaCorriente.toLocaleString()}</p>
+                        <p className="text-sm sm:text-xl font-black text-slate-700 dark:text-white break-all">${analisisDeuda.deudaCorriente.toLocaleString()}</p>
                         <div className="h-1.5 w-full bg-slate-200 mt-2 sm:mt-3 rounded-full overflow-hidden">
                             <motion.div initial={{width:0}} animate={{width: `${(analisisDeuda.deudaCorriente / (analisisDeuda.totalDeuda || 1)) * 100}%`}} className="h-full bg-blue-500 rounded-full" />
                         </div>
@@ -1502,7 +1502,7 @@ export function EstadisticasDashboard({
                             <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest">&gt;30d</p>
                             <ShieldAlert className="w-3 h-3 text-rose-500" />
                         </div>
-                        <p className="text-base sm:text-2xl font-black text-rose-600">${analisisDeuda.deudaCritica.toLocaleString()}</p>
+                        <p className="text-sm sm:text-xl font-black text-rose-600 break-all">${analisisDeuda.deudaCritica.toLocaleString()}</p>
                         <div className="h-1.5 w-full bg-rose-200 mt-2 sm:mt-3 rounded-full overflow-hidden">
                             <motion.div initial={{width:0}} animate={{width: `${(analisisDeuda.deudaCritica / (analisisDeuda.totalDeuda || 1)) * 100}%`}} className="h-full bg-rose-500 rounded-full" />
                         </div>
@@ -2153,7 +2153,7 @@ function StatCard({ label, value, trend, icon, color, sub, highlight, onClick }:
             </div>
             <div>
                 <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 sm:mb-1 truncate">{label}</p>
-                <p className="text-lg sm:text-3xl font-black tracking-tighter text-slate-900 dark:text-white">
+                <p className="text-base sm:text-2xl lg:text-3xl font-black tracking-tighter text-slate-900 dark:text-white break-all">
                     ${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                 </p>
                 <p className="text-[9px] font-bold text-slate-400 mt-1 sm:mt-2 uppercase tracking-wide opacity-60 truncate hidden sm:block">{sub}</p>
