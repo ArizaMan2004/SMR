@@ -223,23 +223,23 @@ export function GastosFijosView({ gastos, rates, onNotification }: ViewProps) {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8 pb-20 px-4">
-      
+    <div className="max-w-7xl mx-auto space-y-5 sm:space-y-8 pb-20 px-2 sm:px-4">
+
       {/* ALERTA VISUAL SI HAY DEUDAS URGENTES */}
       <AnimatePresence>
         {stats.urgentes.length > 0 && (
-            <motion.div 
-                initial={{ opacity: 0, y: -20 }} 
-                animate={{ opacity: 1, y: 0 }} 
-                className="bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-900/30 p-4 rounded-[2rem] flex items-center gap-4 shadow-sm"
+            <motion.div
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-900/30 p-3 sm:p-4 rounded-[1.5rem] sm:rounded-[2rem] flex items-center gap-3 sm:gap-4 shadow-sm"
             >
-                <div className="bg-rose-100 dark:bg-rose-900/30 p-2.5 rounded-full text-rose-600 animate-pulse">
-                    <BellRing size={20} />
+                <div className="bg-rose-100 dark:bg-rose-900/30 p-2 sm:p-2.5 rounded-full text-rose-600 animate-pulse shrink-0">
+                    <BellRing size={18} />
                 </div>
                 <div>
-                    <h4 className="text-sm font-black text-rose-700 dark:text-rose-400 uppercase tracking-wide">Atención Requerida</h4>
+                    <h4 className="text-xs sm:text-sm font-black text-rose-700 dark:text-rose-400 uppercase tracking-wide">Atención Requerida</h4>
                     <p className="text-xs font-bold text-slate-600 dark:text-slate-400">
-                        Tienes {stats.urgentes.length} servicio(s) que vencen pronto o están vencidos.
+                        {stats.urgentes.length} servicio(s) vencen pronto o ya vencieron.
                     </p>
                 </div>
             </motion.div>
@@ -247,29 +247,29 @@ export function GastosFijosView({ gastos, rates, onNotification }: ViewProps) {
       </AnimatePresence>
 
       {/* KPI CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="p-8 rounded-[3rem] bg-slate-900 text-white border-none shadow-2xl relative overflow-hidden group">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-6">
+        <Card className="col-span-2 sm:col-span-1 p-5 sm:p-8 rounded-[2rem] sm:rounded-[3rem] bg-slate-900 text-white border-none shadow-2xl relative overflow-hidden group">
             <div className="relative z-10">
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-1">Presupuesto Mensual Compartido</p>
-                <h2 className="text-5xl font-black tracking-tighter italic">${stats.totalPresupuesto.toFixed(2)}</h2>
-                <Button 
+                <p className="text-slate-400 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] mb-1">Presupuesto Mensual</p>
+                <h2 className="text-3xl sm:text-5xl font-black tracking-tighter italic">${stats.totalPresupuesto.toFixed(2)}</h2>
+                <Button
                     onClick={() => { setEditingGasto(null); setShowForm(true); }}
-                    className="mt-6 w-full rounded-2xl h-12 bg-blue-600 hover:bg-blue-700 font-black text-[11px] uppercase tracking-widest transition-all gap-2"
+                    className="mt-4 sm:mt-6 w-full rounded-xl sm:rounded-2xl h-10 sm:h-12 bg-blue-600 hover:bg-blue-700 font-black text-[10px] sm:text-[11px] uppercase tracking-widest transition-all gap-2"
                 >
-                    <Plus className="w-4 h-4" /> Nuevo Servicio Global
+                    <Plus className="w-3 h-3 sm:w-4 sm:h-4" /> Nuevo Servicio
                 </Button>
             </div>
-            <TrendingDown className="absolute -bottom-10 -right-10 w-48 h-48 opacity-10 -rotate-12 group-hover:rotate-0 transition-transform duration-700" />
+            <TrendingDown className="absolute -bottom-10 -right-10 w-36 sm:w-48 h-36 sm:h-48 opacity-10 -rotate-12 group-hover:rotate-0 transition-transform duration-700" />
         </Card>
 
-        <Card className="p-8 rounded-[3rem] bg-white dark:bg-[#1c1c1e] border-black/5 shadow-xl flex flex-col justify-center">
-            <p className="text-[10px] font-black uppercase tracking-widest text-orange-500 mb-1">Cuentas Pendientes</p>
-            <h2 className="text-4xl font-black text-slate-900 dark:text-white tracking-tighter">${stats.montoPendienteUSD.toFixed(2)}</h2>
+        <Card className="p-4 sm:p-8 rounded-[1.75rem] sm:rounded-[3rem] bg-white dark:bg-[#1c1c1e] border-black/5 shadow-xl flex flex-col justify-center">
+            <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-orange-500 mb-1">Pendientes</p>
+            <h2 className="text-2xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tighter">${stats.montoPendienteUSD.toFixed(2)}</h2>
         </Card>
 
-        <Card className="p-8 rounded-[3rem] bg-white dark:bg-[#1c1c1e] border-black/5 shadow-xl flex flex-col justify-center">
-            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500 mb-1">Total Pagado (Mes)</p>
-            <h2 className="text-4xl font-black text-slate-900 dark:text-white tracking-tighter">${stats.montoPagadoUSD.toFixed(2)}</h2>
+        <Card className="p-4 sm:p-8 rounded-[1.75rem] sm:rounded-[3rem] bg-white dark:bg-[#1c1c1e] border-black/5 shadow-xl flex flex-col justify-center">
+            <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-emerald-500 mb-1">Pagado (Mes)</p>
+            <h2 className="text-2xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tighter">${stats.montoPagadoUSD.toFixed(2)}</h2>
         </Card>
       </div>
 
@@ -317,36 +317,36 @@ export function GastosFijosView({ gastos, rates, onNotification }: ViewProps) {
 
       {/* --- MODAL DE PAGO (MEJORADO) --- */}
       <Dialog open={!!paymentTarget} onOpenChange={(open) => !open && setPaymentTarget(null)}>
-        <DialogContent className="max-w-md p-0 border-none bg-transparent shadow-none">
+        <DialogContent className="w-[95vw] max-w-md p-0 border-none bg-transparent shadow-none">
           <DialogTitle className="sr-only">Procesar Pago</DialogTitle>
-          <div className="bg-white dark:bg-[#1c1c1e] w-full rounded-[3rem] p-10 shadow-2xl border border-black/5">
-              <div className="flex items-center justify-between mb-8">
-                  <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 bg-blue-600 rounded-[1.5rem] flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-                          <Wallet size={28} />
+          <div className="bg-white dark:bg-[#1c1c1e] w-full rounded-[2rem] sm:rounded-[3rem] p-5 sm:p-10 shadow-2xl border border-black/5">
+              <div className="flex items-center justify-between mb-5 sm:mb-8">
+                  <div className="flex items-center gap-3 sm:gap-4">
+                      <div className="w-11 h-11 sm:w-14 sm:h-14 bg-blue-600 rounded-[1rem] sm:rounded-[1.5rem] flex items-center justify-center text-white shadow-lg shadow-blue-500/20 shrink-0">
+                          <Wallet size={22} />
                       </div>
                       <div>
-                        <h4 className="text-xl font-black italic uppercase text-slate-900 dark:text-white leading-none">Liquidar Servicio</h4>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">{paymentTarget?.nombre}</p>
+                        <h4 className="text-base sm:text-xl font-black italic uppercase text-slate-900 dark:text-white leading-none">Liquidar Servicio</h4>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase mt-1 truncate max-w-[150px] sm:max-w-none">{paymentTarget?.nombre}</p>
                       </div>
                   </div>
-                  <button onClick={() => setPaymentTarget(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X className="text-slate-400 w-6 h-6" /></button>
+                  <button onClick={() => setPaymentTarget(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors shrink-0"><X className="text-slate-400 w-5 h-5 sm:w-6 sm:h-6" /></button>
               </div>
-              
-              <div className="space-y-6">
+
+              <div className="space-y-4 sm:space-y-6">
                   {/* INPUT MONTO BS */}
                   <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase text-slate-500 ml-2">Total Pagado en Bolívares</label>
                       <div className="relative">
-                          <input 
-                              autoFocus 
-                              type="number" 
-                              value={montoBsInput} 
+                          <input
+                              autoFocus
+                              type="number"
+                              value={montoBsInput}
                               onChange={(e) => setMontoBsInput(e.target.value)}
-                              className="w-full px-7 py-6 bg-slate-50 dark:bg-white/5 rounded-[2rem] outline-none font-black text-4xl text-blue-600 placeholder:opacity-20"
+                              className="w-full px-5 sm:px-7 py-4 sm:py-6 bg-slate-50 dark:bg-white/5 rounded-[1.5rem] sm:rounded-[2rem] outline-none font-black text-2xl sm:text-4xl text-blue-600 placeholder:opacity-20"
                               placeholder="0,00"
                           />
-                          <span className="absolute right-8 top-1/2 -translate-y-1/2 font-black text-slate-300 italic text-xl">Bs.</span>
+                          <span className="absolute right-5 sm:right-8 top-1/2 -translate-y-1/2 font-black text-slate-300 italic text-base sm:text-xl">Bs.</span>
                       </div>
                   </div>
 
@@ -354,7 +354,7 @@ export function GastosFijosView({ gastos, rates, onNotification }: ViewProps) {
                   <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase text-slate-500 ml-2">Cuenta de Salida</label>
                       <Select value={selectedMethod} onValueChange={setSelectedMethod}>
-                        <SelectTrigger className="w-full h-14 bg-slate-50 dark:bg-white/5 rounded-[1.5rem] border-none font-bold text-xs pl-6">
+                        <SelectTrigger className="w-full h-12 sm:h-14 bg-slate-50 dark:bg-white/5 rounded-[1.25rem] sm:rounded-[1.5rem] border-none font-bold text-xs pl-5 sm:pl-6">
                             <div className="flex items-center gap-3">
                                 <CreditCard className="w-4 h-4 text-slate-400"/>
                                 <SelectValue />
@@ -369,17 +369,17 @@ export function GastosFijosView({ gastos, rates, onNotification }: ViewProps) {
                   </div>
 
                   {/* INFO CONVERSIÓN */}
-                  <div className="bg-slate-50 dark:bg-white/5 p-6 rounded-[2rem] border border-dashed border-black/10">
+                  <div className="bg-slate-50 dark:bg-white/5 p-4 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border border-dashed border-black/10">
                       <div className="flex justify-between items-center">
                           <span className="text-slate-400 uppercase tracking-widest text-[9px]">Equivalente USD</span>
-                          <span className="font-black text-slate-900 dark:text-white text-lg">${usdEquivalent}</span>
+                          <span className="font-black text-slate-900 dark:text-white text-base sm:text-lg">${usdEquivalent}</span>
                       </div>
                   </div>
 
-                  <Button 
+                  <Button
                       disabled={!montoBsInput || isLoading || tasaUSD <= 0}
                       onClick={processFinalPay}
-                      className="w-full h-16 rounded-[2rem] bg-blue-600 hover:bg-blue-700 font-black uppercase text-[11px] tracking-widest shadow-xl active:scale-95 transition-all text-white"
+                      className="w-full h-12 sm:h-16 rounded-[1.5rem] sm:rounded-[2rem] bg-blue-600 hover:bg-blue-700 font-black uppercase text-[11px] tracking-widest shadow-xl active:scale-95 transition-all text-white"
                   >
                       {isLoading ? <Loader2 className="animate-spin" /> : "Confirmar Pago Global"}
                   </Button>

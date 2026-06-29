@@ -87,8 +87,8 @@ export function PaymentHistoryView({
                 </div>
             </div>
 
-            {/* TABLA DE PAGOS */}
-            <div className="rounded-md border bg-white dark:bg-black/20 overflow-hidden">
+            {/* TABLA DE PAGOS (escritorio) */}
+            <div className="hidden md:block rounded-md border bg-white dark:bg-black/20 overflow-hidden">
                 <Table>
                     <TableHeader className="bg-gray-50 dark:bg-gray-800">
                         <TableRow>
@@ -195,6 +195,73 @@ export function PaymentHistoryView({
                         )}
                     </TableBody>
                 </Table>
+            </div>
+
+            {/* LISTA DE PAGOS (móvil) */}
+            <div className="md:hidden space-y-2.5">
+                {sortedHistorial.length === 0 ? (
+                    <div className="text-center py-10 text-muted-foreground text-xs italic border rounded-md bg-white dark:bg-black/20">
+                        No hay movimientos registrados.
+                    </div>
+                ) : (
+                    sortedHistorial.map((pago, idx) => {
+                        const rawDate = pago.fechaRegistro || pago.fecha || pago.timestamp;
+                        const dateObj = rawDate?.toDate ? rawDate.toDate() : (rawDate ? new Date(rawDate) : null);
+                        const dateIsValid = dateObj && isValid(dateObj);
+                        const style = getMethodStyles(pago.metodo);
+                        const Icon = style.icon;
+                        const isDiscount = pago.metodo === 'DESCUENTO';
+
+                        return (
+                            <div
+                                key={idx}
+                                className={cn(
+                                    "rounded-2xl border bg-white dark:bg-black/20 p-3.5",
+                                    isDiscount && "bg-amber-50/40 dark:bg-amber-900/10 border-amber-200/60"
+                                )}
+                            >
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                        <div className={cn("p-2 rounded-xl flex-shrink-0", style.color)}>
+                                            <Icon className="w-4 h-4" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-xs font-bold uppercase text-gray-700 dark:text-gray-200 leading-none truncate">{style.label}</p>
+                                            <p className="text-[10px] text-muted-foreground mt-1">
+                                                {dateIsValid ? format(dateObj, "dd MMM yy · hh:mm a", { locale: es }) : "Fecha inválida"}
+                                                {pago.tasaBCV && pago.tasaBCV > 0 ? ` · Tasa ${pago.tasaBCV.toFixed(2)}` : ""}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <span className={cn(
+                                        "font-black text-sm flex-shrink-0",
+                                        isDiscount ? "text-amber-600 dark:text-amber-500" : "text-emerald-600 dark:text-emerald-400"
+                                    )}>
+                                        {isDiscount && "- "}{formatCurrency(pago.montoUSD)}
+                                    </span>
+                                </div>
+
+                                {(pago.nota || pago.imagenUrl) && (
+                                    <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-black/5 dark:border-white/5">
+                                        <p className="text-[11px] text-gray-500 dark:text-gray-400 italic truncate" title={pago.nota || ""}>
+                                            {pago.nota || "Sin nota"}
+                                        </p>
+                                        {pago.imagenUrl && (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-7 px-2.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-full text-[10px] font-bold flex-shrink-0"
+                                                onClick={() => setPreviewImage(pago.imagenUrl || null)}
+                                            >
+                                                <Eye className="w-3.5 h-3.5 mr-1" /> Ver
+                                            </Button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })
+                )}
             </div>
 
             {/* MODAL DE PREVISUALIZACIÓN */}

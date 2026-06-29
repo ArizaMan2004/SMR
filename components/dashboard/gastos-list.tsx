@@ -114,7 +114,7 @@ export function GastosList({ gastos, onDelete, onEdit, onQuickCategory }: Gastos
                     </div>
 
                     <div className="flex-1 min-w-0">
-                        <h4 className="font-black text-sm uppercase tracking-tight text-slate-900 dark:text-white truncate max-w-[180px] sm:max-w-[250px]">
+                        <h4 className="font-black text-sm uppercase tracking-tight text-slate-900 dark:text-white truncate max-w-[150px] sm:max-w-[250px]">
                             {gasto.nombre}
                         </h4>
                         <div className="flex flex-wrap items-center gap-2 mt-0.5">

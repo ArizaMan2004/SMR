@@ -676,7 +676,7 @@ function AuditTable({ data, color, onUpdate, onUpdateDate, updatingId, isEditMod
     return (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             <Card className="lg:col-span-3 p-6 rounded-[2.5rem] border-none bg-white dark:bg-[#1c1c1e] shadow-xl overflow-hidden">
-                <div className="overflow-y-auto max-h-[500px] custom-scrollbar">
+                <div className="overflow-auto max-h-[500px] custom-scrollbar">
                     <table className="w-full text-left border-collapse">
                         <thead className="sticky top-0 bg-white dark:bg-[#1c1c1e] z-10 border-b border-black/5 dark:border-white/5">
                             <tr>

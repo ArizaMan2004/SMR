@@ -13,7 +13,7 @@ export interface UserData {
   nombre: string
   apellido: string
   // ✨ NUEVO ROL: PRODUCCION EN LUGAR DE INSTALADOR
-  rol: 'ADMIN' | 'VENDEDOR' | 'DISENADOR' | 'IMPRESOR' | 'OPERADOR_LASER' | 'PRODUCCION' | 'EMPLEADO'
+  rol: 'ADMIN' | 'VENDEDOR' | 'CAJERO' | 'DISENADOR' | 'IMPRESOR' | 'OPERADOR_LASER' | 'PRODUCCION' | 'EMPLEADO'
   isActive: boolean
   registroCodigo?: string
 }
@@ -49,7 +49,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 setUser(null);
                 setUserData(null);
               } else {
-                setUserData(data);
+                // userDocSnap.id == Firebase Auth uid (path: usuarios/{uid})
+                // Siempre inyectamos el uid para que userData.uid nunca sea undefined
+                setUserData({ ...data, uid: userDocSnap.id });
               }
             } else {
               setUserData(null);

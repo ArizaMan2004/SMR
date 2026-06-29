@@ -452,3 +452,102 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
 
     pdfMake.createPdf(docDefinition).open();
 }
+
+// 4. NOTA DE ENTREGA — VENTAS DE CATÁLOGO
+export async function generateCatalogSalePDF(venta: any, SMRLogoBase64: string, options: PDFOptions = {}) {
+    const pdfMake = await loadPdfDependencies();
+    if (!pdfMake) return;
+
+    const { firmaBase64, selloBase64, currency = { rate: options.bcvRate || 1, label: "Tasa BCV", symbol: "Bs." } } = options;
+
+    const tableBody: any[] = [
+        [
+            { text: "Cant.", style: "tableHeader" },
+            { text: "Descripción", style: "tableHeader" },
+            { text: "Medida / Detalle", style: "tableHeader", alignment: "center" },
+            { text: "P. Unit.", style: "tableHeader", alignment: "right" },
+            { text: "Subtotal", style: "tableHeader", alignment: "right" },
+        ]
+    ];
+
+    (venta.items || []).forEach((item: any) => {
+        const esPublicista = item.tipoCliente === 'publicista';
+        const monedaSimbolo = esPublicista ? '€' : '$';
+        const precioDisplay = item.precioBase || 0;
+
+        let medida = '—';
+        let descripcion = item.productoNombre || '';
+        if (item.varianteNombre) descripcion += `\n${item.varianteNombre}`;
+        if (esPublicista) descripcion += '\n[Precio Publicista]';
+
+        if (item.tipoVenta === 'metro_cuadrado' && item.cmAlto && item.cmAncho) {
+            medida = `${item.cmAlto}×${item.cmAncho}cm\n(${(item.m2Total || 0).toFixed(3)} m²)`;
+        } else {
+            medida = `${item.cantidad} ${item.unidadLabel || 'und'}`;
+        }
+
+        tableBody.push([
+            { text: String(item.cantidad), style: "itemText" },
+            { text: descripcion, style: "itemText" },
+            { text: medida, style: "itemText", alignment: "center" },
+            { text: `${monedaSimbolo}${precioDisplay.toFixed(2)}`, style: "itemText", alignment: "right" },
+            { text: `$${item.subtotalUSD.toFixed(2)}`, style: "itemTotal", alignment: "right" },
+        ]);
+    });
+
+    const totalUSD = venta.totalUSD || 0;
+    tableBody.push([
+        { text: "TOTAL USD", colSpan: 4, style: "finalTotalLabelBig", alignment: "right" }, {}, {}, {},
+        { text: `$${totalUSD.toFixed(2)}`, style: "finalTotalValueBig", alignment: "right" }
+    ]);
+
+    if (venta.moneda && venta.moneda !== 'USD' && venta.totalLocal) {
+        const simbolo = venta.moneda === 'EUR' ? '€' : venta.moneda === 'BS' ? 'Bs.' : 'USDT ';
+        tableBody.push([
+            { text: `TOTAL ${venta.moneda}`, colSpan: 4, style: "finalTotalLabelBig", alignment: "right" }, {}, {}, {},
+            { text: `${simbolo}${venta.totalLocal.toFixed(2)}`, style: "finalTotalValueBig", alignment: "right" }
+        ]);
+    }
+
+    const ventaDate = venta.fecha?.toDate ? venta.fecha.toDate() : new Date(venta.fecha || Date.now());
+    const dateStr = ventaDate.toLocaleDateString('es-VE', { day: '2-digit', month: 'long', year: 'numeric' });
+
+    const clienteLines: any[] = [
+        { text: `Cliente: ${venta.clienteNombre || 'Consumidor Final'}`, style: "clientInfo", margin: [0, 5, 0, 0] }
+    ];
+    if (venta.clienteRif) clienteLines.push({ text: `RIF/CI: ${venta.clienteRif}`, style: "contactInfo" });
+    if (venta.clienteTelefono) clienteLines.push({ text: `Tel.: ${venta.clienteTelefono}`, style: "contactInfo" });
+    if (venta.metodoPago) clienteLines.push({ text: `Método de Pago: ${venta.metodoPago}`, style: "contactInfo" });
+    if (venta.notas) clienteLines.push({ text: `Notas: ${venta.notas}`, style: "contactInfo", italics: true });
+
+    const docDefinition: any = {
+        pageSize: getDynamicPageSize(venta.items || []),
+        pageMargins: [40, 40, 40, 40],
+        content: [
+            { text: `Coro, ${dateStr}`, alignment: "right", style: "dateInfo" },
+            { image: SMRLogoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
+            { text: "NOTA DE ENTREGA", style: "title", alignment: "center", margin: [0, 10, 0, 5] },
+            ...clienteLines,
+            {
+                table: { widths: [35, "*", 90, 55, 60], body: tableBody },
+                layout: customTableLayout,
+                margin: [0, 10, 0, 15]
+            },
+            currency.rate > 1
+                ? {
+                    columns: [
+                        { width: "50%", text: `${currency.label}: ${currency.rate.toFixed(2)}`, style: "bcvRate" },
+                        { width: "50%", text: `Total en ${currency.symbol}: ${formatBsCurrency(totalUSD, currency.rate)}`, alignment: "right", style: "totalVesRef" }
+                    ],
+                    margin: [0, 0, 0, 15]
+                }
+                : { text: " ", margin: [0, 0, 0, 10] },
+            { stack: [{ text: "NOTA:", bold: true, fontSize: 10 }, { ul: NOTAS_LEGALES, fontSize: 9 }] },
+            getUnifiedFooterBlock(firmaBase64, selloBase64, currency.rate)
+        ],
+        styles: COMMON_STYLES,
+        defaultStyle: { font: "Roboto" }
+    };
+
+    pdfMake.createPdf(docDefinition).open();
+}

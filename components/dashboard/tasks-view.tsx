@@ -168,47 +168,47 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
     const completedOrders = ordenesServicio.filter(o => o.estado === "COMPLETADO");
 
     return (
-        <div className="max-w-7xl mx-auto space-y-6 md:space-y-8 pb-24">
-            
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-[#1c1c1e] p-6 rounded-[2rem] border border-black/5 shadow-sm">
+        <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6 md:space-y-8 pb-24">
+
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 bg-white dark:bg-[#1c1c1e] p-4 sm:p-6 rounded-[1.75rem] sm:rounded-[2rem] border border-black/5 shadow-sm">
                 <div>
-                    <h2 className="text-3xl font-black italic uppercase tracking-tighter flex items-center gap-3">
-                        <ClipboardList className="w-8 h-8 text-blue-600" /> Taller de Producción
+                    <h2 className="text-2xl sm:text-3xl font-black italic uppercase tracking-tighter flex items-center gap-2 sm:gap-3">
+                        <ClipboardList className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600 shrink-0" /> Taller de Producción
                     </h2>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">
+                    <p className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">
                         Control Digital de Órdenes de Trabajo SMR
                     </p>
                 </div>
-                
+
                 {/* SOLO EL ADMIN PUEDE CREAR ÓRDENES DE TRABAJO FÍSICAS */}
                 {isAdmin && (
-                    <Button 
+                    <Button
                         onClick={() => { setFormData(emptyOrder); setIsReadOnly(false); setIsModalOpen(true); }}
-                        className="bg-blue-600 hover:bg-blue-700 text-white h-14 px-8 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-blue-500/20 w-full md:w-auto"
+                        className="bg-blue-600 hover:bg-blue-700 text-white h-12 sm:h-14 px-6 sm:px-8 rounded-xl sm:rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-blue-500/20 w-full sm:w-auto"
                     >
-                        <Plus className="w-5 h-5 mr-2" /> Crear Orden de Trabajo
+                        <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" /> Crear Orden de Trabajo
                     </Button>
                 )}
             </div>
 
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-                <TabsList className="bg-slate-100 dark:bg-white/5 p-1.5 rounded-2xl flex flex-wrap h-auto w-full md:w-fit gap-2">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 sm:space-y-6">
+                <TabsList className="bg-slate-100 dark:bg-white/5 p-1 sm:p-1.5 rounded-xl sm:rounded-2xl flex flex-wrap h-auto w-full gap-1 sm:gap-2">
                     {visibleAreas.map(area => {
                         const count = ordenesServicio.filter(o => o.estado === "PENDIENTE" && o.areaActual === area.id).length;
                         return (
-                            <TabsTrigger 
-                                key={area.id} 
-                                value={area.id} 
-                                className="rounded-xl px-6 py-3 font-black uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm flex items-center gap-2"
+                            <TabsTrigger
+                                key={area.id}
+                                value={area.id}
+                                className="rounded-lg sm:rounded-xl px-3 sm:px-6 py-2 sm:py-3 font-black uppercase text-[9px] sm:text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm flex items-center gap-1.5 sm:gap-2"
                             >
-                                <area.icon className="w-4 h-4" /> {area.label}
-                                {count > 0 && <Badge className="ml-1 bg-red-500 text-white border-0 px-1.5 py-0 text-[9px]">{count}</Badge>}
+                                <area.icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> {area.label}
+                                {count > 0 && <Badge className="ml-0.5 bg-red-500 text-white border-0 px-1.5 py-0 text-[9px]">{count}</Badge>}
                             </TabsTrigger>
                         )
                     })}
                     {(isAdmin || userData?.rol === 'VENDEDOR') && (
-                        <TabsTrigger value="COMPLETADOS" className="rounded-xl px-6 py-3 font-black uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-emerald-600 data-[state=active]:shadow-sm">
-                            <CheckCircle2 className="w-4 h-4 mr-2 inline-block"/> Finalizados
+                        <TabsTrigger value="COMPLETADOS" className="rounded-lg sm:rounded-xl px-3 sm:px-6 py-2 sm:py-3 font-black uppercase text-[9px] sm:text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-emerald-600 data-[state=active]:shadow-sm flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Finalizados
                         </TabsTrigger>
                     )}
                 </TabsList>
@@ -261,81 +261,86 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
             </Tabs>
 
             <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-                <DialogContent className="w-[95vw] sm:max-w-4xl md:max-w-5xl lg:max-w-6xl max-h-[90vh] overflow-y-auto custom-scrollbar bg-white dark:bg-[#1c1c1e] rounded-[2rem] border-0 shadow-2xl p-0">
-                    
+                <DialogContent className="w-[95vw] sm:max-w-4xl md:max-w-5xl lg:max-w-6xl max-h-[90vh] overflow-y-auto custom-scrollbar bg-white dark:bg-[#1c1c1e] rounded-[1.5rem] sm:rounded-[2rem] border-0 shadow-2xl p-0">
+
                     <DialogTitle className="sr-only">Formulario de Orden de Trabajo</DialogTitle>
 
-                    <div className="bg-slate-900 text-white p-6 md:p-8 flex flex-col md:flex-row justify-between items-center gap-6 sticky top-0 z-20">
-                        <div className="flex items-center gap-4">
-                            <div className="bg-white/20 p-3 rounded-2xl backdrop-blur-sm"><ClipboardList className="w-8 h-8" /></div>
+                    {/* CABECERA DEL MODAL */}
+                    <div className="bg-slate-900 text-white p-4 sm:p-6 md:p-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sticky top-0 z-20">
+                        <div className="flex items-center gap-3 sm:gap-4">
+                            <div className="bg-white/20 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl backdrop-blur-sm shrink-0">
+                                <ClipboardList className="w-6 h-6 sm:w-8 sm:h-8" />
+                            </div>
                             <div>
-                                <h2 className="text-2xl font-black italic uppercase tracking-tighter">SMR Laser Print</h2>
+                                <h2 className="text-xl sm:text-2xl font-black italic uppercase tracking-tighter">SMR Laser Print</h2>
                                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60">
                                     {isReadOnly ? "Orden de Trabajo (Solo Lectura)" : "Orden de Trabajo Oficial"}
                                 </p>
                             </div>
                         </div>
-                        
-                        <div className="w-full md:w-64 space-y-2">
+
+                        <div className="w-full sm:w-56 md:w-64 space-y-1.5">
                             <Label className="text-[10px] font-black uppercase text-white/60 ml-1">Enviar a Área Inicial:</Label>
-                            <select 
+                            <select
                                 value={formData.areaActual}
                                 onChange={(e) => setFormData({...formData, areaActual: e.target.value})}
                                 disabled={isReadOnly}
-                                className={cn("w-full h-12 bg-white/10 border-none rounded-xl text-white font-bold px-4 outline-none cursor-pointer", isReadOnly && "opacity-70 pointer-events-none")}
+                                className={cn("w-full h-11 sm:h-12 bg-white/10 border-none rounded-xl text-white font-bold px-4 outline-none cursor-pointer text-sm", isReadOnly && "opacity-70 pointer-events-none")}
                             >
                                 {AREAS_TALLER.map(a => <option key={a.id} value={a.id} className="text-black">{a.label}</option>)}
                             </select>
                         </div>
                     </div>
 
-                    <div className="p-6 md:p-8 space-y-8">
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
+                    {/* CUERPO DEL FORMULARIO */}
+                    <div className="p-4 sm:p-6 md:p-8 space-y-5 sm:space-y-8">
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                            <div className="space-y-1.5">
                                 <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Cliente</Label>
                                 <div className="relative">
                                     <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                                    <Input readOnly={isReadOnly} value={formData.cliente} onChange={e=>setFormData({...formData, cliente: e.target.value})} className={cn("pl-10 h-12 rounded-xl bg-slate-50 dark:bg-black/20 border-none font-bold", isReadOnly && "pointer-events-none opacity-80")} placeholder="Nombre del cliente" />
+                                    <Input readOnly={isReadOnly} value={formData.cliente} onChange={e=>setFormData({...formData, cliente: e.target.value})} className={cn("pl-10 h-11 sm:h-12 rounded-xl bg-slate-50 dark:bg-black/20 border-none font-bold", isReadOnly && "pointer-events-none opacity-80")} placeholder="Nombre del cliente" />
                                 </div>
                             </div>
-                            <div className="space-y-2">
+                            <div className="space-y-1.5">
                                 <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Teléfono</Label>
                                 <div className="relative">
                                     <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                                    <Input readOnly={isReadOnly} value={formData.telefono} onChange={e=>setFormData({...formData, telefono: e.target.value})} className={cn("pl-10 h-12 rounded-xl bg-slate-50 dark:bg-black/20 border-none font-bold", isReadOnly && "pointer-events-none opacity-80")} placeholder="Número de contacto" />
+                                    <Input readOnly={isReadOnly} value={formData.telefono} onChange={e=>setFormData({...formData, telefono: e.target.value})} className={cn("pl-10 h-11 sm:h-12 rounded-xl bg-slate-50 dark:bg-black/20 border-none font-bold", isReadOnly && "pointer-events-none opacity-80")} placeholder="Número de contacto" />
                                 </div>
                             </div>
-                            <div className="space-y-2">
-                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Fechas (Inicio - Entrega)</Label>
-                                <div className="flex items-center gap-2">
-                                    <Input type="date" disabled={isReadOnly} value={formData.fechaInicio} onChange={e=>setFormData({...formData, fechaInicio: e.target.value})} className={cn("h-12 rounded-xl bg-slate-50 dark:bg-black/20 border-none font-bold text-xs", isReadOnly && "pointer-events-none opacity-80")} />
-                                    <span className="text-slate-300">-</span>
-                                    <Input type="date" disabled={isReadOnly} value={formData.fechaEntrega} onChange={e=>setFormData({...formData, fechaEntrega: e.target.value})} className={cn("h-12 rounded-xl bg-slate-50 dark:bg-black/20 border-none font-bold text-xs", isReadOnly && "pointer-events-none opacity-80")} />
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Inicio — Entrega</Label>
+                                <div className="flex flex-col xs:flex-row items-start xs:items-center gap-2">
+                                    <Input type="date" disabled={isReadOnly} value={formData.fechaInicio} onChange={e=>setFormData({...formData, fechaInicio: e.target.value})} className={cn("h-11 sm:h-12 rounded-xl bg-slate-50 dark:bg-black/20 border-none font-bold text-xs flex-1 min-w-0", isReadOnly && "pointer-events-none opacity-80")} />
+                                    <span className="text-slate-300 hidden xs:block shrink-0">—</span>
+                                    <Input type="date" disabled={isReadOnly} value={formData.fechaEntrega} onChange={e=>setFormData({...formData, fechaEntrega: e.target.value})} className={cn("h-11 sm:h-12 rounded-xl bg-slate-50 dark:bg-black/20 border-none font-bold text-xs flex-1 min-w-0", isReadOnly && "pointer-events-none opacity-80")} />
                                 </div>
                             </div>
-                            <div className="space-y-2">
+                            <div className="space-y-1.5">
                                 <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Responsable / Vendedor</Label>
-                                <Input readOnly={isReadOnly} value={formData.responsable} onChange={e=>setFormData({...formData, responsable: e.target.value})} className={cn("h-12 rounded-xl bg-slate-50 dark:bg-black/20 border-none font-bold", isReadOnly && "pointer-events-none opacity-80")} placeholder="Quién recibe la orden" />
+                                <Input readOnly={isReadOnly} value={formData.responsable} onChange={e=>setFormData({...formData, responsable: e.target.value})} className={cn("h-11 sm:h-12 rounded-xl bg-slate-50 dark:bg-black/20 border-none font-bold", isReadOnly && "pointer-events-none opacity-80")} placeholder="Quién recibe la orden" />
                             </div>
                         </div>
 
                         <div className="space-y-2">
-                            <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-blue-100 dark:bg-blue-900/30 text-blue-600 px-3 py-1 rounded-md">Descripción del Trabajo</Label>
-                            <Textarea 
+                            <Label className="text-[10px] font-black uppercase tracking-widest bg-blue-100 dark:bg-blue-900/30 text-blue-600 px-3 py-1 rounded-md inline-block">Descripción del Trabajo</Label>
+                            <Textarea
                                 readOnly={isReadOnly}
-                                value={formData.descripcion} 
-                                onChange={e=>setFormData({...formData, descripcion: e.target.value})} 
-                                className={cn("min-h-[120px] rounded-2xl bg-slate-50 dark:bg-black/20 border-none font-medium p-4 text-base resize-none", isReadOnly && "pointer-events-none opacity-80")} 
-                                placeholder="Ej: 1. Sticker 500 de Doctora Store redondo 4cm..." 
+                                value={formData.descripcion}
+                                onChange={e=>setFormData({...formData, descripcion: e.target.value})}
+                                className={cn("min-h-[100px] sm:min-h-[120px] rounded-xl sm:rounded-2xl bg-slate-50 dark:bg-black/20 border-none font-medium p-3 sm:p-4 text-sm sm:text-base resize-none", isReadOnly && "pointer-events-none opacity-80")}
+                                placeholder="Ej: 1. Sticker 500 de Doctora Store redondo 4cm..."
                             />
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            
-                            <div className="border border-slate-200 dark:border-white/10 rounded-2xl p-4 bg-white dark:bg-[#1c1c1e] shadow-sm">
-                                <p className="text-center font-black uppercase text-xs tracking-widest border-b border-black/10 pb-2 mb-4">Tipo de Material</p>
-                                <div className="grid grid-cols-2 gap-3">
+                        {/* PANELES: MATERIAL / MEDIDAS / ADICIONALES */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
+
+                            <div className="border border-slate-200 dark:border-white/10 rounded-xl sm:rounded-2xl p-4 bg-white dark:bg-[#1c1c1e] shadow-sm">
+                                <p className="text-center font-black uppercase text-[10px] sm:text-xs tracking-widest border-b border-black/10 pb-2 mb-3 sm:mb-4">Tipo de Material</p>
+                                <div className="grid grid-cols-2 gap-2 sm:gap-3">
                                     {MATERIALES.map(mat => (
                                         <div key={mat} className={cn("flex items-center space-x-2", isReadOnly && "opacity-80 pointer-events-none")}>
                                             <Checkbox disabled={isReadOnly} id={`mat-${mat}`} checked={formData.materiales.includes(mat)} onCheckedChange={() => handleCheckToggle('materiales', mat)} />
@@ -343,32 +348,32 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                                         </div>
                                     ))}
                                 </div>
-                                <div className="mt-4 pt-3 border-t border-black/5">
+                                <div className="mt-3 sm:mt-4 pt-3 border-t border-black/5">
                                     <Label className="text-[9px] font-black uppercase text-slate-400">Nota Especial Material</Label>
                                     <Input readOnly={isReadOnly} value={formData.notaMaterial} onChange={e=>setFormData({...formData, notaMaterial: e.target.value})} className={cn("h-8 text-xs mt-1 bg-slate-50 border-none", isReadOnly && "pointer-events-none opacity-80")} />
                                 </div>
                             </div>
 
-                            <div className="border border-slate-200 dark:border-white/10 rounded-2xl p-4 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col items-center justify-center relative overflow-hidden">
-                                <Ruler className="absolute w-32 h-32 text-slate-100 dark:text-white/5 rotate-45 -right-10 -bottom-10" />
-                                <p className="text-center font-black uppercase text-xs tracking-widest bg-slate-900 text-white px-4 py-1 rounded-full mb-6 z-10">Medidas</p>
-                                
-                                <div className="flex items-center justify-center gap-4 w-full z-10">
+                            <div className="border border-slate-200 dark:border-white/10 rounded-xl sm:rounded-2xl p-4 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col items-center justify-center relative overflow-hidden min-h-[160px]">
+                                <Ruler className="absolute w-28 h-28 text-slate-100 dark:text-white/5 rotate-45 -right-8 -bottom-8" />
+                                <p className="text-center font-black uppercase text-[10px] sm:text-xs tracking-widest bg-slate-900 text-white px-4 py-1 rounded-full mb-5 z-10">Medidas</p>
+
+                                <div className="flex items-center justify-center gap-3 sm:gap-4 w-full z-10">
                                     <div className="text-center">
                                         <Label className="text-[10px] font-black uppercase text-slate-400">Alto (↕)</Label>
-                                        <Input readOnly={isReadOnly} value={formData.medidas.alto} onChange={e=>setFormData({...formData, medidas: {...formData.medidas, alto: e.target.value}})} className={cn("w-20 text-center font-black text-lg h-12 mt-1 border-slate-300", isReadOnly && "pointer-events-none opacity-80")} placeholder="cm" />
+                                        <Input readOnly={isReadOnly} value={formData.medidas.alto} onChange={e=>setFormData({...formData, medidas: {...formData.medidas, alto: e.target.value}})} className={cn("w-16 sm:w-20 text-center font-black text-base sm:text-lg h-11 sm:h-12 mt-1 border-slate-300", isReadOnly && "pointer-events-none opacity-80")} placeholder="cm" />
                                     </div>
-                                    <div className="text-2xl font-black text-slate-300 mt-5">X</div>
+                                    <div className="text-xl sm:text-2xl font-black text-slate-300 mt-4 sm:mt-5">X</div>
                                     <div className="text-center">
                                         <Label className="text-[10px] font-black uppercase text-slate-400">Ancho (↔)</Label>
-                                        <Input readOnly={isReadOnly} value={formData.medidas.ancho} onChange={e=>setFormData({...formData, medidas: {...formData.medidas, ancho: e.target.value}})} className={cn("w-20 text-center font-black text-lg h-12 mt-1 border-slate-300", isReadOnly && "pointer-events-none opacity-80")} placeholder="cm" />
+                                        <Input readOnly={isReadOnly} value={formData.medidas.ancho} onChange={e=>setFormData({...formData, medidas: {...formData.medidas, ancho: e.target.value}})} className={cn("w-16 sm:w-20 text-center font-black text-base sm:text-lg h-11 sm:h-12 mt-1 border-slate-300", isReadOnly && "pointer-events-none opacity-80")} placeholder="cm" />
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="border border-slate-200 dark:border-white/10 rounded-2xl p-4 bg-white dark:bg-[#1c1c1e] shadow-sm">
-                                <p className="text-center font-black uppercase text-xs tracking-widest border-b border-black/10 pb-2 mb-4">Adicionales</p>
-                                <div className="grid grid-cols-2 gap-3">
+                            <div className="border border-slate-200 dark:border-white/10 rounded-xl sm:rounded-2xl p-4 bg-white dark:bg-[#1c1c1e] shadow-sm sm:col-span-2 md:col-span-1">
+                                <p className="text-center font-black uppercase text-[10px] sm:text-xs tracking-widest border-b border-black/10 pb-2 mb-3 sm:mb-4">Adicionales</p>
+                                <div className="grid grid-cols-3 sm:grid-cols-2 gap-2 sm:gap-3">
                                     {ADICIONALES.map(adi => (
                                         <div key={adi} className={cn("flex items-center space-x-2", isReadOnly && "opacity-80 pointer-events-none")}>
                                             <Checkbox disabled={isReadOnly} id={`adi-${adi}`} checked={formData.adicionales.includes(adi)} onCheckedChange={() => handleCheckToggle('adicionales', adi)} />
@@ -381,27 +386,27 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
 
                         <div className="space-y-2">
                             <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Observaciones Generales</Label>
-                            <Input 
+                            <Input
                                 readOnly={isReadOnly}
-                                value={formData.observaciones} 
-                                onChange={e=>setFormData({...formData, observaciones: e.target.value})} 
-                                className={cn("h-12 rounded-xl bg-slate-50 dark:bg-black/20 border-b-2 border-slate-300 font-medium", isReadOnly && "pointer-events-none opacity-80")} 
-                                placeholder="Notas adicionales para el equipo..." 
+                                value={formData.observaciones}
+                                onChange={e=>setFormData({...formData, observaciones: e.target.value})}
+                                className={cn("h-11 sm:h-12 rounded-xl bg-slate-50 dark:bg-black/20 border-b-2 border-slate-300 font-medium", isReadOnly && "pointer-events-none opacity-80")}
+                                placeholder="Notas adicionales para el equipo..."
                             />
                         </div>
 
                     </div>
 
-                    <DialogFooter className="bg-slate-50 dark:bg-black/40 p-6 md:p-8 flex items-center justify-between border-t border-black/5 rounded-b-[2rem]">
-                        <p className="text-[8px] font-black uppercase text-slate-400 max-w-[200px] leading-tight">
+                    <DialogFooter className="bg-slate-50 dark:bg-black/40 p-4 sm:p-6 md:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-t border-black/5 rounded-b-[1.5rem] sm:rounded-b-[2rem]">
+                        <p className="text-[8px] font-black uppercase text-slate-400 max-w-[220px] leading-tight">
                             {isReadOnly ? "Estás en modo visualización." : "Nota: Cada responsable debe remitir la orden al siguiente proceso."}
                         </p>
-                        <div className="flex gap-2">
-                            <Button variant="outline" onClick={() => setIsModalOpen(false)} className="rounded-xl font-bold uppercase text-[10px] tracking-widest h-12">
-                                {isReadOnly ? "Cerrar Visualización" : "Cancelar"}
+                        <div className="flex gap-2 w-full sm:w-auto">
+                            <Button variant="outline" onClick={() => setIsModalOpen(false)} className="rounded-xl font-bold uppercase text-[10px] tracking-widest h-11 sm:h-12 flex-1 sm:flex-none">
+                                {isReadOnly ? "Cerrar" : "Cancelar"}
                             </Button>
                             {!isReadOnly && (
-                                <Button onClick={handleSaveOrder} className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black uppercase text-[10px] tracking-widest h-12 px-8 shadow-lg shadow-emerald-500/20">
+                                <Button onClick={handleSaveOrder} className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black uppercase text-[10px] tracking-widest h-11 sm:h-12 px-6 sm:px-8 shadow-lg shadow-emerald-500/20 flex-1 sm:flex-none">
                                     Guardar Ticket
                                 </Button>
                             )}
@@ -426,12 +431,12 @@ function OrderCard({ orden, onView, onEdit, onMove, onComplete, onDelete, isAdmi
     };
 
     return (
-        <Card className="rounded-[2rem] border border-slate-200 dark:border-white/10 shadow-sm hover:shadow-xl transition-all overflow-hidden flex flex-col bg-white dark:bg-[#1c1c1e]">
-            <div className="p-5 flex justify-between items-start border-b border-black/5 bg-slate-50/50 dark:bg-white/5">
-                <div>
-                    <h3 className="font-black text-lg uppercase italic leading-tight text-slate-900 dark:text-white truncate max-w-[200px]">{orden.cliente}</h3>
+        <Card className="rounded-[1.5rem] sm:rounded-[2rem] border border-slate-200 dark:border-white/10 shadow-sm hover:shadow-xl transition-all overflow-hidden flex flex-col bg-white dark:bg-[#1c1c1e]">
+            <div className="p-4 sm:p-5 flex justify-between items-start border-b border-black/5 bg-slate-50/50 dark:bg-white/5">
+                <div className="min-w-0 flex-1 pr-2">
+                    <h3 className="font-black text-base sm:text-lg uppercase italic leading-tight text-slate-900 dark:text-white truncate">{orden.cliente}</h3>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1 mt-1">
-                        <Clock size={10} /> Entrega: {orden.fechaEntrega ? new Date(orden.fechaEntrega).toLocaleDateString() : "Sin fecha"}
+                        <Clock size={10} /> {orden.fechaEntrega ? new Date(orden.fechaEntrega).toLocaleDateString('es-VE', {day:'2-digit',month:'2-digit',year:'2-digit'}) : "Sin fecha"}
                     </p>
                 </div>
                 <Badge className={cn("rounded-lg px-2 py-1 text-[9px] font-black uppercase tracking-widest border-0 shadow-sm shrink-0", colors[areaColor])}>
@@ -439,13 +444,13 @@ function OrderCard({ orden, onView, onEdit, onMove, onComplete, onDelete, isAdmi
                 </Badge>
             </div>
 
-            <div className="p-5 flex-1 flex flex-col gap-4">
-                <div className="grid grid-cols-2 gap-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-black/5 pb-3">
-                    <span className="flex items-center gap-1 truncate" title={`Resp: ${orden.responsable}`}>
-                        <User size={12} className="shrink-0"/> Resp: {orden.responsable || "N/A"}
+            <div className="p-4 sm:p-5 flex-1 flex flex-col gap-3 sm:gap-4">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-black/5 pb-3">
+                    <span className="flex items-center gap-1 truncate">
+                        <User size={11} className="shrink-0"/> {orden.responsable || "N/A"}
                     </span>
-                    <span className="flex items-center gap-1 truncate" title={orden.telefono}>
-                        <Phone size={12} className="shrink-0"/> {orden.telefono || "Sin Tlf"}
+                    <span className="flex items-center gap-1 truncate">
+                        <Phone size={11} className="shrink-0"/> {orden.telefono || "Sin Tlf"}
                     </span>
                 </div>
 
@@ -455,37 +460,36 @@ function OrderCard({ orden, onView, onEdit, onMove, onComplete, onDelete, isAdmi
 
                 {(orden.observaciones || orden.notaMaterial) && (
                     <div className="text-xs font-medium text-amber-700 dark:text-amber-500 bg-amber-50 dark:bg-amber-500/10 p-3 rounded-xl border border-amber-200/50 dark:border-amber-500/20 line-clamp-2">
-                        <span className="font-black uppercase text-[9px] block mb-0.5 tracking-widest opacity-70">Aviso / Notas:</span>
-                        {orden.notaMaterial && <span className="block italic">- Mat: {orden.notaMaterial}</span>}
-                        {orden.observaciones && <span className="block italic">- {orden.observaciones}</span>}
+                        <span className="font-black uppercase text-[9px] block mb-0.5 tracking-widest opacity-70">Aviso:</span>
+                        {orden.notaMaterial && <span className="block italic truncate">Mat: {orden.notaMaterial}</span>}
+                        {orden.observaciones && <span className="block italic truncate">{orden.observaciones}</span>}
                     </div>
                 )}
 
-                <div className="flex flex-wrap gap-1.5 mt-auto pt-2">
+                <div className="flex flex-wrap gap-1 sm:gap-1.5 mt-auto pt-2">
                     {orden.medidas?.alto && orden.medidas?.ancho && (
-                        <span className="text-[9px] font-black bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 px-2 py-1 rounded-md flex items-center gap-1 border border-black/5"><Ruler size={10}/> {orden.medidas.alto}x{orden.medidas.ancho} cm</span>
+                        <span className="text-[9px] font-black bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-md flex items-center gap-1 border border-black/5"><Ruler size={9}/> {orden.medidas.alto}×{orden.medidas.ancho}</span>
                     )}
                     {orden.materiales?.map((m: string) => (
-                        <span key={m} className="text-[9px] font-black bg-blue-50 dark:bg-blue-500/10 text-blue-600 px-2 py-1 rounded-md uppercase border border-blue-500/10">{m}</span>
+                        <span key={m} className="text-[9px] font-black bg-blue-50 dark:bg-blue-500/10 text-blue-600 px-2 py-0.5 rounded-md uppercase border border-blue-500/10">{m}</span>
                     ))}
                     {orden.adicionales?.map((a: string) => (
-                        <span key={a} className="text-[9px] font-black bg-purple-50 dark:bg-purple-500/10 text-purple-600 px-2 py-1 rounded-md uppercase border border-purple-500/10">{a}</span>
+                        <span key={a} className="text-[9px] font-black bg-purple-50 dark:bg-purple-500/10 text-purple-600 px-2 py-0.5 rounded-md uppercase border border-purple-500/10">{a}</span>
                     ))}
                 </div>
             </div>
 
-            <div className="p-2 bg-slate-50 dark:bg-black/20 border-t border-black/5 flex items-center justify-between gap-1">
+            <div className="p-2 sm:p-2 bg-slate-50 dark:bg-black/20 border-t border-black/5 flex items-center justify-between gap-1 flex-wrap">
                 <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" onClick={onView} className="h-9 w-9 rounded-xl text-slate-400 hover:text-emerald-600 hover:bg-emerald-50" title="Ver Detalles Completos">
+                    <Button variant="ghost" size="icon" onClick={onView} className="h-9 w-9 rounded-xl text-slate-400 hover:text-emerald-600 hover:bg-emerald-50" title="Ver Detalles">
                         <Eye className="w-4 h-4" />
                     </Button>
-
                     {isAdmin && (
                         <>
-                            <Button variant="ghost" size="icon" onClick={onEdit} className="h-9 w-9 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50" title="Editar Ticket (Admin)">
+                            <Button variant="ghost" size="icon" onClick={onEdit} className="h-9 w-9 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50" title="Editar">
                                 <PenTool className="w-4 h-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" onClick={onDelete} className="h-9 w-9 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50" title="Eliminar (Admin)">
+                            <Button variant="ghost" size="icon" onClick={onDelete} className="h-9 w-9 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50" title="Eliminar">
                                 <Trash2 className="w-4 h-4" />
                             </Button>
                         </>
@@ -494,16 +498,16 @@ function OrderCard({ orden, onView, onEdit, onMove, onComplete, onDelete, isAdmi
 
                 {!isCompleted && (
                     <div className="flex gap-1">
-                        <select 
+                        <select
                             onChange={(e) => { if(e.target.value !== "") onMove(e.target.value); e.target.value = ""; }}
-                            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 text-[9px] font-black uppercase text-slate-500 rounded-xl px-2 h-9 outline-none cursor-pointer hover:bg-slate-50 transition-colors max-w-[100px]"
+                            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 text-[9px] font-black uppercase text-slate-500 rounded-xl px-2 h-9 outline-none cursor-pointer hover:bg-slate-50 transition-colors max-w-[90px] sm:max-w-[110px]"
                         >
                             <option value="">Pasar a...</option>
                             {AREAS_TALLER.filter(a => a.id !== orden.areaActual).map(a => (
                                 <option key={a.id} value={a.id}>{a.label}</option>
                             ))}
                         </select>
-                        
+
                         <Button onClick={onComplete} className="h-9 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-black uppercase text-[9px] tracking-widest px-3 shadow-md shadow-emerald-500/20">
                             <CheckCircle2 className="w-4 h-4" />
                         </Button>

@@ -53,7 +53,7 @@ export function BackgroundRemoverView() {
             // Al no poner 'publicPath', la librería descarga los modelos faltantes automáticamente.
             const config: Config = {
                 model: 'medium',
-                output: { format: 'image/png', quality: 0.8 },
+                output: { format: 'image/png', quality: 1.0 },
                 progress: (key: string, current: number, total: number) => {
                     if (total > 0) setProgress(Math.round((current / total) * 100))
                 },
@@ -90,18 +90,18 @@ export function BackgroundRemoverView() {
             {/* HEADER */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h2 className="text-3xl font-black italic uppercase tracking-tighter flex items-center gap-3">
-                        <Sparkles className="w-8 h-8 text-indigo-600" /> IA Tools <span className="text-slate-300">|</span> Studio
+                    <h2 className="text-2xl sm:text-3xl font-black italic uppercase tracking-tighter flex items-center gap-3">
+                        <Sparkles className="w-6 h-6 sm:w-8 sm:h-8 text-indigo-600" /> IA Tools <span className="text-slate-300">|</span> Studio
                     </h2>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Removedor de Fondos Inteligente</p>
                 </div>
             </div>
 
             {/* MAIN AREA */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 min-h-[500px]">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 min-h-[420px] sm:min-h-[500px]">
                 
                 {/* 1. UPLOAD ZONE */}
-                <Card className={cn("rounded-[2.5rem] border-2 border-dashed relative overflow-hidden flex flex-col justify-center items-center text-center transition-all duration-300", dragActive ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20" : "border-slate-200 dark:border-white/10 bg-white dark:bg-[#1c1c1e]", imageSrc ? "border-solid border-transparent p-0" : "p-12 hover:border-slate-300")}>
+                <Card className={cn("rounded-[2.5rem] border-2 border-dashed relative overflow-hidden flex flex-col justify-center items-center text-center transition-all duration-300", dragActive ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20" : "border-slate-200 dark:border-white/10 bg-white dark:bg-[#1c1c1e]", imageSrc ? "border-solid border-transparent p-0" : "p-8 sm:p-12 hover:border-slate-300")}>
                     {!imageSrc ? (
                         <div className="w-full h-full flex flex-col items-center justify-center cursor-pointer" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} onClick={() => fileInputRef.current?.click()}>
                             <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && handleFile(e.target.files[0])} />
@@ -130,7 +130,7 @@ export function BackgroundRemoverView() {
                         <Badge variant="outline" className="bg-white/50 backdrop-blur-md border-none font-black uppercase text-[10px] tracking-widest">Resultado</Badge>
                         {processTime > 0 && <Badge className="bg-emerald-500 text-white border-none font-bold text-[10px]"><CheckCircle2 className="w-3 h-3 mr-1"/> {processTime.toFixed(1)}s</Badge>}
                     </div>
-                    <div className="flex-1 flex items-center justify-center p-8 bg-[url('https://t3.ftcdn.net/jpg/03/76/74/78/360_F_376747823_L8il80K6c1DkIOe5D6A7D3Z7z88le8fE.jpg')] bg-cover">
+                    <div className="flex-1 flex items-center justify-center p-5 sm:p-8 bg-[url('https://t3.ftcdn.net/jpg/03/76/74/78/360_F_376747823_L8il80K6c1DkIOe5D6A7D3Z7z88le8fE.jpg')] bg-cover">
                         {isProcessing ? (
                             <div className="text-center">
                                 <div className="relative w-24 h-24 mx-auto mb-4"><div className="absolute inset-0 rounded-full border-4 border-indigo-100"></div><div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin"></div><Sparkles className="absolute inset-0 m-auto text-indigo-600 animate-pulse"/></div>

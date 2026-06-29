@@ -45,7 +45,11 @@ import { toast } from 'sonner'
 
 // FIREBASE
 import { db } from "@/lib/firebase"
-import { collection, doc, updateDoc, arrayUnion, writeBatch, onSnapshot, getDocs } from "firebase/firestore"
+import { collection, doc, updateDoc, arrayUnion, writeBatch, onSnapshot, getDocs, query, where, getDoc } from "firebase/firestore"
+
+// --- Caché local del análisis de deudas (evita re-leer Firestore en cada recarga) ---
+const DEUDAS_CACHE_KEY = "smr_deudas_globales_v1";
+const DEUDAS_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 horas de validez
 
 interface ClientSummary {
     key: string
@@ -89,8 +93,17 @@ export function ClientsAndPaymentsView({
 }: ClientsAndPaymentsViewProps) {
     
     // --- ESTADOS DE DATOS HISTÓRICOS Y CLIENTES ---
-    const [historicasBusqueda, setHistoricasBusqueda] = useState<any[]>([]); 
-    const [frequentClients, setFrequentClients] = useState<any[]>([]); 
+    const [historicasBusqueda, setHistoricasBusqueda] = useState<any[]>([]);
+    // Análisis profundo de deudas: trae TODAS las órdenes con saldo (sin el tope de 150 del dashboard)
+    const [deudasGlobales, setDeudasGlobales] = useState<any[]>([]);
+    const [isAnalyzingDebts, setIsAnalyzingDebts] = useState(false);
+    const [debtsAnalyzed, setDebtsAnalyzed] = useState(false);
+    const [debtsFetchedAt, setDebtsFetchedAt] = useState<number | null>(null);
+    const [frequentClients, setFrequentClients] = useState<any[]>([]);
+    // Historial de órdenes PAGADAS del histórico completo (carga bajo demanda)
+    const [pagadasHistoricas, setPagadasHistoricas] = useState<any[]>([]);
+    const [isLoadingPagadas, setIsLoadingPagadas] = useState(false);
+    const [pagadasHistoricasCargadas, setPagadasHistoricasCargadas] = useState(false);
 
     // --- ESTADOS DE UI Y FILTROS ---
     const [searchTerm, setSearchTerm] = useState('')
@@ -98,6 +111,9 @@ export function ClientsAndPaymentsView({
     const [currentPage, setCurrentPage] = useState(1)
     const itemsPerPage = 5
     const [expandedOrdenId, setExpandedOrdenId] = useState<string | null>(null);
+    // Paginación del historial de liquidadas
+    const [pagadasPage, setPagadasPage] = useState(1);
+    const PAGADAS_PER_PAGE = 15;
     const [isDropdownOpen, setIsDropdownOpen] = useState(false); 
 
     // --- ESTADOS DE PRIVACIDAD ---
@@ -138,12 +154,12 @@ export function ClientsAndPaymentsView({
     }, []);
 
     // ==============================================================
-    // TIEMPO REAL PARA ÓRDENES HISTÓRICAS
+    // TIEMPO REAL PARA ÓRDENES HISTÓRICAS (búsqueda manual)
     // ==============================================================
     useEffect(() => {
         if (historicasBusqueda.length === 0) return;
-        
-        const unsubs = historicasBusqueda.map(ord => 
+
+        const unsubs = historicasBusqueda.map(ord =>
             onSnapshot(doc(db, "ordenes", ord.id), (docSnap) => {
                 if (docSnap.exists()) {
                     const dataActualizada = { id: docSnap.id, ...docSnap.data() };
@@ -155,6 +171,28 @@ export function ClientsAndPaymentsView({
         return () => unsubs.forEach(unsub => unsub());
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [historicasBusqueda.map(o => o.id).join(',')]);
+
+    // ==============================================================
+    // TIEMPO REAL PARA ÓRDENES DEL ANÁLISIS DE DEUDAS (deudasGlobales)
+    // Límite de 50 listeners para no saturar Firestore; las más antiguas
+    // se actualizarán cuando el usuario recargue el análisis.
+    // ==============================================================
+    useEffect(() => {
+        if (deudasGlobales.length === 0) return;
+        const slice = deudasGlobales.slice(0, 50);
+        const unsubs = slice.map(ord =>
+            onSnapshot(doc(db, "ordenes", ord.id), (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data() as any;
+                    const fecha = data.fecha?.toDate ? data.fecha.toDate().toISOString() : data.fecha;
+                    const actualizada = { id: docSnap.id, ...data, fecha };
+                    setDeudasGlobales(prev => prev.map(o => o.id === ord.id ? actualizada : o));
+                }
+            })
+        );
+        return () => unsubs.forEach(u => u());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [deudasGlobales.map(o => o.id).join(',')]);;
 
     // ==============================================================
     // BÚSQUEDA PROFUNDA (CON TRADUCTOR INTELIGENTE)
@@ -199,6 +237,88 @@ export function ClientsAndPaymentsView({
             } finally {
                 setIsSearchingDeep(false);
             }
+        }
+    };
+
+    // Al montar: si hay caché fresco de deudas, lo usamos (0 lecturas a Firestore).
+    useEffect(() => {
+        try {
+            const raw = localStorage.getItem(DEUDAS_CACHE_KEY);
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (parsed?.ts && Array.isArray(parsed.data) && (Date.now() - parsed.ts) < DEUDAS_CACHE_TTL_MS) {
+                setDeudasGlobales(parsed.data);
+                setDebtsAnalyzed(true);
+                setDebtsFetchedAt(parsed.ts);
+            }
+        } catch { /* caché corrupto o no disponible: se ignora */ }
+    }, []);
+
+    const formatCacheAge = (ts: number | null) => {
+        if (!ts) return "";
+        const mins = Math.floor((Date.now() - ts) / 60000);
+        if (mins < 1) return "recién actualizado";
+        if (mins < 60) return `hace ${mins} min`;
+        const hrs = Math.floor(mins / 60);
+        return `hace ${hrs} h`;
+    };
+
+    // Trae TODAS las órdenes con saldo pendiente (PENDIENTE/ABONADO) de todo el histórico,
+    // sin el límite de 150 del dashboard, para que el ranking muestre al mayor deudor real.
+    const analizarTodasLasDeudas = async () => {
+        setIsAnalyzingDebts(true);
+        try {
+            const qDeudas = query(
+                collection(db, "ordenes"),
+                where("estadoPago", "in", ["PENDIENTE", "ABONADO"])
+            );
+            const snap = await getDocs(qDeudas);
+            const todas = snap.docs.map(d => {
+                const data: any = d.data();
+                const fecha = data.fecha?.toDate ? data.fecha.toDate().toISOString() : data.fecha;
+                return { id: d.id, ...data, fecha };
+            });
+            setDeudasGlobales(todas);
+            setDebtsAnalyzed(true);
+            const ts = Date.now();
+            setDebtsFetchedAt(ts);
+            try {
+                localStorage.setItem(DEUDAS_CACHE_KEY, JSON.stringify({ ts, data: todas }));
+            } catch (e) {
+                console.warn("No se pudo guardar el caché de deudas (posible límite de almacenamiento):", e);
+            }
+            toast.success(`Histórico analizado: ${todas.length} órdenes con saldo pendiente.`);
+        } catch (error) {
+            console.error("Error al analizar deudas históricas:", error);
+            toast.error("No se pudo analizar el histórico de deudas.");
+        } finally {
+            setIsAnalyzingDebts(false);
+        }
+    };
+
+    // Trae TODAS las órdenes con estadoPago === "PAGADO" del histórico completo
+    const cargarPagadasHistoricas = async () => {
+        setIsLoadingPagadas(true);
+        try {
+            const qPagadas = query(
+                collection(db, "ordenes"),
+                where("estadoPago", "==", "PAGADO")
+            );
+            const snap = await getDocs(qPagadas);
+            const todas = snap.docs.map(d => {
+                const data: any = d.data();
+                const fecha = data.fecha?.toDate ? data.fecha.toDate().toISOString() : data.fecha;
+                return { id: d.id, ...data, fecha };
+            });
+            setPagadasHistoricas(todas);
+            setPagadasHistoricasCargadas(true);
+            setPagadasPage(1);
+            toast.success(`Histórico cargado: ${todas.length} órdenes liquidadas.`);
+        } catch (error) {
+            console.error("Error al cargar historial pagado:", error);
+            toast.error("No se pudo cargar el historial completo.");
+        } finally {
+            setIsLoadingPagadas(false);
         }
     };
 
@@ -283,8 +403,10 @@ export function ClientsAndPaymentsView({
             });
         };
 
-        procesarLista(ordenes);
-        procesarLista(historicasBusqueda);
+        procesarLista(deudasGlobales);     // base histórica (snapshot; puede contener datos viejos)
+        procesarLista(pagadasHistoricas);  // historial completo de PAGADAS cargado bajo demanda
+        procesarLista(ordenes);            // recientes en tiempo real -> sobrescriben lo histórico
+        procesarLista(historicasBusqueda); // búsquedas manuales en tiempo real -> sobrescriben
 
         const todasUnpaid = Array.from(mapUnpaid.values());
         const todasPaid = Array.from(mapPaid.values());
@@ -333,7 +455,7 @@ export function ClientsAndPaymentsView({
             pagadasCompletamente: pagadas, 
             totalPendienteGlobal: totalPendGlobal 
         };
-    }, [ordenes, historicasBusqueda, searchTerm]);
+    }, [ordenes, historicasBusqueda, deudasGlobales, pagadasHistoricas, searchTerm]);
 
     const totalPages = Math.ceil(clientSummaries.length / itemsPerPage);
     const paginatedClients = useMemo(() => clientSummaries.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage), [clientSummaries, currentPage]);
@@ -426,28 +548,55 @@ export function ClientsAndPaymentsView({
         
         try {
             toast.loading("Distribuyendo abono...");
-            const batch = writeBatch(db); 
             const ordersToProcess = selectedClientForGlobal.ordenesPendientes.filter(o => selectedOrdersForGlobal.includes(o.id));
 
-            for (const orden of ordersToProcess) {
-                if (remaining <= 0.009) break;
+            // Leer datos FRESCOS de todas las órdenes antes de calcular.
+            // Esto evita calcular sobre datos desactualizados (el bug de los pagos duplicados).
+            const freshSnaps = await Promise.all(
+                ordersToProcess.map(o => getDoc(doc(db, "ordenes", o.id)))
+            );
 
-                const saldoOrden = Number(orden.totalUSD) - (Number(orden.montoPagadoUSD) || 0);
+            const batch = writeBatch(db);
+
+            for (const snap of freshSnaps) {
+                if (remaining <= 0.009) break;
+                if (!snap.exists()) continue;
+
+                const data = snap.data() as any;
+                const montoPagadoFresh = Number(data.montoPagadoUSD) || 0;
+                const totalUSD = Number(data.totalUSD) || 0;
+                const saldoOrden = Math.max(0, totalUSD - montoPagadoFresh);
                 const aPagar = Math.min(remaining, saldoOrden);
 
                 if (aPagar > 0.009) {
-                    const ordenRef = doc(db, "ordenes", orden.id);
-                    const nuevoMontoPagado = (Number(orden.montoPagadoUSD) || 0) + aPagar;
-                    const nuevoEstado = (Number(orden.totalUSD) - nuevoMontoPagado) <= 0.01 ? "PAGADO" : "ABONADO";
+                    const ordenRef = doc(db, "ordenes", snap.id);
+                    const nuevoMontoPagado = montoPagadoFresh + aPagar;
+                    const nuevoEstado = (totalUSD - nuevoMontoPagado) <= 0.01 ? "PAGADO" : "ABONADO";
 
-                    const nuevoRecibo = { montoUSD: aPagar, fecha: new Date().toISOString(), nota: finalNota, imagenUrl: globalPaymentData.imagenUrl || "", tasaBCV: rates.usd, metodo: metodoFinal };
+                    // Normalizar registroPagos y concatenar (no arrayUnion) para evitar duplicados
+                    const registroActual: any[] = Array.isArray(data.registroPagos)
+                        ? data.registroPagos
+                        : data.registroPagos ? Object.values(data.registroPagos) : [];
 
-                    batch.update(ordenRef, { montoPagadoUSD: nuevoMontoPagado, estadoPago: nuevoEstado, registroPagos: arrayUnion(nuevoRecibo) });
+                    const nuevoRecibo = {
+                        montoUSD: aPagar,
+                        fecha: new Date().toISOString(),
+                        nota: finalNota,
+                        imagenUrl: globalPaymentData.imagenUrl || "",
+                        tasaBCV: rates.usd,
+                        metodo: metodoFinal
+                    };
+
+                    batch.update(ordenRef, {
+                        montoPagadoUSD: nuevoMontoPagado,
+                        estadoPago: nuevoEstado,
+                        registroPagos: [...registroActual, nuevoRecibo],
+                    });
                     remaining -= aPagar;
                 }
             }
 
-            await batch.commit(); 
+            await batch.commit();
 
             toast.dismiss(); toast.success("Abono global aplicado correctamente");
             closeGlobalModal();
@@ -507,8 +656,8 @@ export function ClientsAndPaymentsView({
             {/* HEADER */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
                 <div className="space-y-1">
-                    <h2 className="text-4xl font-black italic tracking-tighter uppercase text-slate-900 dark:text-white flex items-center gap-3">
-                        <Wallet className="w-10 h-10 text-blue-600 drop-shadow-lg"/> Cobranzas <span className="text-blue-600">Pro</span>
+                    <h2 className="text-2xl sm:text-4xl font-black italic tracking-tighter uppercase text-slate-900 dark:text-white flex items-center gap-2 sm:gap-3">
+                        <Wallet className="w-7 h-7 sm:w-10 sm:h-10 text-blue-600 drop-shadow-lg"/> Cobranzas <span className="text-blue-600">Pro</span>
                     </h2>
                     <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Siskoven SMR - Entorno Shared</p>
                 </div>
@@ -599,13 +748,29 @@ export function ClientsAndPaymentsView({
                         </div>
 
                         <div className="relative z-10">
-                            <h3 className="text-5xl font-black tracking-tighter">
+                            <h3 className="text-3xl sm:text-5xl font-black tracking-tighter break-words">
                                 {showTotalDeuda ? formatCurrency(totalPendienteGlobal) : "$***.**"}
                             </h3>
                             <p className="text-xs font-bold opacity-80 mt-2">
                                 ≈ {showTotalDeuda ? formatBs(totalPendienteGlobal, rates.usd) : "Bs. ***.**"} (BCV)
                             </p>
                         </div>
+
+                        {/* Análisis profundo: ranking de deudores de TODO el histórico (no solo las ~150 recientes) */}
+                        <button
+                            onClick={analizarTodasLasDeudas}
+                            disabled={isAnalyzingDebts}
+                            className="relative z-10 mt-5 w-full flex items-center justify-center gap-2 bg-white/15 hover:bg-white/25 border border-white/20 rounded-2xl py-3 px-4 text-[10px] font-black uppercase tracking-widest transition-colors disabled:opacity-60"
+                        >
+                            {isAnalyzingDebts
+                                ? <><Loader2 className="w-4 h-4 animate-spin" /> Analizando histórico...</>
+                                : <><Search className="w-4 h-4" /> {debtsAnalyzed ? "Re-analizar deudas" : "Analizar TODAS las deudas"}</>}
+                        </button>
+                        {debtsAnalyzed && !isAnalyzingDebts && (
+                            <p className="relative z-10 mt-2 text-[9px] font-bold uppercase tracking-widest opacity-70 text-center">
+                                {deudasGlobales.length} órdenes con saldo{debtsFetchedAt ? ` · ${formatCacheAge(debtsFetchedAt)}` : ""}
+                            </p>
+                        )}
                     </Card>
                 </motion.div>
 
@@ -805,9 +970,31 @@ export function ClientsAndPaymentsView({
 
             {/* HISTORIAL DE LIQUIDADAS */}
             <div className="pt-10 space-y-6 pb-20">
-                <div className="flex items-center gap-4 ml-2">
-                    <div className="p-2 bg-emerald-100 dark:bg-emerald-500/20 rounded-xl text-emerald-600"><CheckCircle2 className="w-5 h-5" /></div>
-                    <h3 className="text-xl font-black tracking-tight uppercase italic">Historial Liquidadas</h3>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ml-2">
+                    <div className="flex items-center gap-4">
+                        <div className="p-2 bg-emerald-100 dark:bg-emerald-500/20 rounded-xl text-emerald-600"><CheckCircle2 className="w-5 h-5" /></div>
+                        <div>
+                            <h3 className="text-xl font-black tracking-tight uppercase italic">Historial Liquidadas</h3>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                                {pagadasHistoricasCargadas
+                                    ? `${pagadasCompletamente.length} registros en total`
+                                    : `Mostrando las ${pagadasCompletamente.length} más recientes`}
+                            </p>
+                        </div>
+                    </div>
+                    {!pagadasHistoricasCargadas && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={cargarPagadasHistoricas}
+                            disabled={isLoadingPagadas}
+                            className="rounded-2xl border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-500/10 font-black text-[10px] uppercase tracking-widest gap-2 px-5 h-10"
+                        >
+                            {isLoadingPagadas
+                                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando...</>
+                                : <><Search className="w-3.5 h-3.5" /> Cargar historial completo</>}
+                        </Button>
+                    )}
                 </div>
 
                 <Card className="rounded-[3rem] border-0 bg-white/40 dark:bg-slate-900/20 backdrop-blur-xl shadow-2xl overflow-hidden">
@@ -823,8 +1010,9 @@ export function ClientsAndPaymentsView({
                         </TableHeader>
                         <TableBody>
                             <AnimatePresence>
-                                {/* Si hay una búsqueda activa, mostramos todas. Si no, solo las últimas 10 para no saturar la UI */}
-                                {pagadasCompletamente.slice(0, searchTerm ? undefined : 10).map((orden: any) => (
+                                {pagadasCompletamente
+                                    .slice((pagadasPage - 1) * PAGADAS_PER_PAGE, pagadasPage * PAGADAS_PER_PAGE)
+                                    .map((orden: any) => (
                                     <React.Fragment key={orden.id}>
                                         <TableRow className="border-b border-slate-100 dark:border-white/5 hover:bg-white dark:hover:bg-white/5 transition-all">
                                             <TableCell className="pl-10 font-black text-slate-900 dark:text-white text-xs">#{orden.ordenNumero}</TableCell>
@@ -861,12 +1049,41 @@ export function ClientsAndPaymentsView({
                             </AnimatePresence>
                         </TableBody>
                     </Table>
+
+                    {/* PAGINACIÓN DEL HISTORIAL */}
+                    {pagadasCompletamente.length > PAGADAS_PER_PAGE && (
+                        <div className="px-10 py-5 border-t border-slate-100 dark:border-white/5 flex items-center justify-between bg-slate-50/30 dark:bg-white/5">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                Pág. {pagadasPage} de {Math.ceil(pagadasCompletamente.length / PAGADAS_PER_PAGE)} · {pagadasCompletamente.length} registros
+                            </span>
+                            <div className="flex gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={pagadasPage === 1}
+                                    onClick={() => { setPagadasPage(p => p - 1); setExpandedOrdenId(null); }}
+                                    className="h-9 w-9 p-0 rounded-xl dark:border-white/10"
+                                >
+                                    <ChevronLeft className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={pagadasPage >= Math.ceil(pagadasCompletamente.length / PAGADAS_PER_PAGE)}
+                                    onClick={() => { setPagadasPage(p => p + 1); setExpandedOrdenId(null); }}
+                                    className="h-9 w-9 p-0 rounded-xl dark:border-white/10"
+                                >
+                                    <ChevronRight className="w-4 h-4" />
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </Card>
             </div>
 
             {/* MODAL ABONO GLOBAL */}
             <Dialog open={isGlobalModalOpen} onOpenChange={(open) => !isGlobalUploading && closeGlobalModal()}>
-                <DialogContent className="max-w-md md:max-w-5xl rounded-[2.5rem] border-0 shadow-2xl p-0 outline-none bg-white dark:bg-[#1c1c1e] flex flex-col max-h-[95vh] overflow-hidden">
+                <DialogContent className="w-[95vw] max-w-md md:max-w-5xl rounded-[2.5rem] border-0 shadow-2xl p-0 outline-none bg-white dark:bg-[#1c1c1e] flex flex-col max-h-[95vh] overflow-hidden">
                     <DialogTitle className="sr-only">Abono General para Cliente</DialogTitle>
                     <DialogDescription className="sr-only">Formulario para procesar un pago global o múltiple a un cliente</DialogDescription>
                     
@@ -965,7 +1182,7 @@ export function ClientsAndPaymentsView({
                                 {/* SELECCIÓN DE BILLETERA */}
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-black uppercase tracking-widest ml-1 text-slate-400">Destino del Dinero</label>
-                                    <div className="grid grid-cols-4 gap-2">
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                         <WalletOption id="cash_usd" label="Caja" icon={Wallet} active={globalWallet} onClick={setGlobalWallet} color="emerald" />
                                         <WalletOption id="bank_bs" label="Banco" icon={Landmark} active={globalWallet} onClick={setGlobalWallet} color="blue" />
                                         <WalletOption id="zelle" label="Zelle" icon={CreditCard} active={globalWallet} onClick={setGlobalWallet} color="purple" />
@@ -998,7 +1215,7 @@ export function ClientsAndPaymentsView({
                                         </TabsContent>
 
                                         <TabsContent value="BS" className="mt-0 space-y-4">
-                                            <div className="grid grid-cols-3 gap-2">
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                                                 <button onClick={() => handleRateChange('USD')} className={cn("flex flex-col items-center justify-center p-2 rounded-xl border transition-all h-14", globalCalculationBase === 'USD' ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 ring-2 ring-emerald-500/20" : "border-slate-200 bg-slate-50 dark:bg-black/20 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5")}>
                                                     <span className="text-[9px] font-black uppercase flex items-center gap-1"><DollarSign size={10}/> BCV</span>
                                                     <span className="text-xs font-bold">{rates.usd.toFixed(2)}</span>
@@ -1251,7 +1468,7 @@ function GlobalPaymentHistoryModal({ isOpen, onClose, onDeleteBatch, onViewImage
     if (isLoadingHistory) {
         return (
             <Dialog open={isOpen} onOpenChange={onClose}>
-                <DialogContent className="max-w-md bg-white dark:bg-[#1c1c1e] rounded-[3rem] border-0 p-10 flex flex-col items-center justify-center shadow-2xl outline-none">
+                <DialogContent className="w-[95vw] max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] sm:rounded-[3rem] border-0 p-6 sm:p-10 flex flex-col items-center justify-center shadow-2xl outline-none">
                     <DialogTitle className="sr-only">Cargando Historial</DialogTitle>
                     <DialogDescription className="sr-only">Sincronizando registros globales de pago...</DialogDescription>
                     
@@ -1264,7 +1481,7 @@ function GlobalPaymentHistoryModal({ isOpen, onClose, onDeleteBatch, onViewImage
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-2xl bg-white dark:bg-[#1c1c1e] rounded-[3rem] border-0 p-0 flex flex-col max-h-[95vh] overflow-hidden">
+            <DialogContent className="w-[95vw] max-w-2xl bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] sm:rounded-[3rem] border-0 p-0 flex flex-col max-h-[95vh] overflow-hidden">
                 <DialogHeader className="p-6 md:p-8 pb-4 shrink-0">
                     <DialogTitle className="flex items-center gap-3 text-2xl font-black italic uppercase">
                         <History className="w-8 h-8 text-blue-600" /> Historial de Abonos Globales

@@ -25,11 +25,11 @@ import {
 import { formatCurrency } from "@/lib/utils/order-utils"
 import { generateOrderPDF } from "@/lib/services/pdf-generator"
 import { toast } from "sonner"
-import { 
-    Trash2, Eye, Pencil, ChevronLeft, ChevronRight, 
+import {
+    Trash2, Eye, Pencil, ChevronLeft, ChevronRight,
     ChevronDown, CheckCircle2, Wallet, Landmark,
     History, X, Clock, Download, RefreshCw, Loader2, Sparkles, Banknote,
-    ArrowUpDown, ArrowUp, ArrowDown, Wrench, Building2
+    ArrowUpDown, ArrowUp, ArrowDown, Wrench, Building2, Hammer, CircleCheck
 } from "lucide-react"
 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
@@ -41,8 +41,9 @@ interface OrdersTableProps {
   ordenes: OrdenServicio[]
   onDelete: (ordenId: string) => void
   onEdit: (orden: OrdenServicio) => void
-  onRegisterPayment: (orden: OrdenServicio) => void 
-  onSavePayment?: (ordenId: string, abonoUSD: number, nota: string | undefined, imagenUrl: string | undefined, metodo: string, descuento?: number, fechaPago?: string) => Promise<void> | void // <-- NUEVO PROP PARA GUARDAR EL PAGO
+  onRegisterPayment: (orden: OrdenServicio) => void
+  onSavePayment?: (ordenId: string, abonoUSD: number, nota: string | undefined, imagenUrl: string | undefined, metodo: string, descuento?: number, fechaPago?: string) => Promise<void> | void
+  onUpdateOrden?: (ordenId: string, changes: Partial<OrdenServicio>) => Promise<void>
   currentUserId: string
   rates: {
     usd: number;
@@ -53,7 +54,7 @@ interface OrdersTableProps {
   firmaBase64?: string
   selloBase64?: string
   onSyncStatus?: () => Promise<{ success: boolean; message: string }>;
-  onFixPayments?: () => Promise<{ success: boolean; message: string }>; 
+  onFixPayments?: () => Promise<{ success: boolean; message: string }>;
 }
 
 function PaymentStatusBadge({ total, abonado }: { total: number, abonado: number }) {
@@ -80,9 +81,9 @@ function PaymentStatusBadge({ total, abonado }: { total: number, abonado: number
     );
 }
 
-export function OrdersTable({ 
-    ordenes, onDelete, onEdit, onRegisterPayment, onSavePayment,
-    currentUserId, rates, pdfLogoBase64, firmaBase64, selloBase64, onSyncStatus, onFixPayments 
+export function OrdersTable({
+    ordenes, onDelete, onEdit, onRegisterPayment, onSavePayment, onUpdateOrden,
+    currentUserId, rates, pdfLogoBase64, firmaBase64, selloBase64, onSyncStatus, onFixPayments
 }: OrdersTableProps) {
   
   const [selectedOrden, setSelectedOrden] = useState<OrdenServicio | null>(null)
@@ -120,7 +121,7 @@ export function OrdersTable({
   }, [ordenes]);
 
   const handleDownloadPDF = async (o: OrdenServicio, rateType: 'USD' | 'EUR' | 'USDT' | 'USD_ONLY') => {
-    if (!pdfLogoBase64) return alert("Por favor, cargue un logo en Presupuestos.");
+    if (!pdfLogoBase64) return void toast.error("Por favor, cargue un logo en Presupuestos → Configuración.");
     let selectedCurrency = { rate: rates.usd, label: "Tasa BCV ($)", symbol: "Bs." };
     if (rateType === 'EUR') selectedCurrency = { rate: rates.eur, label: "Tasa BCV (€)", symbol: "Bs." };
     if (rateType === 'USDT') selectedCurrency = { rate: rates.usdt, label: "Tasa Monitor", symbol: "Bs." };
@@ -230,15 +231,14 @@ export function OrdersTable({
                                     onDelete, 
                                     onEdit, 
                                     handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, 
-                                    handleOpenPayment: (o:any)=>{ 
-                                        onRegisterPayment(o); // Conservamos la prop por compatibilidad
-                                        setOrderForPayment(o); 
-                                        setIsPaymentModalOpen(true); 
-                                    }, 
-                                    handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, 
-                                    handleDownloadPDF 
-                                }} 
-                                rates={rates} 
+                                    handleOpenPayment: (o:any)=>{
+                                        setOrderForPayment(o);
+                                        setIsPaymentModalOpen(true);
+                                    },
+                                    handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); },
+                                    handleDownloadPDF
+                                }}
+                                rates={rates}
                             />
                         </CardContent>
                     </Card>
@@ -264,16 +264,15 @@ export function OrdersTable({
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
                     <Card className="rounded-[2.5rem] border-none shadow-lg bg-white/80 dark:bg-zinc-900/80 overflow-hidden opacity-90">
                         <CardContent className="p-0">
-                            <OrdersSubTable 
-                                data={paidOrders} 
-                                actions={{ 
-                                    onDelete, 
-                                    onEdit, 
-                                    handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);}, 
-                                    handleOpenPayment: (o:any)=>{ 
-                                        onRegisterPayment(o); // Conservamos la prop por compatibilidad
-                                        setOrderForPayment(o); 
-                                        setIsPaymentModalOpen(true); 
+                            <OrdersSubTable
+                                data={paidOrders}
+                                actions={{
+                                    onDelete,
+                                    onEdit,
+                                    handleOpenDetail: (o:any)=>{setSelectedOrden(o); setIsDetailModalOpen(true);},
+                                    handleOpenPayment: (o:any)=>{
+                                        setOrderForPayment(o);
+                                        setIsPaymentModalOpen(true);
                                     }, 
                                     handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, 
                                     handleDownloadPDF 
@@ -288,7 +287,14 @@ export function OrdersTable({
       </section>
 
       {selectedOrden && (
-        <OrderDetailModal orden={selectedOrden} open={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} rates={rates} />
+        <OrderDetailModal
+          orden={selectedOrden}
+          open={isDetailModalOpen}
+          onClose={() => setIsDetailModalOpen(false)}
+          rates={rates}
+          onUpdate={onUpdateOrden}
+          allOrdenes={ordenes}
+        />
       )}
 
       <Dialog open={isHistoryModalOpen} onOpenChange={setIsHistoryModalOpen}>
@@ -335,6 +341,15 @@ function OrdersSubTable({ data, actions, rates }: any) {
     const [page, setPage] = useState(1);
     const pageSize = 10;
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'ordenNumero', direction: 'desc' });
+
+    // Resetear a página 1 cuando cambia el conjunto de datos (filtros, búsqueda)
+    const prevDataLengthRef = React.useRef(data.length);
+    React.useEffect(() => {
+        if (data.length !== prevDataLengthRef.current) {
+            setPage(1);
+            prevDataLengthRef.current = data.length;
+        }
+    }, [data.length]);
 
     const sortedData = useMemo(() => {
         let sortableItems = [...data];
@@ -405,12 +420,29 @@ function OrdersSubTable({ data, actions, rates }: any) {
                         {paginated.map((o: any) => (
                             <TableRow key={o.id} className="group border-b border-slate-50 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
                                 <TableCell className="py-5 px-8">
-                                    <div className="flex flex-col">
+                                    <div className="flex flex-col gap-1">
                                         <span className="text-xl font-black tracking-tighter text-slate-900 dark:text-white">#{o.ordenNumero}</span>
+                                        {o.nombreOrden && <span className="text-[11px] font-black text-purple-600 dark:text-purple-400 italic truncate max-w-[160px]">{o.nombreOrden}</span>}
+                                        {/* Badge de estado de producción */}
+                                        {o.estadoProduccion === 'EN_PRODUCCION' && (
+                                            <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 border-none text-[8px] font-black uppercase px-2 h-4 gap-1 flex items-center w-fit">
+                                                <Hammer className="w-2 h-2" /> En Producción
+                                            </Badge>
+                                        )}
+                                        {o.estadoProduccion === 'TERMINADA' && (
+                                            <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 border-none text-[8px] font-black uppercase px-2 h-4 gap-1 flex items-center w-fit">
+                                                <CircleCheck className="w-2 h-2" /> Terminada
+                                            </Badge>
+                                        )}
+                                        {(o.estadoProduccion === 'PENDIENTE' || !o.estadoProduccion) && (
+                                            <Badge className="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-500 border-none text-[8px] font-black uppercase px-2 h-4 gap-1 flex items-center w-fit">
+                                                <Clock className="w-2 h-2" /> Pendiente
+                                            </Badge>
+                                        )}
                                         <span className="text-[10px] font-bold text-slate-400 dark:text-slate-600 flex items-center gap-1">
-                                           {new Date(o.fecha).toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                           {o.fecha ? (() => { const d = o.fecha?.toDate ? o.fecha.toDate() : new Date(o.fecha); return isNaN(d.getTime()) ? 'Sin fecha' : d.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' }); })() : 'Sin fecha'}
                                            <span className="w-1 h-1 rounded-full bg-slate-300 mx-0.5" />
-                                           {new Date(o.fecha).toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                           {o.fecha ? (() => { const d = o.fecha?.toDate ? o.fecha.toDate() : new Date(o.fecha); return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true }); })() : ''}
                                         </span>
                                     </div>
                                 </TableCell>
@@ -493,6 +525,90 @@ function OrdersSubTable({ data, actions, rates }: any) {
                     </TableBody>
                 </Table>
             </div>
+
+            {/* MÓVIL: tarjetas (la tabla está oculta en pantallas pequeñas) */}
+            <div className="md:hidden divide-y divide-slate-100 dark:divide-white/5">
+                {paginated.map((o: any) => {
+                    const saldo = (o.totalUSD || 0) - (o.montoPagadoUSD || 0);
+                    return (
+                        <div key={o.id} className="p-4 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-lg font-black tracking-tighter text-slate-900 dark:text-white">#{o.ordenNumero}</span>
+                                        {o.nombreOrden && <span className="text-[11px] font-black text-purple-600 dark:text-purple-400 italic">{o.nombreOrden}</span>}
+                                        <PaymentStatusBadge total={o.totalUSD} abonado={o.montoPagadoUSD || 0} />
+                                    </div>
+                                    <span className="text-[10px] font-bold text-slate-400 dark:text-slate-600">
+                                        {o.fecha ? (() => { const d = o.fecha?.toDate ? o.fecha.toDate() : new Date(o.fecha); return isNaN(d.getTime()) ? 'Sin fecha' : `${d.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' })} · ${d.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true })}`; })() : 'Sin fecha'}
+                                    </span>
+                                </div>
+                                <div className="text-right shrink-0">
+                                    <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">{formatCurrency(o.totalUSD)}</span>
+                                    {o.montoPagadoUSD > 0.01 && saldo > 0.01 && (
+                                        <p className="text-[9px] font-black text-amber-600 dark:text-amber-500 uppercase italic leading-none mt-0.5">Abonado: {formatCurrency(o.montoPagadoUSD)}</p>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-bold text-slate-700 dark:text-slate-300 text-xs uppercase italic truncate max-w-[180px]">{o.cliente?.nombreRazonSocial || "Cliente S/N"}</span>
+                                {o.isMaster && (
+                                    <Badge className="bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400 border-none text-[7px] font-black uppercase px-2 h-4 gap-1 flex items-center">
+                                        <Building2 className="w-2 h-2" /> Matriz
+                                    </Badge>
+                                )}
+                                {o.cliente?.tipoCliente === 'ALIADO' ? (
+                                    <Badge className="bg-purple-100 text-purple-600 dark:bg-purple-500/20 dark:text-purple-400 border-none text-[7px] font-black uppercase px-2 h-4">Aliado</Badge>
+                                ) : !o.isMaster && (
+                                    <Badge className="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border-none text-[7px] font-black uppercase px-2 h-4">Regular</Badge>
+                                )}
+                            </div>
+
+                            <div className="flex items-center gap-2 flex-wrap pt-1">
+                                <ActionButton icon={<Eye />} color="blue" onClick={() => actions.handleOpenDetail(o)} label="Ver Factura" />
+
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button className="w-10 h-10 rounded-xl flex items-center justify-center transition-all border active:scale-95 shadow-sm text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-600 hover:text-white dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:hover:bg-emerald-500">
+                                            <Download className="w-5 h-5" />
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="rounded-2xl min-w-[150px]">
+                                        <DropdownMenuLabel className="text-[10px] uppercase font-black text-slate-400">Seleccionar Tasa</DropdownMenuLabel>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem onClick={() => actions.handleDownloadPDF(o, 'USD')} className="gap-3 cursor-pointer text-xs font-bold">
+                                            <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-200">BCV $</Badge>
+                                            {rates?.usd?.toFixed(2)}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => actions.handleDownloadPDF(o, 'EUR')} className="gap-3 cursor-pointer text-xs font-bold">
+                                            <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200">BCV €</Badge>
+                                            {rates?.eur?.toFixed(2)}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => actions.handleDownloadPDF(o, 'USDT')} className="gap-3 cursor-pointer text-xs font-bold">
+                                            <Badge variant="outline" className="bg-orange-50 text-orange-600 border-orange-200">Monitor</Badge>
+                                            {rates?.usdt?.toFixed(2)}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem onClick={() => actions.handleDownloadPDF(o, 'USD_ONLY')} className="gap-3 cursor-pointer text-xs font-bold hover:bg-slate-100 dark:hover:bg-white/10">
+                                            <Banknote className="w-4 h-4 text-slate-500" />
+                                            Solo Dólares (Sin Bs)
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+
+                                <ActionButton icon={<History />} color="indigo" onClick={() => actions.handleOpenHistory(o)} label="Historial" />
+                                {saldo > 0.01 && (
+                                    <ActionButton icon={<Wallet />} color="green" onClick={() => actions.handleOpenPayment(o)} label="Abonar" />
+                                )}
+                                <ActionButton icon={<Pencil />} color="orange" onClick={() => actions.onEdit(o)} label="Editar" />
+                                <ActionButton icon={<Trash2 />} color="rose" onClick={() => { if (confirm(`¿Borrar orden #${o.ordenNumero}?`)) actions.onDelete(o.id); }} label="Borrar" />
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
             {totalPages > 1 && (
                 <div className="p-4 bg-slate-50/50 dark:bg-zinc-800/30 border-t dark:border-white/5 flex justify-between items-center">
                     <span className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest px-4">Página {page} de {totalPages}</span>

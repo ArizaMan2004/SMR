@@ -85,33 +85,33 @@ export function GastosFijosList({
         const isVariable = gasto.categoria?.toLowerCase().includes("impuesto") || montoPrincipal === 0;
 
         return (
-          <div 
+          <div
             key={gasto.id}
             className={cn(
-              "group flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-6 bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] border border-black/5 transition-all duration-300",
-              isPaidMode 
-                ? "opacity-80 hover:opacity-100" 
+              "group flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 p-4 sm:p-6 bg-white dark:bg-[#1c1c1e] rounded-[2rem] sm:rounded-[2.5rem] border border-black/5 transition-all duration-300",
+              isPaidMode
+                ? "opacity-80 hover:opacity-100"
                 : "hover:shadow-2xl hover:shadow-black/5 hover:-translate-y-1"
             )}
           >
             {/* SECCIÓN IZQUIERDA: IDENTIFICACIÓN */}
-            <div className="flex items-center gap-5 flex-1 w-full">
+            <div className="flex items-center gap-3 sm:gap-5 flex-1 w-full">
               <div className={cn(
-                "w-16 h-16 rounded-[1.8rem] flex items-center justify-center text-white shadow-xl shrink-0 transition-transform group-hover:scale-105",
-                isPaidMode 
-                  ? "bg-emerald-500 shadow-emerald-500/20" 
+                "w-12 h-12 sm:w-16 sm:h-16 rounded-[1.5rem] sm:rounded-[1.8rem] flex items-center justify-center text-white shadow-xl shrink-0 transition-transform group-hover:scale-105",
+                isPaidMode
+                  ? "bg-emerald-500 shadow-emerald-500/20"
                   : "bg-orange-500 shadow-orange-500/20"
               )}>
                 {isPaidMode ? (
-                  <CheckCircle2 size={28} strokeWidth={2.5} />
+                  <CheckCircle2 size={22} strokeWidth={2.5} />
                 ) : (
-                  <Clock size={28} strokeWidth={2.5} />
+                  <Clock size={22} strokeWidth={2.5} />
                 )}
               </div>
-              
+
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                    <h4 className="font-black text-slate-900 dark:text-white text-xl tracking-tight truncate uppercase italic">
+                <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-black text-slate-900 dark:text-white text-base sm:text-xl tracking-tight truncate uppercase italic">
                         {gasto.nombre}
                     </h4>
                     <span className={cn(
@@ -122,13 +122,13 @@ export function GastosFijosList({
                     </span>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-4 mt-1.5">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-1">
                   <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
                     {gasto.categoria}
                   </span>
-                  
-                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 italic">
-                    <Calendar size={14} className="text-blue-500" />
+
+                  <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 italic">
+                    <Calendar size={12} className="text-blue-500" />
                     <span>
                         {isPaidMode ? `Pagado: ${fechaAMostrar}` : `Vence: ${fechaAMostrar}`}
                     </span>
@@ -138,10 +138,10 @@ export function GastosFijosList({
             </div>
 
             {/* SECCIÓN DERECHA: IMPORTES Y ACCIONES */}
-            <div className="flex items-center justify-between w-full sm:w-auto gap-8 border-t sm:border-t-0 pt-4 sm:pt-0 border-black/5">
+            <div className="flex items-center justify-between w-full sm:w-auto gap-4 sm:gap-8 border-t sm:border-t-0 pt-3 sm:pt-0 border-black/5">
               <div className="text-right">
                 <div className="flex flex-col items-end">
-                    <span className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter italic">
+                    <span className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tighter italic">
                         ${montoPrincipal.toFixed(2)}
                     </span>
                     {isPaidMode && gasto.ultimoMontoPagadoBs && (
@@ -149,22 +149,22 @@ export function GastosFijosList({
                         {gasto.ultimoMontoPagadoBs.toLocaleString('es-VE')} Bs.
                       </span>
                     )}
-                    
+
                     {/* BADGE DE BILLETERA (SOLO EN MODO PAGADO) */}
                     {isPaidMode && (
                         <Badge variant="outline" className={cn(
                             "mt-1.5 text-[8px] font-black uppercase h-5 px-2 border gap-1",
-                            isBs 
-                                ? "text-blue-600 border-blue-200 bg-blue-50 dark:bg-blue-900/20" 
+                            isBs
+                                ? "text-blue-600 border-blue-200 bg-blue-50 dark:bg-blue-900/20"
                                 : "text-emerald-600 border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20"
                         )}>
                             <CreditCard size={10} /> {metodoPago}
                         </Badge>
                     )}
                 </div>
-                
+
                 {!isPaidMode && (
-                  <button 
+                  <button
                     disabled={isLoading}
                     onClick={() => onPay(gasto)}
                     className="group/btn text-[10px] font-black uppercase tracking-widest text-blue-600 hover:text-blue-700 mt-2 flex items-center gap-2 ml-auto transition-all disabled:opacity-50"
@@ -182,22 +182,21 @@ export function GastosFijosList({
               {/* BOTONES DE EDICIÓN / ELIMINACIÓN */}
               {!isPaidMode && (
                 <div className="flex items-center gap-1 bg-slate-50 dark:bg-white/5 p-1.5 rounded-2xl">
-                  <button 
+                  <button
                     disabled={isLoading}
                     onClick={() => onEdit(gasto)}
                     title="Editar servicio"
-                    className="p-3 text-slate-400 hover:text-blue-500 hover:bg-white dark:hover:bg-slate-800 rounded-xl transition-all shadow-sm disabled:opacity-30"
+                    className="p-2 sm:p-3 text-slate-400 hover:text-blue-500 hover:bg-white dark:hover:bg-slate-800 rounded-xl transition-all shadow-sm disabled:opacity-30"
                   >
-                    <Edit2 size={18} />
+                    <Edit2 size={16} />
                   </button>
-                  <button 
+                  <button
                     disabled={isLoading}
                     onClick={() => onDelete(gasto.id)}
                     title="Eliminar de la lista global"
-                    className="p-3 text-slate-400 hover:text-red-500 hover:bg-white dark:hover:bg-slate-800 rounded-xl transition-all shadow-sm disabled:opacity-30"
+                    className="p-2 sm:p-3 text-slate-400 hover:text-red-500 hover:bg-white dark:hover:bg-slate-800 rounded-xl transition-all shadow-sm disabled:opacity-30"
                   >
-                    {/* AQUÍ ESTABA EL ERROR DE COMILLAS ESCAPADAS */}
-                    {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
+                    {isLoading ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
                   </button>
                 </div>
               )}

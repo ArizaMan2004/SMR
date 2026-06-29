@@ -10,6 +10,7 @@
     "postinstall": "mkdir -p public/ai-assets && cp -r node_modules/@imgly/background-removal/dist/* public/ai-assets/ && cp node_modules/onnxruntime-web/dist/*.wasm public/ai-assets/"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.107.0",
     "@hookform/resolvers": "^3.10.0",
     "@imgly/background-removal": "^1.7.0",
     "@radix-ui/react-accordion": "1.2.2",

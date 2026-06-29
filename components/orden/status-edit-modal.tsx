@@ -1,7 +1,7 @@
 // @/components/orden/status-edit-modal.tsx
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { type OrdenServicio, EstadoOrden } from "@/lib/types/orden"
 // Asume que estos son de Shadcn UI o similar
 import {
@@ -26,8 +26,8 @@ export function StatusEditModal({ isOpen, orden, onClose, onSave }: StatusEditMo
   // Inicializa el estado con el estado actual de la orden o una cadena vacía
   const [nuevoEstado, setNuevoEstado] = useState<EstadoOrden | "">(orden?.estado || "")
 
-  // Actualiza el estado local cada vez que la prop 'orden' cambie y el modal se abra
-  useState(() => {
+  // Sincroniza el estado local cada vez que la prop 'orden' cambie y el modal se abra
+  useEffect(() => {
     if (orden && isOpen) {
       setNuevoEstado(orden.estado);
     }

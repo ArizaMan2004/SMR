@@ -143,29 +143,29 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
   }
 
   return (
-    <Card className="overflow-hidden border-0 shadow-2xl bg-white/70 dark:bg-[#1c1c1e]/70 backdrop-blur-3xl rounded-[3rem]">
+    <Card className="overflow-hidden border-0 shadow-2xl bg-white/70 dark:bg-[#1c1c1e]/70 backdrop-blur-3xl rounded-[2rem] sm:rounded-[3rem]">
       {/* Banner Superior Estilo iOS */}
       <div className={cn(
-        "h-28 p-8 flex justify-between items-start transition-colors duration-500",
+        "p-5 sm:p-8 flex justify-between items-start transition-colors duration-500",
         initialData ? "bg-gradient-to-r from-indigo-600 to-purple-500" : "bg-gradient-to-r from-blue-600 to-blue-400"
       )}>
         <div className="relative z-10">
-          <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter">
+          <h3 className="text-xl sm:text-2xl font-black text-white italic uppercase tracking-tighter">
             {initialData ? "Editar Gasto" : "Nuevo Gasto"}
           </h3>
           <p className="text-blue-100 text-[10px] font-bold uppercase tracking-widest opacity-80">
             SMR • Control de Operaciones
           </p>
         </div>
-        <ShoppingCart className="text-white/20 w-16 h-16 -rotate-12" />
+        <ShoppingCart className="text-white/20 w-12 h-12 sm:w-16 sm:h-16 -rotate-12" />
       </div>
 
-      <form onSubmit={handleSubmit} className="p-8 -mt-6 bg-white dark:bg-[#1c1c1e] rounded-t-[3rem] space-y-8">
-        
+      <form onSubmit={handleSubmit} className="p-5 sm:p-8 -mt-4 sm:-mt-6 bg-white dark:bg-[#1c1c1e] rounded-t-[2rem] sm:rounded-t-[3rem] space-y-5 sm:space-y-8">
+
         {/* Selector de Departamento */}
         <div className="space-y-2">
-            <label className="text-[9px] font-black uppercase text-slate-400 ml-4 tracking-widest">Asignar a Departamento</label>
-            <div className="grid grid-cols-3 gap-2 bg-slate-100 dark:bg-black/20 p-1.5 rounded-2xl">
+            <label className="text-[9px] font-black uppercase text-slate-400 ml-3 tracking-widest">Asignar a Departamento</label>
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-2 bg-slate-100 dark:bg-black/20 p-1 sm:p-1.5 rounded-xl sm:rounded-2xl">
                 {DEPARTAMENTOS.map((dpto) => {
                     const Icon = dpto.icon;
                     const isActive = formData.area === dpto.id;
@@ -175,13 +175,13 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
                             type="button"
                             onClick={() => setFormData(p => ({ ...p, area: dpto.id }))}
                             className={cn(
-                                "flex items-center justify-center gap-2 py-3 rounded-xl transition-all duration-300 text-[10px] font-black uppercase tracking-wide",
-                                isActive 
-                                    ? "bg-white dark:bg-white/10 text-blue-600 shadow-md scale-95 ring-1 ring-black/5" 
+                                "flex items-center justify-center gap-1.5 py-2.5 sm:py-3 rounded-lg sm:rounded-xl transition-all duration-300 text-[9px] sm:text-[10px] font-black uppercase tracking-wide",
+                                isActive
+                                    ? "bg-white dark:bg-white/10 text-blue-600 shadow-md scale-95 ring-1 ring-black/5"
                                     : "text-slate-400 hover:bg-white/50"
                             )}
                         >
-                            <Icon size={14} /> {dpto.label}
+                            <Icon size={13} /> {dpto.label}
                         </button>
                     )
                 })}
@@ -189,7 +189,7 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
         </div>
 
         {/* Selector de Categoría */}
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
           {CATEGORIAS.map((cat) => {
             const Icon = cat.icon
             const isActive = formData.categoria === cat.id
@@ -199,9 +199,9 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
                 type="button"
                 onClick={() => setFormData(p => ({ ...p, categoria: cat.id }))}
                 className={cn(
-                  "flex flex-col items-center justify-center p-4 rounded-2xl border transition-all duration-300",
-                  isActive 
-                    ? "bg-blue-600 border-blue-600 shadow-lg scale-95" 
+                  "flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl sm:rounded-2xl border transition-all duration-300",
+                  isActive
+                    ? "bg-blue-600 border-blue-600 shadow-lg scale-95"
                     : "bg-slate-50 dark:bg-white/5 border-transparent opacity-60 hover:opacity-100"
                 )}
               >
@@ -215,16 +215,16 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
         </div>
 
         {/* Campos de Identificación */}
-        <div className="grid grid-cols-1 gap-6">
+        <div className="grid grid-cols-1 gap-4 sm:gap-6">
           <div className="space-y-1.5">
-            <label className="text-[9px] font-black uppercase text-slate-400 ml-4 tracking-widest">Nombre / Identificación</label>
+            <label className="text-[9px] font-black uppercase text-slate-400 ml-3 tracking-widest">Nombre / Identificación</label>
             <div className="relative group">
-              <FileText className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-blue-600 transition-colors" />
+              <FileText className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-blue-600 transition-colors" />
               <input
                 required
                 value={formData.nombre}
                 onChange={(e) => setFormData(p => ({ ...p, nombre: e.target.value }))}
-                className="w-full pl-12 pr-6 py-4 bg-slate-50 dark:bg-white/5 rounded-2xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-bold text-sm"
+                className="w-full pl-10 sm:pl-12 pr-5 py-3 sm:py-4 bg-slate-50 dark:bg-white/5 rounded-xl sm:rounded-2xl border-none outline-none focus:ring-2 focus:ring-blue-500 font-bold text-sm"
                 placeholder="Ej: Pintura, Lijas, Toner..."
               />
             </div>
@@ -232,23 +232,23 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
         </div>
 
         {/* Área de Montos y Conversión */}
-        <div className="bg-slate-900 dark:bg-black p-6 rounded-[2.5rem] relative overflow-hidden shadow-inner">
-          <ArrowRightLeft className="absolute right-6 top-6 w-12 h-12 text-white/5" />
-          
+        <div className="bg-slate-900 dark:bg-black p-5 sm:p-6 rounded-[1.5rem] sm:rounded-[2.5rem] relative overflow-hidden shadow-inner">
+          <ArrowRightLeft className="absolute right-4 top-4 w-10 h-10 sm:w-12 sm:h-12 text-white/5" />
+
           <div className="space-y-4">
             {/* Campo USD */}
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-blue-500/20 flex items-center justify-center text-blue-500 shadow-lg">
-                <DollarSign className="w-6 h-6" />
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-blue-500/20 flex items-center justify-center text-blue-500 shadow-lg shrink-0">
+                <DollarSign className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-1">Dólares ($)</p>
                 <input
                   type="number"
                   step="0.01"
                   value={formData.montoUSD}
                   onChange={(e) => handleMontoChange(e.target.value, "USD")}
-                  className="bg-transparent border-none outline-none text-4xl font-black text-white w-full placeholder:text-white/5"
+                  className="bg-transparent border-none outline-none text-3xl sm:text-4xl font-black text-white w-full placeholder:text-white/5"
                   placeholder="0.00"
                 />
               </div>
@@ -257,11 +257,11 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
             <div className="h-px bg-white/10 mx-2" />
 
             {/* Campo Bs */}
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 flex items-center justify-center text-emerald-500 shadow-lg">
-                <Coins className="w-6 h-6" />
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-emerald-500/20 flex items-center justify-center text-emerald-500 shadow-lg shrink-0">
+                <Coins className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-1">
                     Bolívares (Tasa: {bcvRate.toFixed(2)})
                 </p>
@@ -270,7 +270,7 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
                   step="0.01"
                   value={formData.montoBs}
                   onChange={(e) => handleMontoChange(e.target.value, "BS")}
-                  className="bg-transparent border-none outline-none text-2xl font-black text-emerald-500 w-full placeholder:text-emerald-900"
+                  className="bg-transparent border-none outline-none text-xl sm:text-2xl font-black text-emerald-500 w-full placeholder:text-emerald-900"
                   placeholder="0.00"
                 />
               </div>
@@ -319,7 +319,7 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
             type="submit"
             disabled={isLoading}
             className={cn(
-                "h-[56px] px-10 rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest gap-3 shadow-xl active:scale-95 transition-all w-full",
+                "h-14 sm:h-[56px] rounded-[1.25rem] sm:rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest gap-3 shadow-xl active:scale-95 transition-all w-full",
                 initialData ? "bg-indigo-600 hover:bg-indigo-700 text-white" : "bg-blue-600 hover:bg-blue-700 text-white"
             )}
         >

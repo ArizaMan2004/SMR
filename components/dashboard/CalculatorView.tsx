@@ -202,7 +202,7 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
         <AnimatePresence>
             <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm" />
-                <motion.div initial={{ scale: 0.95, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 10 }} className="bg-white dark:bg-slate-950 w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden z-[160] border border-slate-200 dark:border-slate-800">
+                <motion.div initial={{ scale: 0.95, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 10 }} className="bg-white dark:bg-slate-950 w-full max-w-lg rounded-[2.5rem] shadow-2xl max-h-[90vh] overflow-y-auto z-[160] border border-slate-200 dark:border-slate-800">
                     <div className="bg-slate-900 p-6 text-white text-center relative">
                         <div className="absolute top-4 right-5 text-emerald-400"><CheckCircle2 size={20}/></div>
                         <h3 className="text-xl font-black italic tracking-tighter">{data.name}</h3>
@@ -393,7 +393,7 @@ const MetroCuadradoCalculator = ({ rates, onSendToProduction }: { rates: any, on
                                     </div>
                                     <Button variant="ghost" size="icon" onClick={() => setMediciones(mediciones.length > 1 ? mediciones.filter(i => i.id !== m.id) : mediciones)} className="h-8 w-8 text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors"><Trash2 size={16}/></Button>
                                 </div>
-                                <div className="grid grid-cols-4 gap-2 sm:gap-3">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
                                     <div className="space-y-1"><Label className="text-[8px] font-black uppercase text-slate-400 ml-1">Cant.</Label><Input type="number" className="rounded-xl h-9 text-xs font-black text-blue-600" value={m.cantidad || ""} onChange={e => setMediciones(mediciones.map(i => i.id === m.id ? {...i, cantidad: parseInt(e.target.value)||0} : i))} /></div>
                                     <div className="space-y-1"><Label className="text-[8px] font-black uppercase text-slate-400 ml-1">Alto (cm)</Label><Input type="number" className="rounded-xl h-9 text-xs font-bold" value={m.cmAlto || ""} onChange={e => setMediciones(mediciones.map(i => i.id === m.id ? {...i, cmAlto: parseFloat(e.target.value)||0} : i))} /></div>
                                     <div className="space-y-1"><Label className="text-[8px] font-black uppercase text-slate-400 ml-1">Ancho (cm)</Label><Input type="number" className="rounded-xl h-9 text-xs font-bold" value={m.cmAncho || ""} onChange={e => setMediciones(mediciones.map(i => i.id === m.id ? {...i, cmAncho: parseFloat(e.target.value)||0} : i))} /></div>

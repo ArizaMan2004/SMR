@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth-context"
 
 // --- IMPORTACIONES PARA FIREBASE ---
 import { db } from "@/lib/firebase"
-import { doc, updateDoc, arrayUnion, collection, onSnapshot } from "firebase/firestore"
+import { doc, updateDoc, arrayUnion, collection, onSnapshot, runTransaction } from "firebase/firestore"
 
 // UI - Shadcn
 import { Button } from "@/components/ui/button"
@@ -31,7 +31,8 @@ import { PaymentEditModal } from "@/components/dashboard/PaymentEditModal"
 import { PaymentAuditView } from "@/components/dashboard/PaymentAuditView"
 import { NewsBar, type NewsAction } from "@/components/dashboard/news-bar" 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal" 
-import { TaskControlView } from "@/components/dashboard/TaskControlView" // <-- NUEVO COMPONENTE
+import { TaskControlView } from "@/components/dashboard/TaskControlView"
+import { CatalogInventoryView } from "@/components/dashboard/CatalogInventoryView"
 
 // --- IMPORTACIONES DE HERRAMIENTAS IA Y DISEÑO ---
 import { BackgroundRemoverView } from "@/components/dashboard/BackgroundRemoverView" 
@@ -41,23 +42,23 @@ import { FormatConverterView } from "@/components/dashboard/FormatConverterView"
 // Componentes Administrativos y de Perfil
 import { GastosFijosView } from "@/components/dashboard/gastos-fijos-view"
 import { InsumosView } from "@/components/dashboard/InsumosView"
-import InventoryView from "@/components/dashboard/inventoryView" 
+
 import { EmpleadosView } from "@/components/dashboard/empleados-view"
 import { EstadisticasDashboard } from "@/components/dashboard/estadisticas-dashboard"
 import { NotificationCenterExpenses, type NotificationGasto } from "@/components/dashboard/notification-center-expenses"
 import { UsersManagementView } from "@/components/dashboard/UsersManagementView" 
 import { ProfileSettingsView } from "@/components/dashboard/ProfileSettingsView"
-import { EmployeeFinancesView } from "@/components/dashboard/EmployeeFinancesView" 
+import { EmployeeFinancesView } from "@/components/dashboard/EmployeeFinancesView"
 
 // Controlador del Tutorial
-import { startTour } from "@/components/dashboard/TutorialController" 
+import { HelpModal } from "@/components/dashboard/TutorialController"
 
 // Iconos
-import { 
-    Plus, CheckCircle, Calculator, LayoutDashboard, FileSpreadsheet, Clock, 
-    Building2, Bell, CheckCircle2, ChevronLeft, Menu, DollarSign, Euro, Coins, 
-    Wallet, Search, HelpCircle, AlertCircle, Loader2, ShieldCheck, Layers
-} from "lucide-react" 
+import {
+    Plus, CheckCircle, Calculator, LayoutDashboard, FileSpreadsheet, Clock,
+    Building2, Bell, CheckCircle2, ChevronLeft, Menu, DollarSign, Euro, Coins,
+    Wallet, Search, HelpCircle, AlertCircle, Loader2, ShieldCheck, Layers, ShoppingCart
+} from "lucide-react"
 
 // Servicios
 import { type OrdenServicio } from "@/lib/types/orden"
@@ -73,17 +74,20 @@ import {
     createNotification, deleteNotification, updateNotificationStatus, createGasto 
 } from "@/lib/services/gastos-service"
 import { subscribeToClients } from "@/lib/services/clientes-service"
+import { subscribeToVentasCatalogo } from "@/lib/services/catalog-service"
 import { syncAllOrdersClientStatus } from "@/lib/services/maintenance-service"
 
 import { fetchBCVRateFromAPI, getBCVRateFromStorage } from "@/lib/services/bcv-service"
-import { 
-    getLogoBase64, setLogoBase64, getFirmaBase64, setFirmaBase64, 
-    getSelloBase64, setSelloBase64 
-} from "@/lib/logo-service" 
+import {
+    getLogoBase64, setLogoBase64, getFirmaBase64, setFirmaBase64,
+    getSelloBase64, setSelloBase64
+} from "@/lib/logo-service"
 import { cn } from "@/lib/utils"
 import type { GastoFijo, Empleado, PagoEmpleado } from "@/lib/types/gastos"
+import { NotificationProvider } from "@/lib/contexts/notification-context"
+import { notifyNuevaOrden } from "@/lib/services/notification-service"
 
-const springConfig = { type: "spring", stiffness: 300, damping: 30 };
+const springConfig = { type: "spring", stiffness: 300, damping: 30 } as const;
 type ActiveView = string; 
 
 export default function Dashboard() {
@@ -92,19 +96,43 @@ export default function Dashboard() {
 
     // --- 1. ESTADOS DE UI ---
     const [activeView, setActiveView] = useState<ActiveView>("orders") 
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true) 
+
+    // Menú: abierto por defecto en escritorio, cerrado en móvil (evita que tape el contenido al cargar).
+    const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+        if (typeof window === "undefined") return false
+        return window.innerWidth >= 1024
+    })
+
+    // Sincroniza el estado del menú al cruzar el breakpoint (1024px): abre en escritorio, cierra en móvil.
+    useEffect(() => {
+        const mq = window.matchMedia("(max-width: 1023px)")
+        const apply = (isMobile: boolean) => setIsSidebarOpen(!isMobile)
+        const handler = (e: MediaQueryListEvent) => apply(e.matches)
+        mq.addEventListener("change", handler)
+        return () => mq.removeEventListener("change", handler)
+    }, [])
+
+    // Bloquea el scroll de fondo cuando el menú está abierto en pantallas pequeñas.
+    useEffect(() => {
+        const isMobile = typeof window !== "undefined" && window.innerWidth < 1024
+        if (isMobile && isSidebarOpen) {
+            const prev = document.body.style.overflow
+            document.body.style.overflow = "hidden"
+            return () => { document.body.style.overflow = prev }
+        }
+    }, [isSidebarOpen])
     
-    // REDIRECCIÓN MÁGICA: Si es empleado, mandarlo al taller por defecto en vez de facturación
+    // Redirige a empleados de producción al taller al cargar por primera vez.
+    // Solo depende de userData: no necesitamos correr esto en cada cambio de vista.
     useEffect(() => {
         if (userData) {
             const productionRoles = ['DISENADOR', 'IMPRESOR', 'OPERADOR_LASER', 'PRODUCCION', 'EMPLEADO'];
-            if (productionRoles.includes(userData.rol)) {
-                if (activeView === "orders") {
-                    setActiveView("tasks_taller");
-                }
+            if (productionRoles.includes(userData.rol) && activeView === "orders") {
+                setActiveView("tasks_taller");
             }
         }
-    }, [userData, activeView]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [userData]);
     
     const [searchTerm, setSearchTerm] = useState("") 
     const [isSearchingDeep, setIsSearchingDeep] = useState(false)
@@ -129,6 +157,7 @@ export default function Dashboard() {
     const [hasUnseenNotifications, setHasUnseenNotifications] = useState(false)
     const [showRateToast, setShowRateToast] = useState(false)
     const [rateToastMessage, setRateToastMessage] = useState("")
+    const [isHelpOpen, setIsHelpOpen] = useState(false)
 
     // --- 2. ESTADOS DE DATOS ---
     const [currentBcvRate, setCurrentBcvRate] = useState<number>(0)
@@ -149,7 +178,9 @@ export default function Dashboard() {
     const [empleados, setEmpleados] = useState<Empleado[]>([])
     const [pagos, setPagos] = useState<PagoEmpleado[]>([]) 
     const [clientes, setClientes] = useState<any[]>([])
-    const [movimientosCaja, setMovimientosCaja] = useState<any[]>([]) 
+    const [movimientosCaja, setMovimientosCaja] = useState<any[]>([])
+    const [ventasCatalogo, setVentasCatalogo] = useState<any[]>([])
+    const [tareasControl, setTareasControl] = useState<any[]>([]) 
 
     // --- AUTOCOMPLETADO DE CLIENTES (Memoizado) ---
     const suggestedClients = useMemo(() => {
@@ -172,35 +203,48 @@ export default function Dashboard() {
 
     // --- 3. NAV ITEMS (CON ROLES INTEGRADADOS Y LIMPIEZA) ---
     const navItems = useMemo(() => [
-        { 
-            id: 'orders', 
-            label: 'Facturación y Cierre', 
-            icon: <LayoutDashboard className="w-4 h-4" />, 
-            roles: ['ADMIN', 'VENDEDOR'] // Restringido
+        {
+            id: 'orders',
+            label: 'Facturación y Cierre',
+            icon: <LayoutDashboard className="w-4 h-4" />,
+            roles: ['ADMIN', 'VENDEDOR', 'CAJERO']
         },
-        { 
-            id: 'tasks_taller', 
-            label: 'Taller de Producción', 
-            icon: <CheckCircle className="w-4 h-4" /> 
-            // Libre para todos
+        {
+            id: 'tasks_taller',
+            label: 'Taller de Producción',
+            icon: <CheckCircle className="w-4 h-4" />,
+            roles: ['ADMIN', 'VENDEDOR', 'DISENADOR', 'IMPRESOR', 'OPERADOR_LASER', 'PRODUCCION', 'EMPLEADO']
         },
-        { 
-            id: 'task_control', 
-            label: 'Control de Tareas (Bonos)', 
-            icon: <Layers className="w-4 h-4" /> 
-            // Libre para todos (Admin audita, empleados registran)
+        {
+            id: 'task_control',
+            label: 'Control de Tareas (Bonos)',
+            icon: <Layers className="w-4 h-4" />,
+            roles: ['ADMIN', 'VENDEDOR', 'DISENADOR', 'IMPRESOR', 'OPERADOR_LASER', 'PRODUCCION', 'EMPLEADO']
         },
-        { 
-            id: 'my_finances', 
-            label: 'Mis Finanzas', 
-            icon: <Wallet className="w-4 h-4" />
-            // Libre para todos. Los empleados verán sus recibos aquí.
+        {
+            id: 'my_finances',
+            label: 'Mis Finanzas',
+            icon: <Wallet className="w-4 h-4" />,
+            roles: ['ADMIN', 'VENDEDOR', 'DISENADOR', 'IMPRESOR', 'OPERADOR_LASER', 'PRODUCCION', 'EMPLEADO']
         },
+        // --- GRUPO CAJERO: ventas y atención al cliente ---
+        {
+            id: 'cajero_group',
+            label: 'Ventas & Clientes',
+            icon: <ShoppingCart className="w-4 h-4" />,
+            roles: ['CAJERO'],
+            children: [
+                { id: 'catalogo_ventas', label: 'Catálogo & Ventas' },
+                { id: 'clients', label: 'Clientes & Cobranza' },
+                { id: 'calculator', label: 'Presupuestos (PDF)' },
+            ]
+        },
+        // --- GRUPO ADMIN ---
         {
             id: 'admin_group',
             label: 'Administración SMR',
             icon: <Building2 className="w-4 h-4" />,
-            roles: ['ADMIN'], // Restringido
+            roles: ['ADMIN'],
             children: [
                 { id: 'wallets', label: 'Billeteras & Caja' },
                 { id: 'payment_audit', label: 'Auditoría de Pagos' },
@@ -209,7 +253,7 @@ export default function Dashboard() {
                 { id: 'design_production', label: 'Pago Diseños' },
                 { id: 'fixed_expenses', label: 'Gastos Fijos' },
                 { id: 'insumos_mgmt', label: 'Insumos y Materiales' },
-                { id: 'inventory_general', label: 'Inventario General' },
+                { id: 'catalogo_ventas', label: 'Catálogo & Ventas' },
                 { id: 'employees_mgmt', label: 'Gestión de Personal' },
             ]
         },
@@ -217,18 +261,18 @@ export default function Dashboard() {
             id: 'users_auth',
             label: 'Accesos y Roles',
             icon: <ShieldCheck className="w-4 h-4" />,
-            roles: ['ADMIN'] // Restringido
+            roles: ['ADMIN']
         },
         {
             id: 'tools_group',
             label: 'Herramientas',
-            icon: <Calculator className="w-4 h-4" />, 
+            icon: <Calculator className="w-4 h-4" />,
             children: [
-                { id: 'calculator', label: 'Presupuestos (PDF)', roles: ['ADMIN', 'VENDEDOR'] }, // Restringido
-                { id: 'old_calculator', label: 'Calculadora de Producción' }, // Libre
-                { id: 'ai_background', label: 'IA Quita Fondos' }, // Libre
-                { id: 'ai_upscale', label: 'IA Upscale (HD)' }, // Libre
-                { id: 'format_converter', label: 'Convertidor Formatos' }, // Libre
+                { id: 'calculator', label: 'Presupuestos (PDF)', roles: ['ADMIN', 'VENDEDOR'] },
+                { id: 'old_calculator', label: 'Calculadora de Producción' },
+                { id: 'ai_background', label: 'IA Quita Fondos' },
+                { id: 'ai_upscale', label: 'IA Upscale (HD)' },
+                { id: 'format_converter', label: 'Convertidor Formatos' },
             ]
         },
     ], []);
@@ -335,6 +379,7 @@ export default function Dashboard() {
                 newValue = label === "USD" ? data.usd : data.eur;
             } else if (label === "USDT") {
                 const res = await fetch('https://ve.dolarapi.com/v1/dolares/paralelo');
+                if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
                 const data = await res.json();
                 if (data?.promedio) { setParallelRate(data.promedio); newValue = data.promedio; }
             }
@@ -346,84 +391,102 @@ export default function Dashboard() {
     }, [currentUserId]);
 
     const handleRegisterOrderPayment = async (
-        ordenId: string, 
-        monto: number, 
-        nota?: string, 
+        ordenId: string,
+        monto: number,
+        nota?: string,
         imagenUrl?: string,
         metodo?: string,
         descuento?: number,
-        fechaPago?: string 
+        fechaPago?: string
     ) => {
-        try {
-            const ordenActual = ordenes.find(o => o.id === ordenId) || selectedOrdenForPayment;
-            
-            if (!ordenActual) {
-                toast.error("No se pudo referenciar la orden para el pago.");
-                return;
-            }
-            
-            const ordenRef = doc(db, "ordenes", ordenId);
-            const montoPagadoAnterior = Number(ordenActual.montoPagadoUSD) || 0;
-            
-            const descuentoAplicado = descuento || 0;
-            const nuevoMontoTotalPagado = montoPagadoAnterior + monto + descuentoAplicado;
-            
-            const saldoRestante = Number(ordenActual.totalUSD) - nuevoMontoTotalPagado;
-            const nuevoEstadoPago = saldoRestante <= 0.01 ? "PAGADO" : "ABONADO";
+        const descuentoAplicado = descuento || 0;
+        const fechaRecibo = fechaPago || new Date().toISOString();
 
-            const nuevoRecibo = {
+        const pagosAGuardar: any[] = [
+            {
                 montoUSD: monto,
-                fecha: fechaPago || new Date().toISOString(),
+                fecha: fechaRecibo,
                 nota: nota || "",
                 imagenUrl: imagenUrl || "",
                 tasaBCV: currentBcvRate,
-                metodo: metodo || "Efectivo USD" 
-            };
+                metodo: metodo || "Efectivo USD",
+            },
+        ];
+        if (descuentoAplicado > 0) {
+            pagosAGuardar.push({
+                montoUSD: descuentoAplicado,
+                fecha: new Date().toISOString(),
+                nota: "Ajuste/Descuento por cierre de orden",
+                imagenUrl: "",
+                tasaBCV: 0,
+                metodo: "DESCUENTO",
+            });
+        }
 
-            const pagosAGuardar = [nuevoRecibo];
+        try {
+            const ordenRef = doc(db, "ordenes", ordenId);
 
-            if (descuentoAplicado > 0) {
-                pagosAGuardar.push({
-                    montoUSD: descuentoAplicado,
-                    fecha: new Date().toISOString(),
-                    nota: "Ajuste/Descuento por cierre de orden",
-                    imagenUrl: "",
-                    tasaBCV: 0,
-                    metodo: "DESCUENTO" 
+            // Transacción: leer datos FRESCOS de Firestore → calcular → escribir de forma atómica.
+            // Esto evita leer estado local desactualizado y previene registros duplicados por doble envío.
+            const resultado = await runTransaction(db, async (tx) => {
+                const snap = await tx.get(ordenRef);
+                if (!snap.exists()) throw new Error("La orden no existe en la base de datos.");
+
+                const data = snap.data() as any;
+                const montoPagadoAnterior = Number(data.montoPagadoUSD) || 0;
+                const totalUSD = Number(data.totalUSD) || 0;
+                const nuevoMonto = montoPagadoAnterior + monto + descuentoAplicado;
+                const saldo = totalUSD - nuevoMonto;
+                const nuevoEstado = saldo <= 0.01 ? "PAGADO" : "ABONADO";
+
+                // Normalizar registroPagos (Firebase puede convertir arrays en objetos en edge cases)
+                const registroActual: any[] = Array.isArray(data.registroPagos)
+                    ? data.registroPagos
+                    : data.registroPagos
+                        ? Object.values(data.registroPagos)
+                        : [];
+
+                tx.update(ordenRef, {
+                    montoPagadoUSD: nuevoMonto,
+                    estadoPago: nuevoEstado,
+                    // Concatenar en lugar de arrayUnion: en una transacción ya tenemos el array
+                    // completo, así no se agregan duplicados por reintento de red.
+                    registroPagos: [...registroActual, ...pagosAGuardar],
                 });
-            }
 
-            await updateDoc(ordenRef, {
-                montoPagadoUSD: nuevoMontoTotalPagado,
-                estadoPago: nuevoEstadoPago,
-                registroPagos: arrayUnion(...pagosAGuardar)
-            });
-            
-            let descNoti = `Ingreso de $${monto} (${metodo || "Caja"}) - Orden #${ordenActual.ordenNumero}`;
-            if(descuentoAplicado > 0) descNoti += ` + Ajuste de $${descuentoAplicado.toFixed(2)}`;
-
-            await createNotification({
-                title: "Pago Registrado",
-                description: descNoti,
-                type: 'success',
-                category: 'system'
+                return {
+                    nuevoMonto,
+                    nuevoEstado,
+                    ordenNumero: data.ordenNumero,
+                    totalUSD,
+                    registroPagosActualizado: [...registroActual, ...pagosAGuardar],
+                    ordenCompleta: { id: ordenId, ...data },
+                };
             });
 
-            // ACTUALIZACIÓN LOCAL OPTIMISTA PARA ÓRDENES ANTIGUAS
-            setOrdenes(prevOrdenes => prevOrdenes.map(o => {
-                if (o.id === ordenId) {
-                    return {
-                        ...o,
-                        montoPagadoUSD: nuevoMontoTotalPagado,
-                        estadoPago: nuevoEstadoPago,
-                        registroPagos: [...((o as any).registroPagos || []), ...pagosAGuardar]
-                    };
+            // Actualización local optimista: buscar la orden y actualizarla,
+            // o AÑADIRLA si era tan vieja que no estaba en los 150 recientes.
+            setOrdenes(prev => {
+                const existe = prev.some(o => o.id === ordenId);
+                const ordenActualizada = {
+                    ...(resultado.ordenCompleta as any),
+                    montoPagadoUSD: resultado.nuevoMonto,
+                    estadoPago: resultado.nuevoEstado,
+                    registroPagos: resultado.registroPagosActualizado,
+                };
+                if (existe) {
+                    return prev.map(o => o.id === ordenId ? { ...o, ...ordenActualizada } : o);
                 }
-                return o;
-            }));
-            
+                // Orden vieja no estaba en la lista local → agregarla para que Cobranza la vea
+                return [...prev, ordenActualizada];
+            });
+
+            let descNoti = `Ingreso de $${monto} (${metodo || "Caja"}) - Orden #${resultado.ordenNumero}`;
+            if (descuentoAplicado > 0) descNoti += ` + Ajuste de $${descuentoAplicado.toFixed(2)}`;
+            await createNotification({ title: "Pago Registrado", description: descNoti, type: 'success', category: 'system' });
+
             toast.success("Pago registrado correctamente");
-            setIsPaymentModalOpen(false); 
+            setIsPaymentModalOpen(false);
         } catch (error) {
             console.error("❌ Error al registrar pago:", error);
             toast.error("Error al registrar el pago");
@@ -446,6 +509,20 @@ export default function Dashboard() {
                 setOrdenes(prev => prev.map(o => o.id === editingOrder?.id ? orderUpdated : o));
             }
         }
+    };
+
+    const handleCreateOrden = async (payload: any) => {
+        const id = await createOrden(payload);
+        try {
+            await notifyNuevaOrden({
+                ordenNumero: payload.ordenNumero ?? '?',
+                cliente: payload.cliente,
+                items: payload.items ?? [],
+                totalUSD: payload.totalUSD ?? 0,
+                id: typeof id === 'string' ? id : undefined,
+            });
+        } catch { /* no-op: notif failure doesn't block order creation */ }
+        return id;
     };
 
     const handleDeepSearch = async (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -575,13 +652,20 @@ export default function Dashboard() {
         let unsubPagos = () => {};
         let unsubDesigners = () => {};
         let unsubMovimientosCaja = () => {};
+        let unsubTareas = () => {};
 
         // Ahora my_finances y task_control necesitan empleados y pagos
         if (["orders", "employees_mgmt", "financial_stats", "wallets", "payment_audit", "my_finances", "task_control"].includes(activeView)) {
             unsubEmpleados = subscribeToEmpleados((data) => setEmpleados(data));
             unsubPagos = subscribeToPagos((data) => setPagos(data));
         }
-        
+
+        if (["employees_mgmt", "my_finances", "task_control"].includes(activeView)) {
+            unsubTareas = onSnapshot(collection(db, "empleado_tareas"), (snap) => {
+                setTareasControl(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            });
+        }
+
         if (["orders", "design_production"].includes(activeView)) {
             unsubDesigners = subscribeToDesigners((data) => setDesigners(data));
         }
@@ -592,7 +676,13 @@ export default function Dashboard() {
             });
         }
 
-        return () => { unsubEmpleados(); unsubPagos(); unsubDesigners(); unsubMovimientosCaja(); };
+        return () => { unsubEmpleados(); unsubPagos(); unsubDesigners(); unsubMovimientosCaja(); unsubTareas(); };
+    }, [activeView]);
+
+    useEffect(() => {
+        if (!["financial_stats", "catalogo_ventas"].includes(activeView)) return;
+        const unsub = subscribeToVentasCatalogo(setVentasCatalogo);
+        return unsub;
     }, [activeView]);
 
 
@@ -695,37 +785,32 @@ export default function Dashboard() {
     const isRoleAdminOrSales = userData?.rol === 'ADMIN' || userData?.rol === 'VENDEDOR';
 
     return (
+      <NotificationProvider>
       <div className="flex h-screen bg-[#f2f2f7] dark:bg-black overflow-hidden relative font-sans text-slate-900 dark:text-white">
-        
-        {/* SIDEBAR */}
-        <div 
-            id="main-sidebar" 
-            className={cn(
-                "fixed top-0 left-0 h-full z-40 transition-all duration-300", 
-                isSidebarOpen ? "w-72" : "w-0 lg:w-20"
-            )}
-        >
-            <Sidebar 
-                activeView={activeView} 
-                setActiveView={setActiveView as any} 
-                navItems={navItems as any} 
-                onLogout={logout} 
-                isMobileOpen={isSidebarOpen} 
-                setIsMobileOpen={setIsSidebarOpen} 
+
+        {/* SIDEBAR — se posiciona, anima y maneja su propio backdrop móvil internamente */}
+        <div id="main-sidebar">
+            <Sidebar
+                activeView={activeView}
+                setActiveView={setActiveView as any}
+                navItems={navItems as any}
+                onLogout={logout}
+                isMobileOpen={isSidebarOpen}
+                setIsMobileOpen={setIsSidebarOpen}
+                onNavigate={(view) => setActiveView(view as any)}
             />
-            <div className="absolute inset-0 pointer-events-none" />
         </div>
         
-        <div className={cn("flex-1 flex flex-col relative transition-all duration-700 min-w-0 overflow-hidden", isSidebarOpen ? "lg:pl-72" : "lg:pl-0")}>
+        <div className={cn("flex-1 flex flex-col relative transition-[padding] duration-300 ease-in-out min-w-0 overflow-hidden", isSidebarOpen ? "lg:pl-72" : "lg:pl-0")}>
           
           <header id="dashboard-header" className="sticky top-0 flex items-center justify-between px-4 sm:px-6 py-4 border-b border-black/5 dark:border-white/5 bg-white/60 dark:bg-black/60 backdrop-blur-2xl z-50 w-full overflow-hidden">
             <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
                 <Button variant="ghost" size="icon" className="h-10 w-10 rounded-2xl bg-black/5 dark:bg-white/10 shrink-0" onClick={() => setIsSidebarOpen(!isSidebarOpen)}><Menu className="h-5 w-5" /></Button>
                 <h2 className="text-lg sm:text-xl font-bold tracking-tight italic uppercase truncate max-w-[150px] sm:max-w-none">
-                    {activeView === "tasks_taller" ? "Taller" : 
+                    {activeView === "tasks_taller" ? "Taller" :
                      activeView === "profile_settings" ? "Configuración" :
                      activeView === "my_finances" ? "Mis Finanzas" :
-                     navItems.find(i => i.id === activeView)?.label || 
+                     navItems.find(i => i.id === activeView)?.label ||
                      (activeView === "design_production" ? "Pago Diseños" : "Panel")}
                 </h2>
             </div>
@@ -737,7 +822,7 @@ export default function Dashboard() {
                     <TasaHeaderBadge label="USDT" value={parallelRate} icon={<Coins className="w-3.5 h-3.5" />} color="orange" onClick={() => handleUpdateRate("USDT")} />
                 </div>
                 
-                <Button variant="ghost" size="icon" className="rounded-2xl bg-blue-500/10 h-10 w-10 text-blue-600 hover:bg-blue-500 hover:text-white transition-colors" onClick={() => startTour(activeView)} title="Ver Tutorial">
+                <Button variant="ghost" size="icon" className="rounded-2xl bg-blue-500/10 h-10 w-10 text-blue-600 hover:bg-blue-500 hover:text-white transition-colors" onClick={() => setIsHelpOpen(true)} title="Guía del Sistema">
                     <HelpCircle className="h-5 w-5" />
                 </Button>
 
@@ -855,14 +940,27 @@ export default function Dashboard() {
                             <Button id="btn-new-order" onClick={() => { setEditingOrder(null); setIsWizardOpen(true); }} className="px-8 py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-[1.8rem] font-bold text-sm gap-3 shrink-0"><Plus /> NUEVA ORDEN</Button>
                         </motion.div>
 
-                        <motion.div layout className="bg-white dark:bg-[#1c1c1e] rounded-[2rem] border border-black/5 shadow-2xl overflow-hidden">
-                            <OrdersTable 
-                                ordenes={filteredOrdenes} 
-                                onDelete={handleDeleteOrden} 
-                                onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}} 
-                                onRegisterPayment={handleOpenPaymentModal} 
+                        <motion.div layout className="-mx-1 sm:mx-0">
+                            <OrdersTable
+                                ordenes={filteredOrdenes}
+                                onDelete={handleDeleteOrden}
+                                onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}}
+                                onRegisterPayment={handleOpenPaymentModal}
                                 onSavePayment={async (ordenId, amount, note, img, method, discount, fechaPago) => {
                                     await handleRegisterOrderPayment(ordenId, amount, note, img, method, discount, fechaPago);
+                                }}
+                                onUpdateOrden={async (ordenId, changes) => {
+                                    await actualizarOrden(ordenId, changes);
+                                    setOrdenes(prev => prev.map(o => o.id === ordenId ? { ...o, ...changes } : o));
+                                    if ((changes as any).estadoProduccion) {
+                                        const o = ordenes.find(x => x.id === ordenId);
+                                        if (o) {
+                                            try {
+                                                const { notifyEstadoProduccion } = await import('@/lib/services/notification-service');
+                                                await notifyEstadoProduccion({ ordenNumero: o.ordenNumero, cliente: o.cliente, estadoProduccion: (changes as any).estadoProduccion, id: ordenId });
+                                            } catch { /* no-op */ }
+                                        }
+                                    }
                                 }}
                                 currentUserId={currentUserId || ""}
                                 rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
@@ -882,19 +980,21 @@ export default function Dashboard() {
 
                 {/* VISTA DE FINANZAS PERSONALES DEL EMPLEADO */}
                 {activeView === "my_finances" && (
-                    <EmployeeFinancesView 
-                        empleados={empleados} 
-                        pagos={pagos} 
-                        currentUserId={currentUserId} 
-                        rates={{ usd: currentBcvRate, eur: eurRate }} 
+                    <EmployeeFinancesView
+                        empleados={empleados}
+                        pagos={pagos}
+                        tareas={tareasControl}
+                        currentUserId={currentUserId}
+                        rates={{ usd: currentBcvRate, eur: eurRate }}
                     />
                 )}
 
                 {/* VISTA DE CONTROL DE TAREAS Y BONOS */}
                 {activeView === "task_control" && (
-                    <TaskControlView 
-                        currentUser={userData} 
-                        empleadosDb={empleados} 
+                    <TaskControlView
+                        currentUser={userData}
+                        empleadosDb={empleados}
+                        rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
                     />
                 )}
 
@@ -905,6 +1005,7 @@ export default function Dashboard() {
 
                 {/* VISTAS ADMINISTRATIVAS */}
                 {activeView === "users_auth" && <UsersManagementView />}
+
                 
                 {activeView === "fixed_expenses" && (
                     <GastosFijosView 
@@ -918,9 +1019,19 @@ export default function Dashboard() {
                 )}
                 
                 {activeView === "insumos_mgmt" && <InsumosView gastos={gastos} currentBcvRate={currentBcvRate} currentUserId={currentUserId || ""} onCreateGasto={createGasto} onDeleteGasto={deleteGastoInsumo} />}
-                {activeView === "inventory_general" && <InventoryView />}
-                {activeView === "financial_stats" && <EstadisticasDashboard gastosInsumos={gastos as any} gastosFijos={gastosFijos} empleados={empleados} pagosEmpleados={pagos} cobranzas={ordenes.map(o => ({id: o.id, montoUSD: (o as any).totalUSD || 0, montoBs: (o as any).totalBs || 0, estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente', fecha: o.fecha })) as any} ordenes={ordenes} clientes={clientes} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} />}
-                {activeView === "employees_mgmt" && <EmpleadosView empleados={empleados} pagos={pagos} rates={{ usd: currentBcvRate, eur: eurRate }} />}
+
+                {activeView === "financial_stats" && <EstadisticasDashboard gastosInsumos={gastos as any} gastosFijos={gastosFijos} empleados={empleados} pagosEmpleados={pagos} cobranzas={ordenes.map(o => ({id: o.id, montoUSD: (o as any).totalUSD || 0, montoBs: (o as any).totalBs || 0, estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente', fecha: o.fecha })) as any} ordenes={ordenes} clientes={clientes} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} ventasCatalogo={ventasCatalogo} />}
+
+                {activeView === "catalogo_ventas" && (
+                    <CatalogInventoryView
+                        currentUser={userData}
+                        rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
+                        pdfLogoBase64={assets.logo}
+                        firmaBase64={assets.firma}
+                        selloBase64={assets.sello}
+                    />
+                )}
+                {activeView === "employees_mgmt" && <EmpleadosView empleados={empleados} pagos={pagos} tareas={tareasControl} rates={{ usd: currentBcvRate, eur: eurRate }} />}
                 {activeView === "wallets" && <WalletsView ordenes={ordenes} gastos={gastos} gastosFijos={gastosFijos} pagosEmpleados={pagos} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} movimientosManuales={movimientosCaja} />}
                 {activeView === "payment_audit" && <PaymentAuditView ordenes={ordenes} gastos={[...gastos, ...gastosFijos]} pagosEmpleados={pagos} />}
                 {activeView === "design_production" && <DesignerPayrollView designers={designers} ordenes={ordenes} bcvRate={currentBcvRate} />}
@@ -979,15 +1090,16 @@ export default function Dashboard() {
         <CurrencyToast show={showRateToast} message={rateToastMessage} onClose={() => setShowRateToast(false)} />
 
         <Dialog open={isWizardOpen} onOpenChange={setIsWizardOpen}>
-          <DialogContent className="w-full max-w-[95vw] lg:max-w-7xl h-auto p-0 border-none bg-transparent shadow-none focus:outline-none overflow-visible">
+          <DialogContent className="w-full max-w-[95vw] lg:max-w-7xl h-[92vh] p-0 border-none bg-transparent shadow-none focus:outline-none overflow-visible">
             <DialogTitle className="sr-only">{editingOrder ? "Editar Orden" : "Nueva Orden"}</DialogTitle>
-            <OrderFormWizardV2 
-                onClose={() => { setIsWizardOpen(false); setEditingOrder(null); }} 
-                initialData={editingOrder || undefined} 
-                currentUserId={currentUserId || ""} 
-                onCreate={createOrden} 
-                onUpdate={handleUpdateOrden} 
-                bcvRate={currentBcvRate} 
+            <OrderFormWizardV2
+                onClose={() => { setIsWizardOpen(false); setEditingOrder(null); }}
+                initialData={editingOrder || undefined}
+                currentUserId={currentUserId || ""}
+                onCreate={handleCreateOrden}
+                onUpdate={handleUpdateOrden}
+                bcvRate={currentBcvRate}
+                eurRate={eurRate}
             />
           </DialogContent>
         </Dialog>
@@ -1083,17 +1195,26 @@ export default function Dashboard() {
         </Dialog>
 
         {/* MODAL PARA MOSTRAR LOS DETALLES DE LA ORDEN */}
-        <OrderDetailModal 
-            open={isDetailModalOpen} 
+        <OrderDetailModal
+            open={isDetailModalOpen}
             onClose={() => {
                 setIsDetailModalOpen(false);
                 setTimeout(() => setSelectedOrderForDetails(null), 300);
-            }} 
-            orden={selectedOrderForDetails} 
-            rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} 
+            }}
+            orden={selectedOrderForDetails}
+            rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
+        />
+
+        {/* GUÍA DEL SISTEMA */}
+        <HelpModal
+            open={isHelpOpen}
+            onClose={() => setIsHelpOpen(false)}
+            activeView={activeView}
+            onNavigate={(view) => { setActiveView(view); setIsHelpOpen(false) }}
         />
 
       </div>
+      </NotificationProvider>
     )
 }
 

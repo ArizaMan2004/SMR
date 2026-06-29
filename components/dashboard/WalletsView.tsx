@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils"
 import { formatCurrency } from "@/lib/utils/order-utils"
 
 // --- IMPORTACIONES DE FIREBASE ---
-import { collection, addDoc, getDocs } from "firebase/firestore"
+import { collection, addDoc, getDocs, doc, setDoc, getDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 
 interface WalletsViewProps {
@@ -30,6 +30,8 @@ interface WalletsViewProps {
     yesterdayRate?: number
     initialBalancesData?: { cash_usd: number, bank_bs: number, zelle: number, usdt: number }
 }
+
+const INIT_BAL_DOC = "configuracion/billetera_saldos_iniciales"
 
 const WALLETS_CONFIG = [
     { id: 'cash_usd', label: 'Caja Chica ($)', currency: 'USD', icon: <Banknote className="w-6 h-6"/>, color: 'emerald', bg: 'bg-emerald-600' },
@@ -57,7 +59,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
     const [isExchangeModalOpen, setIsExchangeModalOpen] = useState(false)
     const [selectedMovement, setSelectedMovement] = useState<any | null>(null) 
 
-    const prevRate = yesterdayRate || (rates.usd * 0.98); 
+    const prevRate = (yesterdayRate && yesterdayRate > 0) ? yesterdayRate : (rates.usd > 0 ? rates.usd * 0.98 : 1);
 
     const [initialBalances, setInitialBalances] = useState({
         cash_usd: initialBalancesData?.cash_usd || 0,
@@ -84,36 +86,34 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
     const [fullMovimientos, setFullMovimientos] = useState<any[]>([])
     const [isCalculating, setIsCalculating] = useState(true)
 
-    // OBTENER HISTORIA COMPLETA
-    useEffect(() => {
-        const fetchFullHistory = async () => {
-            setIsCalculating(true);
-            try {
-                const [oSnap, gSnap, pSnap, mSnap] = await Promise.all([
-                    getDocs(collection(db, "ordenes")),
-                    getDocs(collection(db, "gastos_insumos")),
-                    getDocs(collection(db, "pagos")),
-                    getDocs(collection(db, "movimientos_caja"))
-                ]);
-                setFullOrdenes(oSnap.docs.map(d => ({id: d.id, ...d.data()})));
-                setFullGastos(gSnap.docs.map(d => ({id: d.id, ...d.data()})));
-                setFullPagos(pSnap.docs.map(d => ({id: d.id, ...d.data()})));
-                setFullMovimientos(mSnap.docs.map(d => ({id: d.id, ...d.data()})));
-            } catch (error) {
-                console.error("Error obteniendo historia para billeteras", error);
-            } finally {
-                setIsCalculating(false);
+    // OBTENER HISTORIA COMPLETA — reutilizable para refrescar sin reload
+    const fetchFullHistory = React.useCallback(async () => {
+        setIsCalculating(true);
+        try {
+            const [oSnap, gSnap, pSnap, mSnap, initDoc] = await Promise.all([
+                getDocs(collection(db, "ordenes")),
+                getDocs(collection(db, "gastos_insumos")),
+                getDocs(collection(db, "pagos")),
+                getDocs(collection(db, "movimientos_caja")),
+                getDoc(doc(db, INIT_BAL_DOC))
+            ]);
+            setFullOrdenes(oSnap.docs.map(d => ({...d.data(), id: d.id})));
+            setFullGastos(gSnap.docs.map(d => ({...d.data(), id: d.id})));
+            setFullPagos(pSnap.docs.map(d => ({...d.data(), id: d.id})));
+            setFullMovimientos(mSnap.docs.map(d => ({...d.data(), id: d.id})));
+            if (initDoc.exists()) {
+                const saved = initDoc.data() as any;
+                setInitialBalances(saved);
+                setTempInitialBalances(saved);
             }
-        };
-        fetchFullHistory();
+        } catch (error) {
+            console.error("Error obteniendo historia para billeteras", error);
+        } finally {
+            setIsCalculating(false);
+        }
     }, []);
 
-    useEffect(() => {
-        if(initialBalancesData) {
-            setInitialBalances(initialBalancesData)
-            setTempInitialBalances(initialBalancesData)
-        }
-    }, [initialBalancesData])
+    useEffect(() => { fetchFullHistory(); }, [fetchFullHistory]);
 
     // --- MOTOR DE CÁLCULO Y AGRUPACIÓN DE ABONOS GLOBALES ---
     const walletBalances = useMemo(() => {
@@ -252,14 +252,25 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
 
         // 3. Nómina
         fullPagos.forEach(p => {
-            balances['cash_usd'] -= (Number(p.totalUSD) || 0);
-            movements.push({ 
-                id: `nom-${p.id}`, type: 'EGRESO', wallet: 'cash_usd', amount: Number(p.totalUSD), 
+            const metodoNom = (p.metodoPago || '').toLowerCase();
+            let nomWallet = 'cash_usd';
+            let nomAmount = Number(p.totalUSD) || 0;
+            if (metodoNom.includes('movil') || metodoNom.includes('transferencia') || metodoNom.includes('bs') || metodoNom.includes('banco')) {
+                nomWallet = 'bank_bs';
+                nomAmount = nomAmount * (rates.usd || 1);
+            } else if (metodoNom.includes('zelle')) {
+                nomWallet = 'zelle';
+            } else if (metodoNom.includes('usdt') || metodoNom.includes('binance')) {
+                nomWallet = 'usdt';
+            }
+            balances[nomWallet] -= nomAmount;
+            movements.push({
+                id: `nom-${p.id}`, type: 'EGRESO', wallet: nomWallet, amount: nomAmount,
                 description: `Nómina: ${p.nombre}`, date: parseDate(p.fechaPago || p.fecha), category: 'Nómina',
-                montoUSD: Number(p.totalUSD),
+                montoUSD: Number(p.totalUSD) || 0,
                 tasaAplicada: rates.usd,
-                metodoPago: 'Efectivo USD (Asumido)',
-                referencia: p.nota || '',
+                metodoPago: p.metodoPago || 'Efectivo USD',
+                referencia: p.nota || p.notaAdicional || '',
                 imagenUrl: p.comprobante || null
             });
         });
@@ -272,10 +283,10 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
             if (m.tipo === 'INGRESO') balances[targetWallet] += amount;
             else balances[targetWallet] -= amount;
             
-            movements.push({ 
-                id: `man-${m.id || Math.random()}`, type: m.tipo, wallet: targetWallet, amount: amount, 
+            movements.push({
+                id: `man-${m.id || Math.random()}`, type: m.tipo, wallet: targetWallet, amount: amount,
                 description: m.descripcion, date: parseDate(m.fecha), category: m.categoria || 'Ajuste',
-                montoUSD: targetWallet === 'bank_bs' ? (amount / rates.usd) : amount,
+                montoUSD: (targetWallet === 'bank_bs' && rates.usd > 0) ? (amount / rates.usd) : amount,
                 tasaAplicada: targetWallet === 'bank_bs' ? rates.usd : 1,
                 metodoPago: 'Ajuste de Sistema',
                 referencia: 'Cuadre / Movimiento Manual',
@@ -312,10 +323,45 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
     const getWalletBalance = (walletId: string) => walletBalances.balances[walletId] || 0;
     
     // --- HANDLERS ---
-    const handleSaveInit = () => { setInitialBalances(tempInitialBalances); setIsConfigModalOpen(false); }
-    const handleEx = () => { setIsExchangeModalOpen(false); alert("Compra de Divisas Registrada (Conectar a Base de Datos)"); }
+    const handleSaveInit = async () => {
+        try {
+            await setDoc(doc(db, INIT_BAL_DOC), tempInitialBalances);
+            setInitialBalances(tempInitialBalances);
+            setIsConfigModalOpen(false);
+        } catch (e) {
+            console.error("Error guardando saldos iniciales", e);
+            alert("Error al guardar. Verifica tu conexión.");
+        }
+    }
 
-    const handleManual = async () => { 
+    const handleEx = async () => {
+        const usd = parseFloat(exchangeForm.montoEntrada);
+        const bs = parseFloat(exchangeForm.montoSalida);
+        const tasa = parseFloat(exchangeForm.tasa);
+        if (!usd || !bs || !tasa) return alert("Completa todos los campos de la operación.");
+        try {
+            await Promise.all([
+                addDoc(collection(db, "movimientos_caja"), {
+                    billetera: 'bank_bs', tipo: 'EGRESO', monto: bs,
+                    descripcion: `Compra de divisas → ${WALLETS_CONFIG.find(w => w.id === exchangeForm.destino)?.label}`,
+                    fecha: new Date().toISOString(), categoria: 'Cambio de Divisas', referencia: exchangeForm.referencia
+                }),
+                addDoc(collection(db, "movimientos_caja"), {
+                    billetera: exchangeForm.destino, tipo: 'INGRESO', monto: usd,
+                    descripcion: `Compra de divisas (Bs → ${exchangeForm.destino === 'usdt' ? 'USDT' : 'USD'})`,
+                    fecha: new Date().toISOString(), categoria: 'Cambio de Divisas', referencia: exchangeForm.referencia
+                })
+            ]);
+            setIsExchangeModalOpen(false);
+            setExchangeForm({ origen: 'bank_bs', destino: 'cash_usd', montoSalida: '', montoEntrada: '', tasa: rates.usd.toString(), referencia: '' });
+            await fetchFullHistory();
+        } catch (e) {
+            console.error("Error registrando cambio", e);
+            alert("Error al registrar la operación.");
+        }
+    }
+
+    const handleManual = async () => {
         if (!manualForm.monto || parseFloat(manualForm.monto) <= 0) return alert("Ingrese un monto válido");
         const ajuste = {
             billetera: manualForm.billetera, tipo: manualForm.tipo, monto: parseFloat(manualForm.monto),
@@ -324,9 +370,9 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
         };
         try {
             await addDoc(collection(db, "movimientos_caja"), ajuste);
-            alert("¡Movimiento guardado exitosamente!");
             setIsManualModalOpen(false);
-            window.location.reload();
+            setManualForm({ mode: 'SIMPLE', tipo: 'INGRESO', billetera: 'cash_usd', monto: '', montoReal: '', descripcion: '', fecha: new Date().toISOString().split('T')[0] });
+            await fetchFullHistory();
         } catch (error) { alert("Error al guardar el movimiento"); }
     }
 
@@ -349,15 +395,17 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
         if (ajustes.length === 0) return alert("No hay diferencias para guardar.");
         try {
             for (const ajuste of ajustes) await addDoc(collection(db, "movimientos_caja"), ajuste);
-            alert("¡Cuadre guardado exitosamente!");
-            window.location.reload(); 
+            setUnlockedWallets({});
+            setCuadreData({});
+            setIsManualModalOpen(false);
+            await fetchFullHistory();
         } catch (error) { alert("Hubo un error al guardar el ajuste."); }
     }
 
     const currentWalletData = WALLETS_CONFIG.find(w => w.id === selectedWallet);
 
     return (
-        <div className="space-y-6 p-2 font-sans pb-24 text-slate-800 dark:text-slate-100 animate-in fade-in duration-500 relative">
+        <div className="space-y-4 sm:space-y-6 px-1 sm:px-2 font-sans pb-24 text-slate-800 dark:text-slate-100 animate-in fade-in duration-500 relative">
             
             {isCalculating && (
                 <div className="absolute inset-0 z-50 bg-white/50 dark:bg-black/50 backdrop-blur-sm flex items-center justify-center rounded-[2.5rem]">
@@ -370,17 +418,17 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
 
             {/* ALERTA DE RIESGO */}
             {rateAnalysis.isRisk && (
-                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} className="bg-rose-500 rounded-[2rem] p-6 text-white shadow-xl shadow-rose-500/20 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-10"><AlertTriangle size={120}/></div>
-                    <div className="relative z-10 flex items-start gap-4">
-                        <div className="bg-white/20 p-3 rounded-2xl animate-pulse"><Megaphone className="w-8 h-8 text-white"/></div>
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} className="bg-rose-500 rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-6 text-white shadow-xl shadow-rose-500/20 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-10"><AlertTriangle size={80}/></div>
+                    <div className="relative z-10 flex items-start gap-3 sm:gap-4">
+                        <div className="bg-white/20 p-2 sm:p-3 rounded-xl sm:rounded-2xl animate-pulse shrink-0"><Megaphone className="w-5 h-5 sm:w-8 sm:h-8 text-white"/></div>
                         <div>
-                            <h3 className="text-xl font-black uppercase tracking-tight">¡Alerta de Devaluación!</h3>
-                            <p className="text-sm font-bold opacity-90 mt-1 max-w-xl">
+                            <h3 className="text-base sm:text-xl font-black uppercase tracking-tight">¡Alerta de Devaluación!</h3>
+                            <p className="text-xs sm:text-sm font-bold opacity-90 mt-1">
                                 El dólar subió un <span className="bg-white text-rose-600 px-1 rounded mx-1">{rateAnalysis.percentChange.toFixed(2)}%</span>.
                                 Tus <span className="font-black underline decoration-white">Bs. {walletBalances.balances.bank_bs.toLocaleString()}</span> pierden valor.
                             </p>
-                            <Button onClick={() => setIsExchangeModalOpen(true)} className="mt-4 bg-white text-rose-600 font-black uppercase tracking-widest hover:bg-rose-50 border-none shadow-lg">
+                            <Button onClick={() => setIsExchangeModalOpen(true)} className="mt-3 sm:mt-4 bg-white text-rose-600 font-black uppercase tracking-widest hover:bg-rose-50 border-none shadow-lg text-xs h-9 sm:h-10">
                                 <ShieldAlert className="w-4 h-4 mr-2"/> Proteger Capital
                             </Button>
                         </div>
@@ -389,93 +437,100 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
             )}
 
             {/* HEADER */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 relative">
                 <div>
-                    <h2 className="text-3xl font-black italic uppercase tracking-tighter flex items-center gap-3">
-                        <Wallet className="w-8 h-8 text-blue-600" /> Billeteras <span className="text-slate-300">|</span> Tesorería
+                    <h2 className="text-2xl sm:text-3xl font-black italic uppercase tracking-tighter flex items-center gap-2 sm:gap-3">
+                        <Wallet className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600" /> Billeteras <span className="text-slate-300">|</span> Tesorería
                     </h2>
-                    <div className="flex items-center gap-3 mt-1">
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Tasa Hoy: {rates.usd} Bs/$</p>
-                    </div>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Tasa Hoy: {rates.usd} Bs/$</p>
                 </div>
-                
-                <div className="flex gap-2 relative">
-                    <Button onClick={() => setIsConfigModalOpen(true)} variant="ghost" size="icon" className="rounded-xl hover:bg-slate-100 text-slate-400"><Settings className="w-5 h-5" /></Button>
-                    <Button onClick={() => setIsManualModalOpen(true)} variant="outline" className="rounded-2xl border-slate-200 font-bold uppercase text-[10px] tracking-wider gap-2"><Plus className="w-4 h-4" /> Ajuste</Button>
-                    <Button onClick={() => setIsExchangeModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black uppercase text-[10px] tracking-wider gap-2 shadow-lg"><RefreshCcw className="w-4 h-4" /> Cambiar</Button>
+
+                <div className="flex gap-2 w-full sm:w-auto">
+                    <Button onClick={() => setIsConfigModalOpen(true)} variant="ghost" size="icon" className="rounded-xl hover:bg-slate-100 text-slate-400 shrink-0"><Settings className="w-4 h-4 sm:w-5 sm:h-5" /></Button>
+                    <Button onClick={() => setIsManualModalOpen(true)} variant="outline" className="rounded-xl sm:rounded-2xl border-slate-200 font-bold uppercase text-[10px] tracking-wider gap-1 sm:gap-2 flex-1 sm:flex-none h-9 sm:h-10"><Plus className="w-3 h-3 sm:w-4 sm:h-4" /> Ajuste</Button>
+                    <Button onClick={() => setIsExchangeModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl sm:rounded-2xl font-black uppercase text-[10px] tracking-wider gap-1 sm:gap-2 shadow-lg flex-1 sm:flex-none h-9 sm:h-10"><RefreshCcw className="w-3 h-3 sm:w-4 sm:h-4" /> Cambiar</Button>
                 </div>
             </div>
 
-            <div className="relative">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 overflow-x-auto pb-4">
-                    {WALLETS_CONFIG.map(wallet => {
-                        const balance = walletBalances.balances[wallet.id];
-                        const secondaryValue = wallet.id === 'bank_bs' ? (balance / rates.usd) : null;
-                        return (
-                            <WalletCard 
-                                key={wallet.id} config={wallet} balance={balance} 
-                                isActive={selectedWallet === wallet.id} onClick={() => setSelectedWallet(wallet.id)}
-                                secondaryValue={secondaryValue} rateAnalysis={wallet.id === 'bank_bs' ? rateAnalysis : null}
-                            />
-                        )
-                    })}
-                </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                {WALLETS_CONFIG.map(wallet => {
+                    const balance = walletBalances.balances[wallet.id];
+                    const secondaryValue = (wallet.id === 'bank_bs' && rates.usd > 0) ? (balance / rates.usd) : null;
+                    return (
+                        <WalletCard
+                            key={wallet.id} config={wallet} balance={balance}
+                            isActive={selectedWallet === wallet.id} onClick={() => setSelectedWallet(wallet.id)}
+                            secondaryValue={secondaryValue} rateAnalysis={wallet.id === 'bank_bs' ? rateAnalysis : null}
+                        />
+                    )
+                })}
             </div>
 
             {/* MAIN CONTENT CON BUSCADOR */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 space-y-6">
-                    <Card className="rounded-[2.5rem] border-none shadow-xl bg-white dark:bg-[#1c1c1e] overflow-hidden flex flex-col h-[600px]">
-                        
-                        <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50/50">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-8">
+                <div className="lg:col-span-2">
+                    <Card className="rounded-[2rem] sm:rounded-[2.5rem] border-none shadow-xl bg-white dark:bg-[#1c1c1e] overflow-hidden flex flex-col h-[480px] sm:h-[600px]">
+
+                        <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 bg-slate-50/50 shrink-0">
                             <div>
-                                <h3 className="text-2xl font-black italic uppercase tracking-tight">{currentWalletData?.label}</h3>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Historial de Movimientos</p>
+                                <h3 className="text-lg sm:text-2xl font-black italic uppercase tracking-tight">{currentWalletData?.label}</h3>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 sm:mt-1">Historial de Movimientos</p>
                             </div>
-                            
-                            {/* NUEVO BUSCADOR */}
+
                             <div className="relative w-full sm:w-64">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                                <Input 
+                                <Input
                                     placeholder="Buscar cliente, orden, nota..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="pl-9 h-10 bg-white border border-slate-200 rounded-xl text-xs font-bold shadow-sm focus-visible:ring-1 focus-visible:ring-indigo-500"
+                                    className="pl-9 h-9 sm:h-10 bg-white border border-slate-200 rounded-xl text-xs font-bold shadow-sm focus-visible:ring-1 focus-visible:ring-indigo-500"
                                 />
                             </div>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-2">
+                        <div className="flex-1 overflow-y-auto p-2 sm:p-4 custom-scrollbar space-y-1.5 sm:space-y-2">
                             {activeMovements.map((mov: any) => (
-                                <MovementRow 
-                                    key={mov.id} 
-                                    movement={mov} 
-                                    currency={currentWalletData?.currency || 'USD'} 
+                                <MovementRow
+                                    key={mov.id}
+                                    movement={mov}
+                                    currency={currentWalletData?.currency || 'USD'}
                                     onClick={() => setSelectedMovement(mov)}
                                 />
                             ))}
                             {activeMovements.length === 0 && (
                                 <div className="h-full flex flex-col items-center justify-center opacity-50 py-20">
-                                    <Receipt className="w-16 h-16 mb-4" />
+                                    <Receipt className="w-12 h-12 sm:w-16 sm:h-16 mb-4" />
                                     <p className="text-xs font-black uppercase tracking-widest text-center">
-                                        {searchQuery ? "No hay resultados para tu búsqueda" : "No hay movimientos registrados"}
+                                        {searchQuery ? "No hay resultados" : "No hay movimientos registrados"}
                                     </p>
                                 </div>
                             )}
                         </div>
                     </Card>
                 </div>
-                
+
                 {/* RESUMEN PATRIMONIAL */}
-                <div className="space-y-6">
-                    <Card className="rounded-[2.5rem] p-8 bg-gradient-to-br from-slate-900 to-slate-800 text-white shadow-2xl border-none relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-10 opacity-10"><TrendingUp size={120} /></div>
-                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-70 mb-6">Total Real (USD)</h4>
+                <div>
+                    <Card className="rounded-[2rem] sm:rounded-[2.5rem] p-5 sm:p-8 bg-gradient-to-br from-slate-900 to-slate-800 text-white shadow-2xl border-none relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-10 opacity-10"><TrendingUp size={100} /></div>
+                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-70 mb-4 sm:mb-6">Total Real (USD)</h4>
                         <div className="space-y-2 relative z-10">
-                            <p className="text-5xl font-black tracking-tighter">
-                                {formatCurrency(walletBalances.balances.cash_usd + walletBalances.balances.zelle + walletBalances.balances.usdt + (walletBalances.balances.bank_bs / rates.usd))}
+                            <p className="text-3xl sm:text-5xl font-black tracking-tighter">
+                                {formatCurrency(walletBalances.balances.cash_usd + walletBalances.balances.zelle + walletBalances.balances.usdt + (rates.usd > 0 ? walletBalances.balances.bank_bs / rates.usd : 0))}
                             </p>
                             <p className="text-[10px] font-bold opacity-50 uppercase">Sumando todas las cuentas</p>
+                        </div>
+                        <div className="mt-4 sm:mt-6 space-y-2 relative z-10">
+                            {WALLETS_CONFIG.map(w => {
+                                const bal = walletBalances.balances[w.id];
+                                const inUSD = w.id === 'bank_bs' ? (rates.usd > 0 ? bal / rates.usd : 0) : bal;
+                                return (
+                                    <div key={w.id} className="flex justify-between items-center text-[11px] font-bold opacity-70">
+                                        <span className="uppercase tracking-wider">{w.label.split(' ')[0]}</span>
+                                        <span>{w.currency === 'VES' ? `Bs. ${bal.toLocaleString(undefined,{maximumFractionDigits:0})}` : `${w.currency === 'USDT' ? '₮' : '$'}${bal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`}</span>
+                                    </div>
+                                );
+                            })}
                         </div>
                     </Card>
                 </div>
@@ -485,68 +540,68 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
             <AnimatePresence>
                 {selectedMovement && (
                     <Dialog open={!!selectedMovement} onOpenChange={(o) => !o && setSelectedMovement(null)}>
-                        <DialogContent className="max-w-2xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-                            
+                        <DialogContent className="w-[95vw] max-w-2xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+
                             {/* Cabecera dinámica según el tipo de movimiento */}
                             <div className={cn(
-                                "p-6 flex items-start gap-4",
-                                selectedMovement.type === 'INGRESO' ? "bg-emerald-50" : 
+                                "p-4 sm:p-6 flex items-start gap-3 sm:gap-4",
+                                selectedMovement.type === 'INGRESO' ? "bg-emerald-50" :
                                 selectedMovement.type === 'EGRESO' ? "bg-rose-50" : "bg-slate-100"
                             )}>
                                 <div className={cn(
-                                    "p-4 rounded-2xl shadow-sm text-white",
-                                    selectedMovement.type === 'INGRESO' ? "bg-emerald-500" : 
+                                    "p-3 sm:p-4 rounded-xl sm:rounded-2xl shadow-sm text-white shrink-0",
+                                    selectedMovement.type === 'INGRESO' ? "bg-emerald-500" :
                                     selectedMovement.type === 'EGRESO' ? "bg-rose-500" : "bg-slate-500"
                                 )}>
-                                    {selectedMovement.category === 'Abono Global' ? <Layers size={28}/> : selectedMovement.type === 'INGRESO' ? <ArrowDownLeft size={28}/> : 
-                                     selectedMovement.type === 'EGRESO' ? <ArrowUpRight size={28}/> : <Landmark size={28}/>}
+                                    {selectedMovement.category === 'Abono Global' ? <Layers size={22}/> : selectedMovement.type === 'INGRESO' ? <ArrowDownLeft size={22}/> :
+                                     selectedMovement.type === 'EGRESO' ? <ArrowUpRight size={22}/> : <Landmark size={22}/>}
                                 </div>
-                                <div className="flex-1">
-                                    <div className="flex justify-between items-center mb-1">
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex justify-between items-center mb-1 gap-2 flex-wrap">
                                         <Badge variant="outline" className="bg-white text-[9px] uppercase font-black tracking-widest px-2 py-0.5">
                                             {selectedMovement.category}
                                         </Badge>
                                         <span className="text-[10px] font-bold text-slate-500 uppercase">
-                                            {selectedMovement.date.toLocaleString('es-VE', { dateStyle: 'medium', timeStyle: 'short' })}
+                                            {selectedMovement.date.toLocaleDateString('es-VE', { dateStyle: 'medium' })}
                                         </span>
                                     </div>
-                                    <DialogTitle className="text-xl font-black uppercase tracking-tight text-slate-900 line-clamp-2 leading-tight">
+                                    <DialogTitle className="text-base sm:text-xl font-black uppercase tracking-tight text-slate-900 line-clamp-2 leading-tight">
                                         {selectedMovement.description}
                                     </DialogTitle>
                                     {selectedMovement.ordenRef && (
                                         <p className="text-xs font-bold text-slate-500 mt-1 flex items-center gap-1">
-                                            <FileText className="w-3 h-3" /> Ref. Orden(es) #{selectedMovement.ordenRef}
+                                            <FileText className="w-3 h-3" /> Ref. #{selectedMovement.ordenRef}
                                         </p>
                                     )}
                                 </div>
                             </div>
 
                             {/* Cuerpo del Modal */}
-                            <div className="p-6 overflow-y-auto custom-scrollbar space-y-6 bg-white dark:bg-[#1c1c1e]">
-                                
+                            <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar space-y-4 sm:space-y-6 bg-white dark:bg-[#1c1c1e]">
+
                                 {/* Tarjeta de Resumen Matemático */}
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                    <div className="p-4 bg-slate-50 dark:bg-black/20 rounded-[1.5rem] border border-slate-100 dark:border-white/5">
-                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Total Movimiento</p>
-                                        <p className={cn("text-2xl font-black tracking-tighter", 
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
+                                    <div className="p-3 sm:p-4 bg-slate-50 dark:bg-black/20 rounded-[1.25rem] sm:rounded-[1.5rem] border border-slate-100 dark:border-white/5">
+                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Total</p>
+                                        <p className={cn("text-lg sm:text-2xl font-black tracking-tighter",
                                             selectedMovement.type === 'INGRESO' ? "text-emerald-600" : "text-rose-600"
                                         )}>
-                                            {formatCurrency(selectedMovement.amount)} <span className="text-sm">{currentWalletData?.currency}</span>
+                                            {formatCurrency(selectedMovement.amount)} <span className="text-xs sm:text-sm">{currentWalletData?.currency}</span>
                                         </p>
                                     </div>
 
                                     {/* Muestra desglose en USD si la billetera es en Bolívares */}
                                     {currentWalletData?.currency === 'VES' && selectedMovement.montoUSD > 0 && (
                                         <>
-                                            <div className="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-[1.5rem] border border-blue-100 dark:border-blue-900/20">
-                                                <p className="text-[9px] font-black uppercase tracking-widest text-blue-400 mb-1">Valor en Dólares</p>
-                                                <p className="text-2xl font-black tracking-tighter text-blue-700 dark:text-blue-400">
+                                            <div className="p-3 sm:p-4 bg-blue-50 dark:bg-blue-900/10 rounded-[1.25rem] sm:rounded-[1.5rem] border border-blue-100 dark:border-blue-900/20">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-blue-400 mb-1">En USD</p>
+                                                <p className="text-lg sm:text-2xl font-black tracking-tighter text-blue-700 dark:text-blue-400">
                                                     {formatCurrency(selectedMovement.montoUSD)}
                                                 </p>
                                             </div>
-                                            <div className="p-4 bg-slate-50 dark:bg-black/20 rounded-[1.5rem] border border-slate-100 dark:border-white/5 col-span-2 md:col-span-1">
-                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Tasa Calculada</p>
-                                                <p className="text-xl font-bold tracking-tight text-slate-700 dark:text-slate-300">
+                                            <div className="p-3 sm:p-4 bg-slate-50 dark:bg-black/20 rounded-[1.25rem] sm:rounded-[1.5rem] border border-slate-100 dark:border-white/5 col-span-2 md:col-span-1">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Tasa</p>
+                                                <p className="text-base sm:text-xl font-bold tracking-tight text-slate-700 dark:text-slate-300">
                                                     {selectedMovement.tasaAplicada} <span className="text-xs">Bs/$</span>
                                                 </p>
                                             </div>
@@ -637,28 +692,30 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
 
 function WalletCard({ config, balance, isActive, onClick, secondaryValue, rateAnalysis }: any) {
     return (
-        <motion.div onClick={onClick} whileHover={{ y: -5 }} whileTap={{ scale: 0.98 }}
-            className={cn("min-w-[260px] p-6 rounded-[2.5rem] cursor-pointer transition-all border-2 relative overflow-hidden group",
+        <motion.div onClick={onClick} whileHover={{ y: -3 }} whileTap={{ scale: 0.97 }}
+            className={cn("p-4 sm:p-6 rounded-[1.75rem] sm:rounded-[2.5rem] cursor-pointer transition-all border-2 relative overflow-hidden group",
                 isActive ? `border-${config.color}-500/50 shadow-xl shadow-${config.color}-500/20 bg-white` : "border-transparent bg-white hover:border-slate-200 shadow-sm")}>
-            <div className={cn("absolute top-0 right-0 w-32 h-32 -mr-10 -mt-10 rounded-full opacity-10 transition-transform group-hover:scale-150", config.bg)} />
-            <div className="flex justify-between items-start mb-6 relative z-10">
-                <div className={cn("p-3 rounded-2xl text-white shadow-md", config.bg)}>{config.icon}</div>
-                {rateAnalysis?.isRisk && <div className="animate-bounce bg-rose-500 text-white p-1 rounded-full"><AlertTriangle size={16}/></div>}
+            <div className={cn("absolute top-0 right-0 w-20 h-20 sm:w-32 sm:h-32 -mr-6 -mt-6 sm:-mr-10 sm:-mt-10 rounded-full opacity-10 transition-transform group-hover:scale-150", config.bg)} />
+            <div className="flex justify-between items-start mb-3 sm:mb-5 relative z-10">
+                <div className={cn("p-2 sm:p-3 rounded-xl sm:rounded-2xl text-white shadow-md", config.bg)}>
+                    <div className="w-4 h-4 sm:w-6 sm:h-6 [&>svg]:w-full [&>svg]:h-full">{config.icon}</div>
+                </div>
+                {rateAnalysis?.isRisk && <div className="animate-bounce bg-rose-500 text-white p-1 rounded-full"><AlertTriangle size={12}/></div>}
             </div>
             <div className="relative z-10">
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">{config.label}</p>
-                <h3 className="text-3xl font-black tracking-tighter text-slate-900">
+                <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.15em] sm:tracking-[0.2em] text-slate-400 mb-0.5 sm:mb-1 truncate">{config.label}</p>
+                <h3 className="text-lg sm:text-2xl md:text-3xl font-black tracking-tighter text-slate-900 leading-none">
                     {config.currency === 'USD' ? '$' : config.currency === 'USDT' ? '₮' : 'Bs.'}
                     {balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </h3>
                 {secondaryValue !== null && secondaryValue !== undefined && (
-                    <div className="mt-2 flex items-center gap-2">
-                        <Badge variant="secondary" className="bg-slate-100 text-slate-500 font-bold border-none text-[10px]">
+                    <div className="mt-1.5 sm:mt-2 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+                        <Badge variant="secondary" className="bg-slate-100 text-slate-500 font-bold border-none text-[9px] sm:text-[10px] w-fit">
                             ≈ ${secondaryValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
                         </Badge>
                         {rateAnalysis && (
                             <span className={cn("text-[9px] font-black uppercase", rateAnalysis.trend === 'UP' ? "text-rose-500" : "text-emerald-500")}>
-                                {rateAnalysis.trend === 'UP' ? '↘ Valor bajando' : '→ Estable'}
+                                {rateAnalysis.trend === 'UP' ? '↘ Bajando' : '→ Estable'}
                             </span>
                         )}
                     </div>
@@ -672,32 +729,33 @@ function MovementRow({ movement, currency, onClick }: any) {
     const isIncome = movement.type === 'INGRESO' || movement.type === 'SALDO_INICIAL';
     const isInitial = movement.type === 'SALDO_INICIAL';
     return (
-        <div 
+        <div
             onClick={onClick}
-            className="flex items-center justify-between p-4 bg-slate-50 dark:bg-black/20 rounded-[1.5rem] hover:bg-white dark:hover:bg-white/5 transition-all group border border-transparent hover:border-slate-200 hover:shadow-md cursor-pointer"
+            className="flex items-center justify-between p-3 sm:p-4 bg-slate-50 dark:bg-black/20 rounded-[1.25rem] sm:rounded-[1.5rem] hover:bg-white dark:hover:bg-white/5 transition-all group border border-transparent hover:border-slate-200 hover:shadow-md cursor-pointer"
         >
-            <div className="flex items-center gap-4 flex-1 min-w-0 pr-4">
-                <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors shadow-sm",
+            <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0 pr-2 sm:pr-4">
+                <div className={cn("w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0 transition-colors shadow-sm",
                     isInitial ? "bg-slate-200 text-slate-600" : isIncome ? "bg-emerald-100 text-emerald-600 group-hover:bg-emerald-500 group-hover:text-white" : "bg-rose-100 text-rose-600 group-hover:bg-rose-500 group-hover:text-white")}>
-                    {movement.category === 'Abono Global' ? <Layers className="w-5 h-5" /> : isInitial ? <Landmark className="w-5 h-5"/> : isIncome ? <ArrowDownLeft className="w-5 h-5" /> : <ArrowUpRight className="w-5 h-5" />}
+                    {movement.category === 'Abono Global' ? <Layers className="w-4 h-4 sm:w-5 sm:h-5" /> : isInitial ? <Landmark className="w-4 h-4 sm:w-5 sm:h-5"/> : isIncome ? <ArrowDownLeft className="w-4 h-4 sm:w-5 sm:h-5" /> : <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5" />}
                 </div>
                 <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                        <Badge variant="secondary" className="text-[8px] font-black uppercase px-1.5 h-4 bg-white border-slate-200 shadow-sm">{movement.category}</Badge>
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                        <Badge variant="secondary" className="text-[8px] font-black uppercase px-1.5 h-4 bg-white border-slate-200 shadow-sm hidden sm:flex">{movement.category}</Badge>
                         {movement.imagenUrl && <ImageIcon className="w-3 h-3 text-blue-500 opacity-50 group-hover:opacity-100 transition-opacity" title="Tiene comprobante" />}
                     </div>
-                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{movement.description}</p>
-                    <p className="text-[9px] font-bold text-slate-400 truncate flex items-center gap-1 mt-0.5">
-                        {movement.date.toLocaleDateString()} {movement.referencia && `• Ref: ${movement.referencia}`}
+                    <p className="text-[11px] sm:text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{movement.description}</p>
+                    <p className="text-[9px] font-bold text-slate-400 truncate mt-0.5">
+                        {movement.date.toLocaleDateString()}
+                        {movement.referencia && <span className="hidden sm:inline"> • {movement.referencia}</span>}
                     </p>
                 </div>
             </div>
             <div className="text-right shrink-0">
-                <p className={cn("text-base font-black tracking-tighter flex items-center justify-end gap-2", isInitial ? "text-slate-600" : isIncome ? "text-emerald-600" : "text-rose-600")}>
+                <p className={cn("text-sm sm:text-base font-black tracking-tighter flex items-center justify-end gap-1 sm:gap-2", isInitial ? "text-slate-600" : isIncome ? "text-emerald-600" : "text-rose-600")}>
                     {isIncome ? "+" : "-"}{movement.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    <Eye className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity text-slate-400" />
+                    <Eye className="w-3 h-3 sm:w-4 sm:h-4 opacity-0 group-hover:opacity-100 transition-opacity text-slate-400" />
                 </p>
-                <p className="text-[8px] font-bold text-slate-400 uppercase mr-6">{currency}</p>
+                <p className="text-[8px] font-bold text-slate-400 uppercase mr-4 sm:mr-6">{currency}</p>
             </div>
         </div>
     )

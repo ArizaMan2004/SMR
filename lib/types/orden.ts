@@ -131,10 +131,17 @@ export interface OrdenServicio {
     registroPagos: PaymentLog[]; 
     
     // Estado General
-    estado: EstadoOrden | string; 
-    
+    estado: EstadoOrden | string;
+
+    // Estado de Producción (flujo de taller)
+    estadoProduccion?: 'PENDIENTE' | 'EN_PRODUCCION' | 'TERMINADA';
+
+    // Vinculación entre órdenes
+    ordenVinculadaId?: string;   // ID de la orden padre/relacionada
+    ordenesHijasIds?: string[];  // IDs de órdenes vinculadas (hijas)
+
     // Seguimiento
-    fechaFinalizacion?: string; 
+    fechaFinalizacion?: string;
     updatedAt?: string;
     designerId?: string;
     designStatus?: string;

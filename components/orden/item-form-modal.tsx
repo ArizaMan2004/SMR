@@ -16,10 +16,13 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 
-import { 
-    X, Scissors, Hash, DollarSign, Box, Type, 
-    User, Calculator, Layers, Palette, MoveVertical, AlertCircle, Clock, Printer
+import {
+    X, Scissors, Hash, DollarSign, Box, Type,
+    User, Calculator, Layers, Palette, MoveVertical, AlertCircle, Clock, Printer,
+    BookOpen, ChevronDown, ChevronUp
 } from "lucide-react"
+
+import { subscribeToCatalogoProducts } from "@/lib/services/catalog-service"
 
 // --- CONSTANTES ---
 const PRECIO_LASER_POR_MINUTO = 0.80;
@@ -59,6 +62,9 @@ const getInitialState = () => ({
   cantidad: 1,
   unidad: "und",
   precioUnitario: 0,
+  monedaItem: 'USD' as 'USD' | 'EUR',   // moneda del precio (EUR para aliados)
+  precioMayor: 0,                         // precio al mayor por unidad
+  cantidadMayor: 0,                       // cantidad mínima para activar precio al mayor
   modoCobroLaser: "tiempo", 
   materialDeCorte: "Acrilico",
   grosorMaterial: "3mm",
@@ -94,15 +100,105 @@ const getInitialState = () => ({
   subtotal: 0,
 });
 
-export function ItemFormModal({ 
-    isOpen, onClose, onAddItem, itemToEdit, designers = [], 
-    customColors = [], onRegisterColor 
+export function ItemFormModal({
+    isOpen, onClose, onAddItem, itemToEdit, designers = [],
+    customColors = [], onRegisterColor,
+    tipoCliente = 'REGULAR',  // 'REGULAR' | 'ALIADO'
+    eurRate = 0,              // Bs/EUR para referencia visual
+    usdRate = 0,              // Bs/USD para referencia visual
 }: any) {
+    const esAliado = tipoCliente === 'ALIADO'
   const [state, setState] = useState<any>(getInitialState());
   const [horas, setHoras] = useState('0');
   const [minutos, setMinutos] = useState('0');
   const [segundos, setSegundos] = useState('00');
   const [errors, setErrors] = useState<any>({});
+
+  // --- Catálogo de precios ---
+  const [catalogProductos, setCatalogProductos] = useState<any[]>([])
+  const [showCatalogPicker, setShowCatalogPicker] = useState(false)
+  const [catalogSearch, setCatalogSearch] = useState('')
+
+  // Material del catálogo seleccionado para IMPRESION
+  const [catalogMaterialId, setCatalogMaterialId] = useState<string | null>(null)
+  const [catalogVarianteId, setCatalogVarianteId] = useState<string | null>(null)
+  const [modoMaterialManual, setModoMaterialManual] = useState(false)
+
+  useEffect(() => {
+      const unsub = subscribeToCatalogoProducts(setCatalogProductos)
+      return unsub
+  }, [])
+
+  // Reset selección de material cuando cambia tipoServicio
+  useEffect(() => {
+      setCatalogMaterialId(null)
+      setCatalogVarianteId(null)
+      setModoMaterialManual(false)
+  }, [state.tipoServicio])
+
+  const catalogM2 = useMemo(() =>
+      catalogProductos.filter(p => p.activo !== false && p.tipoVenta === 'metro_cuadrado'),
+      [catalogProductos]
+  )
+
+  const catalogUnidad = useMemo(() => {
+      const q = catalogSearch.toLowerCase().trim()
+      return catalogProductos
+          .filter(p => p.activo !== false && p.tipoVenta !== 'metro_cuadrado')
+          .filter(p => !q || p.nombre.toLowerCase().includes(q))
+          .slice(0, 12)
+  }, [catalogProductos, catalogSearch])
+
+  const catalogFiltrado = useMemo(() => {
+      const q = catalogSearch.toLowerCase().trim()
+      return catalogProductos
+          .filter(p => p.activo !== false)
+          .filter(p => !q || p.nombre.toLowerCase().includes(q))
+          .slice(0, 12)
+  }, [catalogProductos, catalogSearch])
+
+  const materialSeleccionado = useMemo(() =>
+      catalogM2.find(p => p.id === catalogMaterialId) ?? null,
+      [catalogM2, catalogMaterialId]
+  )
+
+  const seleccionarMaterialCatalogo = (prod: any, varianteId?: string | null) => {
+      const variante = varianteId ? prod.variantes?.find((v: any) => v.id === varianteId) : null
+      const usarPublicista = esAliado && (prod.precioPublicista ?? 0) > 0
+      const precioBase = usarPublicista ? prod.precioPublicista : prod.precioBase
+      const precio = precioBase + (variante?.precioAjuste || 0)
+      const moneda: 'USD' | 'EUR' = usarPublicista ? 'EUR' : 'USD'
+      setCatalogMaterialId(prod.id)
+      setCatalogVarianteId(varianteId ?? null)
+      setModoMaterialManual(false)
+      setState((s: any) => ({
+          ...s,
+          precioUnitario: precio,
+          materialImpresion: prod.nombre,
+          nombre: s.nombre || prod.nombre,
+          monedaItem: moneda,
+          _catalogPrecioBase: prod.precioBase || 0,
+          _catalogPrecioPublicista: prod.precioPublicista || 0,
+          _catalogVarianteAjuste: variante?.precioAjuste || 0,
+      }))
+  }
+
+  const usarPrecioCatalogo = (prod: any) => {
+      const usarPublicista = esAliado && (prod.precioPublicista ?? 0) > 0
+      const precio = usarPublicista ? prod.precioPublicista : prod.precioBase
+      const moneda: 'USD' | 'EUR' = usarPublicista ? 'EUR' : 'USD'
+      setState((s: any) => ({
+          ...s,
+          precioUnitario: precio,
+          nombre: s.nombre || prod.nombre,
+          monedaItem: moneda,
+          _catalogPrecioBase: prod.precioBase || 0,
+          _catalogPrecioPublicista: prod.precioPublicista || 0,
+          _catalogVarianteAjuste: 0,
+      }))
+      setShowCatalogPicker(false)
+      setCatalogSearch('')
+  }
 
   const allColors = useMemo(() => {
     const uniqueColors = new Map();
@@ -138,14 +234,19 @@ export function ItemFormModal({
   // LÓGICA DE CÁLCULO
   useEffect(() => {
     let costoBaseUnitario = 0;
-    const { 
-        cantidad, precioUnitario, unidad, medidaXCm, medidaYCm, suministrarMaterial, 
-        costoMaterialExtra, tipoServicio, modoCobroLaser, impresionLaminado, 
+    const {
+        cantidad, precioUnitario, precioMayor, cantidadMayor,
+        unidad, medidaXCm, medidaYCm, suministrarMaterial,
+        costoMaterialExtra, tipoServicio, modoCobroLaser, impresionLaminado,
         tipoCobroLaminado, precioLaminadoLineal, precioLaminadoManual,
         impresionPegado, proveedorPegado, precioPegado
-    } = state; 
-    
+    } = state;
+
     const cantidadCalculo = cantidad > 0 ? cantidad : 0;
+
+    // Precio efectivo: si aplica precio al mayor, usarlo
+    const usaMayor = cantidadMayor > 0 && cantidadCalculo >= cantidadMayor && precioMayor > 0;
+    const precioEfectivo = usaMayor ? precioMayor : precioUnitario;
 
     if (cantidadCalculo > 0 || (modoCobroLaser === 'tiempo' && tipoServicio === 'CORTE')) {
         if (tipoServicio === 'CORTE' && modoCobroLaser === 'tiempo') {
@@ -155,36 +256,34 @@ export function ItemFormModal({
             const totalMinutes = (h * 60) + m + (s / 60);
             costoBaseUnitario = totalMinutes * PRECIO_LASER_POR_MINUTO;
         } else if (unidad === 'm2' && medidaXCm > 0 && medidaYCm > 0) {
-            costoBaseUnitario = (medidaXCm / 100) * (medidaYCm / 100) * precioUnitario;
-            
+            costoBaseUnitario = (medidaXCm / 100) * (medidaYCm / 100) * precioEfectivo;
+
             if (tipoServicio === 'IMPRESION') {
                 if (impresionLaminado) {
                     if (tipoCobroLaminado === 'x' && precioLaminadoLineal > 0) {
-                        const metrosLineales = medidaXCm / 100;
-                        costoBaseUnitario += (metrosLineales * precioLaminadoLineal);
+                        costoBaseUnitario += (medidaXCm / 100) * precioLaminadoLineal;
                     } else if (tipoCobroLaminado === 'y' && precioLaminadoLineal > 0) {
-                        const metrosLineales = medidaYCm / 100;
-                        costoBaseUnitario += (metrosLineales * precioLaminadoLineal);
+                        costoBaseUnitario += (medidaYCm / 100) * precioLaminadoLineal;
                     } else if (tipoCobroLaminado === 'manual' && precioLaminadoManual > 0) {
                         costoBaseUnitario += precioLaminadoManual;
                     }
                 }
-                
                 if (impresionPegado && proveedorPegado === 'taller' && precioPegado > 0) {
                     costoBaseUnitario += precioPegado;
                 }
             }
         } else {
-            costoBaseUnitario = precioUnitario;
+            costoBaseUnitario = precioEfectivo;
         }
 
         const totalUnit = costoBaseUnitario + (suministrarMaterial ? costoMaterialExtra : 0);
         setState((prev: any) => ({ ...prev, subtotal: totalUnit * cantidadCalculo }));
     }
   }, [
-      state.cantidad, state.precioUnitario, state.unidad, state.medidaXCm, state.medidaYCm, 
-      horas, minutos, segundos, state.suministrarMaterial, state.costoMaterialExtra, 
-      state.tipoServicio, state.modoCobroLaser, state.impresionLaminado, 
+      state.cantidad, state.precioUnitario, state.precioMayor, state.cantidadMayor,
+      state.unidad, state.medidaXCm, state.medidaYCm,
+      horas, minutos, segundos, state.suministrarMaterial, state.costoMaterialExtra,
+      state.tipoServicio, state.modoCobroLaser, state.impresionLaminado,
       state.tipoCobroLaminado, state.precioLaminadoLineal, state.precioLaminadoManual,
       state.impresionPegado, state.proveedorPegado, state.precioPegado
   ]);
@@ -282,21 +381,33 @@ export function ItemFormModal({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-[95vw] md:max-w-4xl h-auto max-h-[92vh] p-0 border-none bg-white dark:bg-slate-950 rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden">
         
+        {/* Banner ALIADO */}
+        {esAliado && (
+            <div className="bg-purple-600 text-white px-6 py-2 flex items-center gap-2 shrink-0">
+                <span className="text-sm">⭐</span>
+                <p className="text-[9px] font-black uppercase tracking-widest">
+                    Cliente Aliado — Precios preferenciales en EUR aplicados automáticamente
+                </p>
+            </div>
+        )}
+
         <header className="p-6 border-b bg-white dark:bg-slate-900 flex justify-between items-center shrink-0">
             <div className="flex items-center gap-4">
-                <div className="h-10 w-10 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
+                <div className={cn("h-10 w-10 rounded-2xl flex items-center justify-center text-white shadow-lg", esAliado ? "bg-purple-600 shadow-purple-500/20" : "bg-blue-600 shadow-blue-500/20")}>
                     <Layers className="w-5 h-5" />
                 </div>
                 <div>
                     <DialogTitle className="text-xl font-black uppercase tracking-tight leading-none">Configuración de Ítem</DialogTitle>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Terminal de Producción</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                        {esAliado ? '⭐ Orden Aliado · Precio en EUR' : 'Terminal de Producción'}
+                    </p>
                 </div>
             </div>
             <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full h-10 w-10 hover:bg-red-50 text-red-500"><X /></Button>
         </header>
 
         <ScrollArea className="flex-1 overflow-y-auto">
-            <div className="p-8 space-y-8 pb-12">
+            <div className="p-5 sm:p-8 space-y-6 sm:space-y-8 pb-12">
                 
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
                     <div className="md:col-span-8 space-y-1.5">
@@ -328,6 +439,7 @@ export function ItemFormModal({
                             <SelectContent className="rounded-2xl border-none shadow-2xl">
                                 <SelectItem value="IMPRESION">🖨️ Impresión</SelectItem>
                                 <SelectItem value="CORTE">✂️ Corte Láser</SelectItem>
+                                <SelectItem value="VENTA">🛍️ Venta / Producto</SelectItem>
                                 <SelectItem value="DISENO">🎨 Diseño</SelectItem>
                                 <SelectItem value="ROTULACION">🚗 Rotulación</SelectItem>
                                 <SelectItem value="OTROS">📦 Otros</SelectItem>
@@ -425,6 +537,103 @@ export function ItemFormModal({
                     )}
                 </AnimatePresence>
 
+                {/* PANEL DE VENTA POR UNIDAD */}
+                <AnimatePresence>
+                    {state.tipoServicio === 'VENTA' && (
+                        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+                            className="p-6 bg-emerald-50 dark:bg-emerald-900/10 rounded-[2rem] border border-emerald-100 dark:border-emerald-800 space-y-5">
+                            <div className="flex items-center gap-2">
+                                <span className="text-xl">🛍️</span>
+                                <h4 className="text-[10px] font-black uppercase text-emerald-700 dark:text-emerald-400 tracking-[0.2em]">Venta por Unidad</h4>
+                                <p className="text-[8px] text-emerald-600/60 font-bold">Precio fijo × cantidad</p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* Precio unitario */}
+                                <div className="space-y-2">
+                                    <Label className="text-[9px] font-black uppercase text-emerald-600 ml-1">Precio por Unidad (USD)</Label>
+
+                                    {/* Picker rápido del catálogo de unidades */}
+                                    {catalogProductos.filter(p => p.activo !== false && p.tipoVenta !== 'metro_cuadrado').length > 0 && (
+                                        <div className="space-y-1.5 mb-2">
+                                            <p className="text-[8px] font-black uppercase text-slate-400 ml-1">Del catálogo</p>
+                                            <input
+                                                type="text"
+                                                placeholder="Buscar producto..."
+                                                value={catalogSearch}
+                                                onChange={e => setCatalogSearch(e.target.value)}
+                                                className="w-full h-8 px-3 rounded-xl bg-white dark:bg-slate-800 border-none text-xs font-bold outline-none"
+                                            />
+                                            {catalogSearch.trim() && (
+                                                <div className="space-y-1 max-h-32 overflow-y-auto bg-white dark:bg-slate-800 rounded-2xl p-1">
+                                                    {catalogUnidad.length === 0
+                                                        ? <p className="text-[9px] text-slate-400 text-center py-2">Sin resultados</p>
+                                                        : catalogUnidad.map(prod => (
+                                                            <button key={prod.id} type="button"
+                                                                onClick={() => {
+                                                                    const _usarPublicista = esAliado && (prod.precioPublicista ?? 0) > 0;
+                                                                    const _precio = _usarPublicista ? prod.precioPublicista : prod.precioBase;
+                                                                    const _moneda: 'USD' | 'EUR' = _usarPublicista ? 'EUR' : 'USD';
+                                                                    setState((s: any) => ({ ...s, precioUnitario: _precio, nombre: s.nombre || prod.nombre, monedaItem: _moneda, _catalogPrecioBase: prod.precioBase || 0, _catalogPrecioPublicista: prod.precioPublicista || 0, _catalogVarianteAjuste: 0 }));
+                                                                    setCatalogSearch('');
+                                                                }}
+                                                                className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors text-left">
+                                                                <p className="text-[10px] font-black uppercase">{prod.nombre}</p>
+                                                                <span className="text-xs font-black text-emerald-600">
+                                                                    {esAliado && (prod.precioPublicista ?? 0) > 0 ? `€${prod.precioPublicista}` : `$${prod.precioBase}`}
+                                                                </span>
+                                                            </button>
+                                                        ))
+                                                    }
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    <div className="relative">
+                                        <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
+                                        <Input type="number" step="0.01"
+                                            value={state.precioUnitario === 0 ? '' : state.precioUnitario}
+                                            onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})}
+                                            className="h-12 pl-12 rounded-2xl border-none bg-white dark:bg-slate-800 font-black text-emerald-600 text-xl shadow-inner" />
+                                    </div>
+                                </div>
+
+                                {/* Cantidad + unidad */}
+                                <div className="space-y-2">
+                                    <Label className={cn("text-[9px] font-black uppercase ml-1 transition-colors", errors.cantidad ? "text-red-500" : "text-emerald-600")}>
+                                        Cantidad
+                                    </Label>
+                                    <Input type="number"
+                                        value={state.cantidad === 0 ? '' : state.cantidad}
+                                        onChange={e => { setState({...state, cantidad: parseInt(e.target.value) || 0}); clearError('cantidad'); }}
+                                        className={cn("h-12 rounded-2xl border-none font-black text-center text-xl shadow-inner", errors.cantidad ? "bg-red-50 ring-2 ring-red-500/50" : "bg-white dark:bg-slate-800")} />
+                                    <Select value={state.unidad} onValueChange={v => setState({...state, unidad: v})}>
+                                        <SelectTrigger className="h-10 rounded-xl border-none bg-white dark:bg-slate-800 text-xs font-black"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="und">Pieza / Unidad</SelectItem>
+                                            <SelectItem value="rollo">Rollo</SelectItem>
+                                            <SelectItem value="m">Metro lineal</SelectItem>
+                                            <SelectItem value="lamina">Lámina</SelectItem>
+                                            <SelectItem value="par">Par</SelectItem>
+                                            <SelectItem value="juego">Juego / Set</SelectItem>
+                                            <SelectItem value="hora">Hora</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+
+                            {/* Subtotal preview */}
+                            {state.precioUnitario > 0 && state.cantidad > 0 && (
+                                <div className="flex items-center justify-between bg-emerald-600 text-white px-5 py-3 rounded-2xl">
+                                    <p className="text-[9px] font-black uppercase opacity-80">{state.cantidad} × ${state.precioUnitario}</p>
+                                    <p className="font-black text-xl">${(state.precioUnitario * state.cantidad).toFixed(2)}</p>
+                                </div>
+                            )}
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
                 <AnimatePresence>
                     {state.unidad === 'm2' && (
                         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="p-6 bg-blue-50 dark:bg-blue-900/10 rounded-[2rem] border border-blue-100 dark:border-blue-900/30 space-y-6">
@@ -432,36 +641,121 @@ export function ItemFormModal({
                             {/* SECCIÓN: OPCIONES DE IMPRESIÓN */}
                             {state.tipoServicio === 'IMPRESION' && (
                                 <div className="space-y-4 pb-4 border-b border-blue-200 dark:border-blue-900/50">
-                                    <div className="flex items-center gap-2">
-                                        <Printer className="w-5 h-5 text-blue-600" />
-                                        <h4 className="text-[10px] font-black uppercase text-blue-600 tracking-[0.2em]">Material y Acabados</h4>
-                                    </div>
-                                    
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                        <div className="space-y-1.5 md:col-span-2 lg:col-span-1">
-                                            <Label className="text-[9px] font-black text-blue-500 uppercase">Material de Impresión</Label>
-                                            <Select value={state.materialImpresion} onValueChange={v => {
-                                                let updates: any = { materialImpresion: v };
-                                                
-                                                // Reseteos automáticos al cambiar de material según las reglas
-                                                if (isBanner(v)) {
-                                                    updates.impresionConCorte = false;
-                                                    updates.impresionPegado = false;
-                                                } else if (isSticker(v)) {
-                                                    updates.impresionConCorte = true;
-                                                    updates.impresionPegado = false;
-                                                } else if (isClear(v)) {
-                                                    updates.tipoPegado = 'Acrilico'; // Obliga acrilico si van a pegar
-                                                }
-                                                setState({...state, ...updates});
-                                            }}>
-                                                <SelectTrigger className="bg-white dark:bg-slate-800 border-none h-11 rounded-xl font-bold"><SelectValue /></SelectTrigger>
-                                                <SelectContent>
-                                                    {MATERIALES_IMPRESION.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                                                </SelectContent>
-                                            </Select>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <Printer className="w-5 h-5 text-blue-600" />
+                                            <h4 className="text-[10px] font-black uppercase text-blue-600 tracking-[0.2em]">Material de Impresión</h4>
                                         </div>
+                                        <button type="button"
+                                            onClick={() => { setModoMaterialManual(v => !v); setCatalogMaterialId(null); setCatalogVarianteId(null); }}
+                                            className="text-[8px] font-black uppercase text-slate-400 hover:text-blue-600 transition-colors">
+                                            {modoMaterialManual ? '← Catálogo' : 'Ingresar manual'}
+                                        </button>
                                     </div>
+
+                                    {modoMaterialManual ? (
+                                        /* Selector manual heredado */
+                                        <Select value={state.materialImpresion} onValueChange={v => {
+                                            let updates: any = { materialImpresion: v };
+                                            if (isBanner(v)) { updates.impresionConCorte = false; updates.impresionPegado = false; }
+                                            else if (isSticker(v)) { updates.impresionConCorte = true; updates.impresionPegado = false; }
+                                            else if (isClear(v)) { updates.tipoPegado = 'Acrilico'; }
+                                            setState({...state, ...updates});
+                                        }}>
+                                            <SelectTrigger className="bg-white dark:bg-slate-800 border-none h-11 rounded-xl font-bold"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                {MATERIALES_IMPRESION.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    ) : (
+                                        /* Picker visual del catálogo */
+                                        <div className="space-y-3">
+                                            {catalogM2.length === 0 ? (
+                                                <div className="text-center py-4">
+                                                    <p className="text-[10px] text-slate-400 font-bold">No hay materiales en el catálogo.</p>
+                                                    <button type="button" onClick={() => setModoMaterialManual(true)}
+                                                        className="text-[9px] font-black text-blue-600 mt-1 underline">
+                                                        Usar lista manual
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                                    {catalogM2.map(prod => {
+                                                        const isSelected = catalogMaterialId === prod.id
+                                                        return (
+                                                            <button key={prod.id} type="button"
+                                                                onClick={() => seleccionarMaterialCatalogo(prod)}
+                                                                className={cn(
+                                                                    'text-left p-3 rounded-2xl border-2 transition-all',
+                                                                    isSelected
+                                                                        ? esAliado ? 'bg-purple-600 border-purple-600 text-white shadow-lg shadow-purple-500/30' : 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/30'
+                                                                        : 'bg-white dark:bg-slate-800 border-transparent hover:border-blue-300'
+                                                                )}>
+                                                                <p className={cn('text-[10px] font-black uppercase leading-tight', isSelected ? 'text-white' : 'dark:text-white')}>{prod.nombre}</p>
+                                                                {esAliado && prod.precioPublicista ? (
+                                                                    <p className={cn('text-[8px] font-bold mt-0.5', isSelected ? 'text-purple-100' : 'text-purple-500')}>
+                                                                        €{prod.precioPublicista}/m² <span className="opacity-60">(${prod.precioBase} general)</span>
+                                                                    </p>
+                                                                ) : (
+                                                                    <p className={cn('text-[8px] font-bold mt-0.5', isSelected ? 'text-blue-100' : 'text-slate-400')}>
+                                                                        ${prod.precioBase}/m²
+                                                                    </p>
+                                                                )}
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+
+                                            {/* Variantes del material seleccionado */}
+                                            {materialSeleccionado?.tieneVariantes && materialSeleccionado.variantes?.length > 0 && (
+                                                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-2">
+                                                    <p className="text-[8px] font-black uppercase text-blue-500">Variante</p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {/* Opción base (sin variante) */}
+                                                        <button type="button"
+                                                            onClick={() => seleccionarMaterialCatalogo(materialSeleccionado, null)}
+                                                            className={cn(
+                                                                'px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase transition-all',
+                                                                !catalogVarianteId
+                                                                    ? 'bg-blue-600 border-blue-600 text-white'
+                                                                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                                                            )}>
+                                                            Base ${materialSeleccionado.precioBase}
+                                                        </button>
+                                                        {materialSeleccionado.variantes.map((v: any) => (
+                                                            <button key={v.id} type="button"
+                                                                onClick={() => seleccionarMaterialCatalogo(materialSeleccionado, v.id)}
+                                                                className={cn(
+                                                                    'px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase transition-all',
+                                                                    catalogVarianteId === v.id
+                                                                        ? 'bg-blue-600 border-blue-600 text-white'
+                                                                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                                                                )}>
+                                                                {v.nombre}
+                                                                {v.precioAjuste ? ` +$${v.precioAjuste}` : ''}
+                                                                {' · $'}{(materialSeleccionado.precioBase + (v.precioAjuste || 0)).toFixed(2)}/m²
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </motion.div>
+                                            )}
+
+                                            {/* Precio resultante */}
+                                            {catalogMaterialId && (
+                                                <div className={cn("flex items-center justify-between text-white px-4 py-2.5 rounded-2xl", state.monedaItem === 'EUR' ? "bg-purple-600" : "bg-blue-600")}>
+                                                    <div>
+                                                        <p className="text-[9px] font-black uppercase opacity-80">Precio cargado</p>
+                                                        {state.monedaItem === 'EUR' && <p className="text-[8px] opacity-60">Precio preferencial aliado</p>}
+                                                    </div>
+                                                    <p className="font-black text-lg">
+                                                        {state.monedaItem === 'EUR' ? '€' : '$'}{state.precioUnitario.toFixed(2)}
+                                                        <span className="text-[9px] opacity-70 font-bold">/m²</span>
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {/* CHECKBOXES DINÁMICOS */}
                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-2">
@@ -640,18 +934,74 @@ export function ItemFormModal({
                     )}
                 </AnimatePresence>
 
-                {!(state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo') && (
+                {!(state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo') && state.tipoServicio !== 'VENTA' && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div className="space-y-2">
-                            <Label className="text-[10px] font-black uppercase text-slate-400 ml-1">Precio Unitario Base (USD)</Label>
+                            <div className="flex items-center justify-between ml-1">
+                                <Label className="text-[10px] font-black uppercase text-slate-400">Precio Unitario Base (USD)</Label>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowCatalogPicker(v => !v)}
+                                    className="flex items-center gap-1 text-[8px] font-black uppercase text-blue-600 hover:text-blue-700 transition-colors"
+                                >
+                                    <BookOpen className="w-3 h-3" />
+                                    Catálogo
+                                    {showCatalogPicker ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                </button>
+                            </div>
+
+                            {/* Mini picker del catálogo */}
+                            <AnimatePresence>
+                                {showCatalogPicker && (
+                                    <motion.div
+                                        initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                                        className="overflow-hidden"
+                                    >
+                                        <div className="bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 rounded-2xl p-3 space-y-2 mb-2">
+                                            <input
+                                                type="text"
+                                                placeholder="Buscar material o producto..."
+                                                value={catalogSearch}
+                                                onChange={e => setCatalogSearch(e.target.value)}
+                                                className="w-full h-8 px-3 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-bold outline-none"
+                                                autoFocus
+                                            />
+                                            <div className="space-y-1 max-h-40 overflow-y-auto">
+                                                {catalogFiltrado.length === 0 ? (
+                                                    <p className="text-[9px] text-slate-400 text-center py-2">Sin resultados</p>
+                                                ) : catalogFiltrado.map(prod => (
+                                                    <button
+                                                        key={prod.id}
+                                                        type="button"
+                                                        onClick={() => usarPrecioCatalogo(prod)}
+                                                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-white dark:hover:bg-black/20 transition-colors text-left group"
+                                                    >
+                                                        <div>
+                                                            <p className="text-[10px] font-black uppercase text-slate-700 dark:text-white group-hover:text-blue-600 transition-colors">{prod.nombre}</p>
+                                                            <p className="text-[8px] text-slate-400">
+                                                                {prod.tipoVenta === 'metro_cuadrado' ? `$${prod.precioBase}/m²` : `$${prod.precioBase}/${prod.unidadLabel}`}
+                                                                {prod.precioPublicista ? ` · €${prod.precioPublicista} pub` : ''}
+                                                            </p>
+                                                        </div>
+                                                        <span className="text-xs font-black text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10 px-2 py-1 rounded-lg">
+                                                            ${prod.precioBase}
+                                                        </span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+
                             <div className="relative">
                                 <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
-                                <Input 
-                                    type="number" 
-                                    step="0.01" 
+                                <Input
+                                    type="number"
+                                    step="0.01"
                                     value={state.precioUnitario === 0 ? '' : state.precioUnitario}
-                                    onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})} 
-                                    className="h-12 pl-12 rounded-2xl border-none bg-slate-100 dark:bg-slate-800 font-black text-emerald-600 text-xl shadow-inner" 
+                                    onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})}
+                                    className="h-12 pl-12 rounded-2xl border-none bg-slate-100 dark:bg-slate-800 font-black text-emerald-600 text-xl shadow-inner"
                                 />
                             </div>
                         </div>
@@ -701,33 +1051,80 @@ export function ItemFormModal({
                         <Label className="text-[9px] font-black text-emerald-600 uppercase ml-1">Costo Adicional Material (USD)</Label>
                         <div className="relative mt-1">
                             <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500"/>
-                            <Input 
-                                type="number" step="0.01" 
+                            <Input
+                                type="number" step="0.01"
                                 value={state.costoMaterialExtra === 0 ? '' : state.costoMaterialExtra}
-                                onChange={e => setState({...state, costoMaterialExtra: parseFloat(e.target.value) || 0})} 
-                                className="h-11 pl-11 border-none bg-white dark:bg-slate-800 font-black text-emerald-600 rounded-xl shadow-inner" 
+                                onChange={e => setState({...state, costoMaterialExtra: parseFloat(e.target.value) || 0})}
+                                className="h-11 pl-11 border-none bg-white dark:bg-slate-800 font-black text-emerald-600 rounded-xl shadow-inner"
                             />
                         </div>
                     </motion.div>
                 )}
+
+                {/* PRECIO AL MAYOR */}
+                <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-[1.5rem] p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400">Precio al Mayor (opcional)</p>
+                            <p className="text-[8px] text-amber-600/70 font-bold">Si el cliente compra N o más unidades, se aplica este precio en lugar del normal</p>
+                        </div>
+                        {state.cantidadMayor > 0 && state.precioMayor > 0 && state.cantidad >= state.cantidadMayor && (
+                            <span className="text-[8px] font-black uppercase bg-amber-500 text-white px-2 py-1 rounded-full">Activo</span>
+                        )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                            <Label className="text-[9px] font-black uppercase text-amber-600 ml-1">Cantidad mínima</Label>
+                            <Input type="number" placeholder="Ej: 10"
+                                value={state.cantidadMayor === 0 ? '' : state.cantidadMayor}
+                                onChange={e => setState({...state, cantidadMayor: parseInt(e.target.value) || 0})}
+                                className="h-11 rounded-xl border-none bg-white dark:bg-slate-800 font-black text-center text-amber-700" />
+                        </div>
+                        <div className="space-y-1.5">
+                            <Label className="text-[9px] font-black uppercase text-amber-600 ml-1">
+                                Precio al mayor ({state.monedaItem === 'EUR' ? '€' : '$'})
+                            </Label>
+                            <Input type="number" step="0.01" placeholder="Ej: 8.50"
+                                value={state.precioMayor === 0 ? '' : state.precioMayor}
+                                onChange={e => setState({...state, precioMayor: parseFloat(e.target.value) || 0})}
+                                className="h-11 rounded-xl border-none bg-white dark:bg-slate-800 font-black text-center text-amber-700" />
+                        </div>
+                    </div>
+                    {state.cantidadMayor > 0 && state.precioMayor > 0 && (
+                        <p className="text-[9px] text-amber-700 dark:text-amber-400 font-bold">
+                            {state.cantidad >= state.cantidadMayor
+                                ? `✓ Aplicando precio al mayor: ${state.monedaItem === 'EUR' ? '€' : '$'}${state.precioMayor} c/u`
+                                : `Necesitas ${state.cantidadMayor - state.cantidad} más para activar el precio al mayor`
+                            }
+                        </p>
+                    )}
+                </div>
             </div>
         </ScrollArea>
 
-        <footer className="p-8 bg-white dark:bg-slate-900 border-t flex flex-col md:flex-row justify-between items-center gap-6 shrink-0 z-20">
+        <footer className="p-5 sm:p-8 bg-white dark:bg-slate-900 border-t flex flex-col md:flex-row justify-between items-center gap-4 sm:gap-6 shrink-0 z-20">
             <div className="flex items-center gap-5 w-full md:w-auto">
-                <div className="h-14 w-14 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600 shadow-inner">
+                <div className={cn("h-14 w-14 rounded-2xl flex items-center justify-center shadow-inner", state.monedaItem === 'EUR' ? "bg-purple-100 dark:bg-purple-900/30 text-purple-600" : "bg-blue-100 dark:bg-blue-900/30 text-blue-600")}>
                     <Calculator className="w-7 h-7" />
                 </div>
                 <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] leading-none mb-1">Monto Subtotal</p>
-                    <p className="text-4xl font-black text-blue-600 tracking-tighter leading-none">${state.subtotal.toFixed(2)}</p>
+                    <div className="flex items-center gap-2 mb-1">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] leading-none">Monto Subtotal</p>
+                        {state.monedaItem === 'EUR' && <span className="text-[7px] font-black bg-purple-100 dark:bg-purple-900/30 text-purple-600 px-1.5 py-0.5 rounded-full uppercase">EUR · Aliado</span>}
+                        {state.cantidadMayor > 0 && state.precioMayor > 0 && state.cantidad >= state.cantidadMayor && (
+                            <span className="text-[7px] font-black bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded-full uppercase">Al Mayor</span>
+                        )}
+                    </div>
+                    <p className={cn("text-3xl sm:text-4xl font-black tracking-tighter leading-none", state.monedaItem === 'EUR' ? "text-purple-600" : "text-blue-600")}>
+                        {state.monedaItem === 'EUR' ? '€' : '$'}{state.subtotal.toFixed(2)}
+                    </p>
                 </div>
             </div>
             <div className="flex gap-3 w-full md:w-auto">
                 <Button variant="ghost" onClick={onClose} className="flex-1 md:flex-none h-14 px-8 font-black uppercase text-xs tracking-widest text-slate-400">Cancelar</Button>
-                <Button 
-                    onClick={handleSave} 
-                    className="flex-[2] md:flex-none h-14 px-12 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl shadow-xl shadow-blue-500/20 active:scale-95 transition-all text-sm tracking-widest"
+                <Button
+                    onClick={handleSave}
+                    className={cn("flex-[2] md:flex-none h-14 px-12 text-white font-black rounded-2xl shadow-xl active:scale-95 transition-all text-sm tracking-widest", esAliado ? "bg-purple-600 hover:bg-purple-700 shadow-purple-500/20" : "bg-blue-600 hover:bg-blue-700 shadow-blue-500/20")}
                 >
                     {itemToEdit ? "ACTUALIZAR ÍTEM" : "AÑADIR A LA ORDEN"}
                 </Button>

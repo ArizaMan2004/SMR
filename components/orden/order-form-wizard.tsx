@@ -1,7 +1,7 @@
 // @/components/orden/order-form-wizard.tsx
 "use client"
 
-import React, { useState, useMemo, useCallback, useEffect } from "react"
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input" 
@@ -40,20 +40,21 @@ const formatForDateTimeInput = (isoString: string) => {
 };
 
 const INITIAL_FORM_DATA = {
-    ordenNumero: '', 
-    fecha: new Date().toISOString(), 
+    ordenNumero: '',
+    nombreOrden: '',
+    fecha: new Date().toISOString(),
     fechaEntrega: new Date().toISOString().split('T')[0],
     isMaster: false,
-    cliente: { 
-        nombreRazonSocial: "", tipoCliente: "REGULAR", rifCedula: "", telefono: "", 
-        prefijoTelefono: "0414", numeroTelefono: "", prefijoRif: "V", numeroRif: "", 
-        domicilioFiscal: "", correo: "", personaContacto: "" 
+    cliente: {
+        nombreRazonSocial: "", tipoCliente: "REGULAR", rifCedula: "", telefono: "",
+        prefijoTelefono: "0414", numeroTelefono: "", prefijoRif: "V", numeroRif: "",
+        domicilioFiscal: "", correo: "", personaContacto: ""
     },
     items: [],
     descripcionDetallada: "",
 };
 
-export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, initialData, currentUserId }) => {
+export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, initialData, currentUserId, bcvRate = 0, eurRate = 0 }) => {
     const [formData, setFormData] = useState<any>(INITIAL_FORM_DATA);
     const [isLoading, setIsLoading] = useState(false);
     const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -72,6 +73,39 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
     // Estados para la edición de precio manual (override)
     const [editingPriceIndex, setEditingPriceIndex] = useState<number | null>(null);
     const [tempPrice, setTempPrice] = useState<string>("");
+
+    // Re-preciar ítems de catálogo cuando cambia tipoCliente (REGULAR ↔ ALIADO)
+    const prevTipoClienteRef = useRef<string>('');
+    useEffect(() => {
+        const current = formData.cliente.tipoCliente as string;
+        const prev = prevTipoClienteRef.current;
+        prevTipoClienteRef.current = current;
+
+        // Saltar en la carga inicial (prev vacío) o si no hubo cambio real
+        if (!prev || prev === current) return;
+
+        const esAliado = current === 'ALIADO';
+
+        setFormData((fd: any) => ({
+            ...fd,
+            items: fd.items.map((item: any) => {
+                // Solo re-preciar ítems que vengan del catálogo (tienen precios guardados)
+                if (!item._catalogPrecioBase) return item;
+
+                const pBase = Number(item._catalogPrecioBase) || 0;
+                const pPublicista = Number(item._catalogPrecioPublicista) || 0;
+                const varAjuste = Number(item._catalogVarianteAjuste) || 0;
+
+                const usarPublicista = esAliado && pPublicista > 0;
+                const nuevoPrecio = (usarPublicista ? pPublicista : pBase) + varAjuste;
+                const nuevaMoneda: 'USD' | 'EUR' = usarPublicista ? 'EUR' : 'USD';
+
+                // Eliminar totalAjustado (override manual) al cambiar tarifa de catálogo
+                const { totalAjustado: _rm, ...itemBase } = item;
+                return { ...itemBase, precioUnitario: nuevoPrecio, monedaItem: nuevaMoneda };
+            })
+        }));
+    }, [formData.cliente.tipoCliente]);
 
     useEffect(() => {
         const unsubDesigners = subscribeToDesigners(setDesignersList);
@@ -138,9 +172,14 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
         const p = parseFloat(item.precioUnitario) || 0;
         const c = parseFloat(item.cantidad) || 0;
         const e = item.suministrarMaterial ? (parseFloat(item.costoMaterialExtra) || 0) : 0;
-        
+
+        // Precio al mayor: si aplica, sobreescribe el precio unitario
+        const pMayor = parseFloat(item.precioMayor) || 0;
+        const cMayor = parseInt(item.cantidadMayor) || 0;
+        const precioEfectivo = (cMayor > 0 && c >= cMayor && pMayor > 0) ? pMayor : p;
+
         if (item.unidad === 'm2' && x > 0 && y > 0) {
-            let costoBaseUnitario = (x / 100) * (y / 100) * p;
+            let costoBaseUnitario = (x / 100) * (y / 100) * precioEfectivo;
             if (item.tipoServicio === 'IMPRESION') {
                 if (item.impresionLaminado) {
                     const pLin = parseFloat(item.precioLaminadoLineal) || 0;
@@ -155,7 +194,7 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
             }
             return (costoBaseUnitario + e) * c;
         }
-        return (p + e) * c;
+        return (precioEfectivo + e) * c;
     }, []);
 
     const currentTotal = useMemo(() => {
@@ -232,9 +271,12 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
         setIsLoading(true);
         try {
             const { prefijoTelefono, numeroTelefono, prefijoRif, numeroRif, ...clienteRest } = formData.cliente;
-            const processedItems = formData.items.map((item: any) => ({
-                ...item, subtotal: parseFloat(getItemSubtotal(item).toFixed(2))
-            }));
+            const processedItems = formData.items.map((item: any) => {
+                const clean: any = {};
+                Object.entries({ ...item, subtotal: parseFloat(getItemSubtotal(item).toFixed(2)) })
+                    .forEach(([k, v]) => { if (v !== undefined) clean[k] = v; });
+                return clean;
+            });
             const finalPayload = { 
                 ...formData, items: processedItems, totalUSD: parseFloat(currentTotal.toFixed(2)), 
                 userId: currentUserId, updatedAt: new Date().toISOString(), 
@@ -278,8 +320,8 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                 </div>
             </header>
 
-            <main className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
-                <section className="flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-950 border-r">
+            <main className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden min-h-0">
+                <section className="flex-none lg:flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-950 lg:border-r">
                     <div className="p-4 px-6 flex justify-between items-center border-b bg-slate-50/50">
                         <h3 className="font-black text-[10px] uppercase text-slate-500 tracking-widest flex items-center gap-2">
                             <Layers className="w-4 h-4" /> Estructura de la Orden
@@ -314,12 +356,37 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                                         {items.map((item: any) => (
                                             <div key={item.originalIndex} className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-white/5 flex items-center justify-between group shadow-sm transition-all hover:shadow-md">
                                                 <div className="flex items-center gap-4">
-                                                    <div className={cn("p-2 rounded-xl", item.tipoServicio === 'IMPRESION' ? "bg-blue-50 text-blue-500" : "bg-orange-50 text-orange-500")}>
-                                                        {item.tipoServicio === 'IMPRESION' ? <Printer size={16}/> : <Scissors size={16}/>}
+                                                    <div className={cn("p-2 rounded-xl shrink-0",
+                                                        item.monedaItem === 'EUR' ? "bg-purple-50 text-purple-500" :
+                                                        item.tipoServicio === 'IMPRESION' ? "bg-blue-50 text-blue-500" :
+                                                        item.tipoServicio === 'VENTA' ? "bg-emerald-50 text-emerald-500" :
+                                                        "bg-orange-50 text-orange-500"
+                                                    )}>
+                                                        {item.tipoServicio === 'IMPRESION' ? <Printer size={16}/> :
+                                                         item.tipoServicio === 'VENTA' ? <ShoppingCart size={16}/> :
+                                                         <Scissors size={16}/>}
                                                     </div>
                                                     <div>
-                                                        <h4 className="font-bold text-xs uppercase text-slate-800 dark:text-white leading-none">{item.nombre}</h4>
-                                                        <p className="text-[10px] text-slate-400 mt-1 font-medium">{item.cantidad} {item.unidad} • {item.unidad === 'm2' ? `${item.medidaXCm}x${item.medidaYCm}cm` : `$${item.precioUnitario}`}</p>
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                            <h4 className="font-bold text-xs uppercase text-slate-800 dark:text-white leading-none">{item.nombre}</h4>
+                                                            {item.monedaItem === 'EUR' && (
+                                                                <span className="text-[7px] font-black bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full uppercase">EUR·Aliado</span>
+                                                            )}
+                                                            {(() => {
+                                                                const pM = parseFloat(item.precioMayor) || 0;
+                                                                const cM = parseInt(item.cantidadMayor) || 0;
+                                                                return (cM > 0 && item.cantidad >= cM && pM > 0)
+                                                                    ? <span className="text-[7px] font-black bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded-full uppercase">Al Mayor</span>
+                                                                    : null;
+                                                            })()}
+                                                        </div>
+                                                        <p className="text-[10px] text-slate-400 mt-1 font-medium">
+                                                            {item.cantidad} {item.unidad} •{' '}
+                                                            {item.unidad === 'm2'
+                                                                ? `${item.medidaXCm}x${item.medidaYCm}cm`
+                                                                : `${item.monedaItem === 'EUR' ? '€' : '$'}${item.precioUnitario}`
+                                                            }
+                                                        </p>
                                                     </div>
                                                 </div>
                                                 
@@ -408,7 +475,7 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                     </ScrollArea>
                 </section>
 
-                <aside className="w-full lg:w-[350px] shrink-0 bg-[#f1f5f9] dark:bg-black border-l flex flex-col min-h-0">
+                <aside className="w-full lg:w-[350px] shrink-0 bg-[#f1f5f9] dark:bg-black border-t lg:border-t-0 lg:border-l flex flex-col min-h-0">
                     <ScrollArea className="flex-1">
                         <div className="p-5 space-y-6">
                             <section className="space-y-3 relative">
@@ -445,6 +512,10 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                             </section>
 
                             <section className="space-y-4 pt-4 border-t">
+                                <div className="space-y-1">
+                                    <Label className="text-[9px] font-black uppercase text-slate-400 flex items-center gap-2"><Pencil className="w-3.5 h-3.5 text-purple-400" /> Nombre de la Orden <span className="text-slate-300">(opcional)</span></Label>
+                                    <Input value={formData.nombreOrden} onChange={e => handleChange('nombreOrden', e.target.value)} placeholder="Ej. Letras corporativas Ana Pérez" className="h-9 rounded-lg border-none font-bold text-purple-700 dark:text-purple-300 bg-purple-50/60 dark:bg-purple-500/10 text-xs placeholder:text-slate-300" />
+                                </div>
                                 <div className="space-y-1"><Label className="text-[9px] font-black uppercase text-slate-400 flex items-center gap-2"><Clock className="w-3.5 h-3.5 text-blue-500" /> Emisión</Label><Input type="datetime-local" value={formatForDateTimeInput(formData.fecha)} onChange={e => handleChange('fecha', new Date(e.target.value).toISOString())} className="h-9 rounded-lg border-none font-bold text-blue-600 bg-blue-50/50 text-xs" /></div>
                                 <div className="space-y-1"><Label className="text-[9px] font-black uppercase text-slate-400 flex items-center gap-2"><Calendar className="w-3.5 h-3.5 text-orange-400" /> Entrega</Label><Input type="date" value={formData.fechaEntrega} onChange={e => handleChange('fechaEntrega', e.target.value)} className="h-9 rounded-lg border-none font-black text-orange-600 bg-orange-50/50 text-xs" /></div>
                                 <div className="space-y-1">
@@ -470,9 +541,21 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                                         <Wand2 className="w-2.5 h-2.5" />
                                     </Button>
                                 </div>
-                                {formData.cliente.tipoCliente === 'ALIADO' && <Badge className="bg-purple-600 text-[6px] h-3.5 px-1.5 font-black text-white uppercase">Socio Estratégico</Badge>}
+                                {formData.cliente.tipoCliente === 'ALIADO' && (
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                    <Badge className="bg-purple-600 text-[6px] h-3.5 px-1.5 font-black text-white uppercase">Socio Estratégico</Badge>
+                                    <Badge className="bg-purple-100 text-purple-700 text-[6px] h-3.5 px-1.5 font-black uppercase border-none">Precios EUR</Badge>
+                                </div>
+                            )}
                             </div>
-                            <p className="text-2xl font-black tracking-tighter leading-none text-slate-900 dark:text-white">${currentTotal.toFixed(2)}</p>
+                            <div className="text-right">
+                                <p className={cn("text-2xl font-black tracking-tighter leading-none", formData.cliente.tipoCliente === 'ALIADO' ? "text-purple-600" : "text-slate-900 dark:text-white")}>
+                                    {formData.cliente.tipoCliente === 'ALIADO' ? '€' : '$'}{currentTotal.toFixed(2)}
+                                </p>
+                                {formData.cliente.tipoCliente === 'ALIADO' && eurRate > 0 && bcvRate > 0 && (
+                                    <p className="text-[8px] text-slate-400 font-bold">≈ ${(currentTotal * eurRate / bcvRate).toFixed(2)} USD</p>
+                                )}
+                            </div>
                         </div>
                         <Button disabled={isLoading} onClick={handleSaveOrder} className={cn("w-full h-11 rounded-xl text-white font-black text-[11px] shadow-lg transition-all", formData.cliente.tipoCliente === 'ALIADO' ? "bg-purple-600" : "bg-slate-900 dark:bg-blue-600")}>{isLoading ? <Loader2 className="animate-spin" /> : <span className="flex items-center gap-2 uppercase tracking-widest">Generar Orden <ChevronRight className="w-4 h-4" /></span>}</Button>
                     </div>
@@ -491,7 +574,10 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                     setIsItemModalOpen(false); 
                 }}
                 itemToEdit={editingItemIndex !== null ? formData.items[editingItemIndex] : undefined}
-                tipoCliente={formData.cliente.tipoCliente} designers={designersList} customColors={customColors}
+                tipoCliente={formData.cliente.tipoCliente}
+                eurRate={eurRate}
+                usdRate={bcvRate}
+                designers={designersList} customColors={customColors}
                 onRegisterColor={(newColor: any) => saveNewColor(newColor)}
                 isMaster={formData.isMaster}
             />

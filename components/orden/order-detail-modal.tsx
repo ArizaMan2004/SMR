@@ -16,23 +16,28 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { formatCurrency, formatDate } from "@/lib/utils/order-utils";
 import { type OrdenServicio, type ItemOrden } from "@/lib/types/orden";
-import { 
-    X, User, Calendar, FileText, MapPin, Phone, 
-    Mail, Box, Layers, Hammer, Receipt, ArrowRight, 
+import {
+    X, User, Calendar, FileText, MapPin, Phone,
+    Mail, Box, Layers, Hammer, Receipt, ArrowRight,
     Timer, Scissors, Printer, Star, ShieldCheck,
-    ChevronDown, DollarSign, Euro, Coins, Building2, Users 
+    ChevronDown, DollarSign, Euro, Coins, Building2, Users,
+    Clock, CircleCheck, Loader2, Link2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+type EstadoProduccion = 'PENDIENTE' | 'EN_PRODUCCION' | 'TERMINADA';
 
 interface OrderDetailModalProps {
   open: boolean;
   onClose: () => void;
-  orden: any | null; 
+  orden: any | null;
   rates: {
     usd: number;
     eur: number;
     usdt: number;
   };
+  onUpdate?: (ordenId: string, changes: Partial<any>) => Promise<void>;
+  allOrdenes?: any[]; // para selector de orden vinculada
 }
 
 // --- UTILIDADES DE CÁLCULO ACTUALIZADAS ---
@@ -69,8 +74,28 @@ const getItemSubtotal = (item: ItemOrden) => {
   }
 };
 
-export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailModalProps) {
+export function OrderDetailModal({ open, onClose, orden, rates, onUpdate, allOrdenes = [] }: OrderDetailModalProps) {
   const [selectedCurrency, setSelectedCurrency] = useState<'USD' | 'EUR' | 'USDT'>('USD');
+  const [updatingProd, setUpdatingProd] = useState(false);
+  const [showLinkPicker, setShowLinkPicker] = useState(false);
+
+  const currentEstadoProd: EstadoProduccion = (orden?.estadoProduccion as EstadoProduccion) || 'PENDIENTE';
+
+  const handleSetEstadoProduccion = async (estado: EstadoProduccion) => {
+    if (!onUpdate || !orden?.id || updatingProd) return;
+    setUpdatingProd(true);
+    try {
+      await onUpdate(orden.id, { estadoProduccion: estado });
+    } finally {
+      setUpdatingProd(false);
+    }
+  };
+
+  const handleLinkOrden = async (linkedId: string) => {
+    if (!onUpdate || !orden?.id) return;
+    await onUpdate(orden.id, { ordenVinculadaId: linkedId });
+    setShowLinkPicker(false);
+  };
 
   // AGRUPAR ÍTEMS DINÁMICAMENTE (Para Empresas Matrices)
   const groupedItems = useMemo(() => {
@@ -124,6 +149,9 @@ export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailMod
                         <DialogTitle className="text-xl md:text-3xl font-black tracking-tighter text-slate-900 dark:text-white uppercase leading-none">
                             Orden #{orden.ordenNumero}
                         </DialogTitle>
+                        {orden.nombreOrden && (
+                            <span className="text-sm font-black text-purple-600 dark:text-purple-400 italic">· {orden.nombreOrden}</span>
+                        )}
                         
                         {isMaster && (
                             <Badge className="bg-indigo-600 text-white rounded-full px-3 py-1 text-[9px] md:text-[10px] font-black uppercase tracking-widest border-none flex items-center gap-1">
@@ -146,12 +174,78 @@ export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailMod
                     <p className="text-slate-500 font-bold text-xs md:text-sm uppercase tracking-wide mt-2">{formatDate(orden.fecha)}</p>
                 </div>
             </div>
-            <Button variant="outline" size="icon" onClick={onClose} className="rounded-full h-10 w-10 md:h-12 md:w-12 border-slate-200 bg-white shadow-sm hover:bg-slate-50 shrink-0">
+            <Button variant="outline" size="icon" onClick={onClose} className="rounded-full h-10 w-10 md:h-12 md:w-12 border-slate-200 bg-white shadow-sm hover:bg-slate-50 shrink-0 absolute top-6 right-6 md:static">
                 <X className="h-5 w-5" />
             </Button>
         </header>
 
-        <div className="flex-1 min-h-0 relative"> 
+        {/* BARRA DE ESTADO DE PRODUCCIÓN */}
+        {onUpdate && (
+            <div className="shrink-0 flex flex-wrap items-center gap-3 px-6 md:px-10 py-3 border-b border-slate-200/50 dark:border-white/5 bg-white/50 dark:bg-slate-900/30">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Estado Producción:</span>
+                <div className="flex items-center gap-2">
+                    {(['PENDIENTE', 'EN_PRODUCCION', 'TERMINADA'] as EstadoProduccion[]).map((estado) => {
+                        const active = currentEstadoProd === estado;
+                        const cfg = {
+                            PENDIENTE:    { label: 'Pendiente',    icon: <Clock className="w-3 h-3" />,        cls: active ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700' },
+                            EN_PRODUCCION:{ label: 'En Producción',icon: <Hammer className="w-3 h-3" />,       cls: active ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-600 hover:bg-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:hover:bg-amber-500/20' },
+                            TERMINADA:    { label: 'Terminada',    icon: <CircleCheck className="w-3 h-3" />,  cls: active ? 'bg-emerald-500 text-white' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20' },
+                        }[estado];
+                        return (
+                            <button
+                                key={estado}
+                                disabled={updatingProd}
+                                onClick={() => handleSetEstadoProduccion(estado)}
+                                className={cn(
+                                    'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border border-transparent',
+                                    cfg.cls,
+                                    active && 'shadow-md',
+                                    !active && 'border-transparent'
+                                )}
+                            >
+                                {updatingProd && active ? <Loader2 className="w-3 h-3 animate-spin" /> : cfg.icon}
+                                {cfg.label}
+                            </button>
+                        );
+                    })}
+                </div>
+                {/* Vinculación a otra orden */}
+                <div className="ml-auto flex items-center gap-2 relative">
+                    {orden.ordenVinculadaId && (
+                        <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                            <Link2 className="w-3 h-3" /> #{allOrdenes.find(o => o.id === orden.ordenVinculadaId)?.ordenNumero ?? orden.ordenVinculadaId}
+                        </span>
+                    )}
+                    {allOrdenes.length > 0 && (
+                        <DropdownMenu open={showLinkPicker} onOpenChange={setShowLinkPicker}>
+                            <DropdownMenuTrigger asChild>
+                                <button className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-blue-600 hover:text-blue-700 px-2 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 transition-all">
+                                    <Link2 className="w-3 h-3" /> Vincular Orden
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="rounded-2xl max-h-60 overflow-y-auto min-w-[220px]">
+                                {orden.ordenVinculadaId && (
+                                    <DropdownMenuItem onClick={() => handleLinkOrden('')} className="text-rose-500 text-xs font-bold gap-2 cursor-pointer">
+                                        <X className="w-3 h-3" /> Quitar vinculación
+                                    </DropdownMenuItem>
+                                )}
+                                {allOrdenes
+                                    .filter(o => o.id !== orden.id)
+                                    .slice(0, 40)
+                                    .map(o => (
+                                        <DropdownMenuItem key={o.id} onClick={() => handleLinkOrden(o.id!)} className="text-xs font-bold gap-2 cursor-pointer">
+                                            #{o.ordenNumero} — {o.cliente?.nombreRazonSocial?.slice(0, 25) || 'S/N'}
+                                        </DropdownMenuItem>
+                                    ))
+                                }
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
+                </div>
+            </div>
+        )}
+
+        <div className="flex-1 min-h-0 relative">
             <ScrollArea className="h-full">
                 <div className="px-6 md:px-10 py-8 max-w-5xl mx-auto space-y-8 pb-24">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -240,7 +334,7 @@ export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailMod
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch pt-4">
-                        <div className="p-8 bg-slate-200/30 dark:bg-slate-900/30 rounded-[2.5rem] border border-dashed border-slate-300">
+                        <div className="p-5 sm:p-8 bg-slate-200/30 dark:bg-slate-900/30 rounded-[2.5rem] border border-dashed border-slate-300">
                             <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Notas de Producción</h4>
                             <p className="text-slate-600 dark:text-slate-400 text-sm italic whitespace-pre-line leading-relaxed">
                                 {orden.descripcionDetallada || "Sin instrucciones adicionales."}
@@ -248,7 +342,7 @@ export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailMod
                         </div>
 
                         <div className={cn(
-                            "rounded-[2.5rem] p-8 shadow-xl border flex flex-col justify-between space-y-6 transition-all",
+                            "rounded-[2.5rem] p-5 sm:p-8 shadow-xl border flex flex-col justify-between space-y-6 transition-all",
                             isAliado ? "bg-purple-600 text-white border-purple-500" : "bg-white dark:bg-slate-900 border-slate-200/50"
                         )}>
                             <div className="space-y-4">
@@ -262,7 +356,7 @@ export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailMod
                                 </div>
                                 <Separator className={cn("opacity-50", isAliado ? "bg-white" : "bg-slate-200")} />
                                 
-                                <div className="flex justify-between items-end">
+                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-5">
                                     <div className="space-y-3">
                                         <p className={cn("text-[10px] font-black uppercase tracking-widest", isAliado ? "text-purple-100" : "text-slate-400")}>Restante en Bs.</p>
                                         <DropdownMenu>
@@ -289,8 +383,8 @@ export function OrderDetailModal({ open, onClose, orden, rates }: OrderDetailMod
                                             Ref. Tasa: {formatCurrency(activeRateValue)} Bs.
                                         </p>
                                     </div>
-                                    <div className="text-right">
-                                        <p className={cn("text-4xl md:text-5xl font-black tracking-tighter leading-none", isPagado ? "text-emerald-400" : isAliado ? "text-white" : "text-red-500")}>
+                                    <div className="text-left sm:text-right">
+                                        <p className={cn("text-3xl sm:text-4xl md:text-5xl font-black tracking-tighter leading-none break-words", isPagado ? "text-emerald-400" : isAliado ? "text-white" : "text-red-500")}>
                                             {formatCurrency(montoPendiente)}
                                         </p>
                                         <p className={cn("text-lg md:text-xl font-black mt-1", isAliado ? "text-purple-100" : "text-slate-400")}>

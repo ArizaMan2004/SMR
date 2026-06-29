@@ -73,6 +73,12 @@ export function AccountsPayableView({ bcvRate, initialData = [] }: Props) {
         });
     }, [registros]);
 
+    // Lista filtrada por búsqueda (reutilizada en tabla de escritorio y tarjetas móviles)
+    const filteredRegistros = useMemo(() => {
+        const term = searchTerm.toLowerCase();
+        return registros.filter(r => r.beneficiario.toLowerCase().includes(term));
+    }, [registros, searchTerm]);
+
     // --- MANEJO DE PRECIOS ---
     const handleAmountUpdate = (val: string, source: 'USD' | 'BS', target: 'FORM' | 'PAY') => {
         const num = parseFloat(val) || 0;
@@ -124,9 +130,9 @@ export function AccountsPayableView({ bcvRate, initialData = [] }: Props) {
         <div className="max-w-7xl mx-auto p-4 lg:p-10 space-y-8">
             
             {/* CABECERA */}
-            <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border shadow-sm">
+            <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sm:gap-6 bg-white dark:bg-slate-900 p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm">
                 <div className="space-y-1">
-                    <h1 className="text-4xl font-black italic tracking-tighter uppercase leading-none text-slate-900 dark:text-white">
+                    <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black italic tracking-tighter uppercase leading-none text-slate-900 dark:text-white">
                         SMR <span className="text-amber-600">Payroll & Expenses</span>
                     </h1>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Gestión Integral de Nómina y Egresos</p>
@@ -187,7 +193,7 @@ export function AccountsPayableView({ bcvRate, initialData = [] }: Props) {
                     </Tabs>
                 </div>
 
-                <div className="overflow-x-auto">
+                <div className="hidden md:block overflow-x-auto">
                     <Table>
                         <TableHeader className="bg-slate-50/50 dark:bg-slate-800/30">
                             <TableRow className="h-16 border-none">
@@ -198,7 +204,7 @@ export function AccountsPayableView({ bcvRate, initialData = [] }: Props) {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {registros.filter(r => r.beneficiario.toLowerCase().includes(searchTerm.toLowerCase())).map((r) => (
+                            {filteredRegistros.map((r) => (
                                 <TableRow key={r.id} className="h-28 border-slate-50 dark:border-slate-800 hover:bg-slate-50/50 transition-all">
                                     <TableCell className="px-10">
                                         <div className="flex items-center gap-4">
@@ -239,11 +245,54 @@ export function AccountsPayableView({ bcvRate, initialData = [] }: Props) {
                         </TableBody>
                     </Table>
                 </div>
+
+                {/* MÓVIL: tarjetas apiladas (reemplaza la tabla en pantallas pequeñas) */}
+                <div className="md:hidden p-4 space-y-3">
+                    {filteredRegistros.length === 0 ? (
+                        <div className="text-center py-12 opacity-50">
+                            <Wallet className="w-10 h-10 mx-auto mb-3" />
+                            <p className="text-xs font-black uppercase tracking-widest">Sin registros</p>
+                        </div>
+                    ) : filteredRegistros.map((r) => (
+                        <div key={r.id} className="bg-slate-50 dark:bg-slate-800/40 rounded-3xl p-4 border border-black/5 dark:border-white/5">
+                            <div className="flex items-start gap-3">
+                                <div className={cn("w-11 h-11 rounded-2xl flex items-center justify-center shrink-0",
+                                    r.tipo === 'NOMINA' ? "bg-indigo-100 text-indigo-600" : "bg-amber-100 text-amber-600"
+                                )}>
+                                    {r.tipo === 'NOMINA' ? <UserCircle className="w-6 h-6" /> : <Package className="w-6 h-6" />}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <h3 className="font-black text-slate-900 dark:text-white uppercase italic text-sm leading-tight truncate">{r.beneficiario}</h3>
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter truncate">{r.descripcion}</p>
+                                </div>
+                                <Badge className="bg-slate-900 dark:bg-white dark:text-slate-900 font-black text-[8px] uppercase px-2 rounded-lg shrink-0">{r.categoria}</Badge>
+                            </div>
+                            <div className="flex items-end justify-between mt-4 pt-3 border-t border-black/5 dark:border-white/5">
+                                <div>
+                                    <div className="font-black text-xl text-slate-900 dark:text-white leading-none">${r.monto.toFixed(2)}</div>
+                                    <div className="text-[10px] font-black text-amber-600 uppercase mt-0.5">Bs. {r.montoBs.toLocaleString()}</div>
+                                </div>
+                                {r.estado === 'PAGADO' ? (
+                                    <div className="flex items-center gap-1.5 text-emerald-600 font-black text-[10px] uppercase tracking-widest">
+                                        <CheckCircle2 className="w-4 h-4" /> Pagado
+                                    </div>
+                                ) : (
+                                    <Button
+                                        onClick={() => { setSelectedRecord(r); setIsPayModalOpen(true); }}
+                                        className="bg-amber-600 text-white hover:bg-amber-700 h-9 px-4 rounded-xl font-black text-[9px] uppercase active:scale-95 transition-transform"
+                                    >
+                                        Procesar Pago
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </Card>
 
             {/* MODAL: REGISTRO INICIAL */}
             <Dialog open={isMainModalOpen} onOpenChange={setIsMainModalOpen}>
-                <DialogContent className="max-w-md rounded-[3rem] p-10 bg-white dark:bg-slate-950 border-none shadow-2xl">
+                <DialogContent className="max-w-md w-[95vw] rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 bg-white dark:bg-slate-950 border-none shadow-2xl">
                     <DialogHeader>
                         <DialogTitle className="text-3xl font-black italic uppercase tracking-tighter text-amber-600 leading-none">Configurar Registro</DialogTitle>
                     </DialogHeader>
@@ -287,7 +336,7 @@ export function AccountsPayableView({ bcvRate, initialData = [] }: Props) {
 
             {/* MODAL: PROCESAR PAGO (MONTO MANUAL) */}
             <Dialog open={isPayModalOpen} onOpenChange={setIsPayModalOpen}>
-                <DialogContent className="max-w-sm rounded-[3rem] p-10 bg-slate-900 text-white border-none shadow-2xl">
+                <DialogContent className="max-w-sm w-[95vw] rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 bg-slate-900 text-white border-none shadow-2xl">
                     <DialogHeader>
                         <DialogTitle className="text-2xl font-black italic uppercase tracking-tighter text-amber-500 leading-none">Confirmar Pago</DialogTitle>
                     </DialogHeader>

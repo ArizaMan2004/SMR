@@ -262,7 +262,7 @@ export function ClientesView({ ordenes }: { ordenes: any[] }) {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="grid grid-cols-3 gap-2 sm:gap-4">
                             <div className="bg-white dark:bg-black/20 p-4 rounded-2xl shadow-sm">
                                 <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Fidelidad</p>
                                 <p className="text-2xl font-black text-indigo-600">{selectedClient.totalOrdenes}</p>

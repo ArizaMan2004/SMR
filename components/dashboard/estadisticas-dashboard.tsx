@@ -65,8 +65,9 @@ interface EstadisticasDashboardProps {
   pagosEmpleados: PagoEmpleado[]
   cobranzas: Cobranza[]
   clientes: any[]
-  ordenes: any[] 
+  ordenes: any[]
   rates?: { usd: number, eur: number, usdt: number }
+  ventasCatalogo?: any[]   // ventas del módulo de catálogo (contribuyen a ingresos generales)
 }
 
 type ViewMode = 'GENERAL' | 'IMPRESION' | 'CORTE';
@@ -101,7 +102,7 @@ const detectarCategoria = (texto: string, diccionario: any, fallback: string = '
 };
 
 export function EstadisticasDashboard({
-  gastosFijos, empleados, cobranzas, clientes, rates
+  gastosFijos, empleados, cobranzas, clientes, rates, ventasCatalogo = []
 }: EstadisticasDashboardProps) {
 
   const [viewMode, setViewMode] = useState<ViewMode>('GENERAL');
@@ -121,9 +122,11 @@ export function EstadisticasDashboard({
   const [localOrdenes, setLocalOrdenes] = useState<any[]>([]);
   const [localGastos, setLocalGastos] = useState<any[]>([]);
   const [localPagos, setLocalPagos] = useState<any[]>([]);
+  const [allOrdenes, setAllOrdenes] = useState<any[]>([]);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
 
   useEffect(() => {
+    let active = true;
     const fetchMonthlyData = async () => {
         setIsLoadingStats(true);
         try {
@@ -171,18 +174,36 @@ export function EstadisticasDashboard({
                 return { ...p, fecha: d.toISOString() }; 
             });
 
+            if (!active) return;
             setLocalOrdenes(fetchedOrdenes);
             setLocalGastos(fetchedGastos);
             setLocalPagos(fetchedPagos);
         } catch (error) {
             console.error("Error al descargar estadísticas:", error);
         } finally {
-            setIsLoadingStats(false);
+            if (active) setIsLoadingStats(false);
         }
     };
 
     fetchMonthlyData();
+    return () => { active = false; };
   }, [fechaReferencia]);
+
+  useEffect(() => {
+    const fetchDeudores = async () => {
+        try {
+            const q = query(
+                collection(db, "ordenes"),
+                where("estadoPago", "in", ["PENDIENTE", "ABONADO"])
+            );
+            const snap = await getDocs(q);
+            setAllOrdenes(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+        } catch (e) {
+            console.error("Error fetching deudores:", e);
+        }
+    };
+    fetchDeudores();
+  }, []);
 
   const getFechaRealPago = (c: any) => {
       const raw = c.fecha || c.fechaRegistro || c.fechaPago || c.timestamp;
@@ -339,7 +360,7 @@ export function EstadisticasDashboard({
           }
       });
       return list;
-  }, [localOrdenes, cobranzas, rates]);
+  }, [localOrdenes, cobranzas, rates?.usd]);
 
   const productionMetrics = useMemo(() => {
       const calcularStats = (inicio: Date, fin: Date) => {
@@ -539,7 +560,7 @@ export function EstadisticasDashboard({
             return f >= inicio && f <= fin;
         }).forEach(g => {
             const areaExplicita = (g as any).area; 
-            const texto = ((g as any).nombre || g.descripcion || (g as any).concepto || "" + ' ' + (g.categoria || '')).toLowerCase();
+            const texto = (((g as any).nombre || g.descripcion || (g as any).concepto || '') + ' ' + (g.categoria || '')).toLowerCase();
             const cat = (g.categoria || "").toLowerCase();
             
             const monto = Number(g.monto) || Number(g.montoUSD) || 0;
@@ -585,6 +606,17 @@ export function EstadisticasDashboard({
                     }
                 });
              });
+        }
+
+        // Ventas del catálogo (contribuyen solo en vista GENERAL)
+        if (viewMode === 'GENERAL') {
+            (ventasCatalogo || []).forEach(v => {
+                if (v.estado === 'ANULADA') return;
+                try {
+                    const d = v.fecha?.toDate ? v.fecha.toDate() : new Date(v.fecha)
+                    if (d >= inicio && d <= fin) ingresos += Number(v.totalUSD) || 0
+                } catch { /* fecha inválida */ }
+            });
         }
 
         return { ingresos, egresosDirectos, ordenesCount, gastosDiseno, gastosFijosPagados };
@@ -645,24 +677,39 @@ export function EstadisticasDashboard({
         puntoEquilibrioPct, 
         variacionIngreso: anterior.ingresos > 0 ? ((actual.ingresos - anterior.ingresos) / anterior.ingresos) * 100 : 0 
     };
-  }, [fechaReferencia, viewMode, transaccionesReales, localOrdenes, localGastos, gastosFijos, localPagos, empRoleMap, orderBreakdown, fechas, empleados]);
+  }, [fechaReferencia, viewMode, transaccionesReales, localOrdenes, localGastos, gastosFijos, localPagos, empRoleMap, orderBreakdown, fechas, empleados, ventasCatalogo]);
 
   const analisisDeuda = useMemo(() => {
       let deudaCorriente = 0; let deudaCritica = 0; let totalDeuda = 0;
       const hoy = new Date();
-      
+
+      const getBreakdown = (o: any) => {
+          if (orderBreakdown.has(o.id)) return orderBreakdown.get(o.id)!;
+          let totalImp = 0, totalCorte = 0;
+          const items = Array.isArray(o.items) ? o.items : [];
+          items.forEach((item: any) => {
+              const tipo = (item.tipo || item.tipoItem || '').toLowerCase();
+              const monto = Number(item.precioUSD || item.precio || item.subtotal || 0);
+              if (/imp|vinil|lona|banner|roll|flex/.test(tipo)) totalImp += monto;
+              else if (/laser|corte|grabado|acril/.test(tipo)) totalCorte += monto;
+              else totalImp += monto;
+          });
+          const total = totalImp + totalCorte || 1;
+          return { pctImp: totalImp / total, pctCorte: totalCorte / total, pctOtros: 0 };
+      };
+
       const clientesDeudoresMap = new Map<string, {
           nombreCliente: string,
           montoTotal: number,
           ordenes: any[]
       }>();
 
-      localOrdenes.forEach(o => {
+      allOrdenes.forEach(o => {
           if (o.estado === 'ANULADO') return;
           const deudaReal = Math.max(0, (o.totalUSD || 0) - (o.montoPagadoUSD || 0));
           if (deudaReal <= 0.01) return;
 
-          const props = orderBreakdown.get(o.id) || { pctImp: 0, pctCorte: 0, pctOtros: 0 };
+          const props = getBreakdown(o);
           let deudaAplicable = 0;
           if (viewMode === 'GENERAL') deudaAplicable = deudaReal;
           else if (viewMode === 'IMPRESION') deudaAplicable = deudaReal * props.pctImp;
@@ -676,7 +723,7 @@ export function EstadisticasDashboard({
               totalDeuda += deudaAplicable;
 
               const nombreKey = (o.cliente?.nombreRazonSocial || 'Cliente Desconocido').toUpperCase();
-              
+
               if (!clientesDeudoresMap.has(nombreKey)) {
                   clientesDeudoresMap.set(nombreKey, {
                       nombreCliente: o.cliente?.nombreRazonSocial || 'Cliente Desconocido',
@@ -699,7 +746,7 @@ export function EstadisticasDashboard({
           .slice(0, 10);
 
       return { totalDeuda, deudaCorriente, deudaCritica, topClientesDeuda };
-  }, [localOrdenes, viewMode, orderBreakdown]);
+  }, [allOrdenes, viewMode, orderBreakdown]);
 
   const chartData = useMemo(() => {
     const map = new Map();
@@ -1125,28 +1172,28 @@ export function EstadisticasDashboard({
                     initial="hidden"
                     animate="visible"
                     whileHover={hoverEffect} 
-                    className="bg-blue-600 p-6 rounded-[2.5rem] shadow-xl shadow-blue-500/20 text-white relative overflow-hidden"
+                    className="bg-blue-600 p-4 sm:p-6 rounded-[2rem] sm:rounded-[2.5rem] shadow-xl shadow-blue-500/20 text-white relative overflow-hidden"
                 >
-                    <div className="absolute top-0 right-0 p-10 opacity-10"><Ruler size={100} /></div>
+                    <div className="absolute top-0 right-0 p-10 opacity-10"><Ruler size={80} /></div>
                     <div className="relative z-10">
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="p-2 bg-white/20 rounded-xl"><Layers size={20}/></div>
+                        <div className="flex items-center gap-3 mb-3 sm:mb-4">
+                            <div className="p-2 bg-white/20 rounded-xl"><Layers size={18}/></div>
                             <span className="text-xs font-bold uppercase tracking-widest opacity-80">Volumen Impreso</span>
                         </div>
-                        <p className="text-3xl sm:text-4xl font-black tracking-tighter">{productionMetrics.actual.m2Totales.toFixed(2)} <span className="text-lg opacity-60">m²</span></p>
-                        <div className="flex items-center gap-2 mt-4 bg-white/10 w-fit px-3 py-1 rounded-lg">
+                        <p className="text-2xl sm:text-4xl font-black tracking-tighter">{productionMetrics.actual.m2Totales.toFixed(2)} <span className="text-base sm:text-lg opacity-60">m²</span></p>
+                        <div className="flex items-center gap-2 mt-3 sm:mt-4 bg-white/10 w-fit px-3 py-1 rounded-lg">
                             {productionMetrics.variacionM2 >= 0 ? <TrendingUp size={14}/> : <TrendingDown size={14}/>}
-                            <span className="text-xs font-bold">{Math.abs(productionMetrics.variacionM2).toFixed(1)}% vs mes anterior</span>
+                            <span className="text-xs font-bold">{Math.abs(productionMetrics.variacionM2).toFixed(1)}% vs mes ant.</span>
                         </div>
                     </div>
                 </motion.div>
 
-                <motion.div 
+                <motion.div
                     variants={itemVariants}
                     initial="hidden"
                     animate="visible"
-                    whileHover={hoverEffect} 
-                    className="bg-white dark:bg-[#1c1c1e] p-6 rounded-[2.5rem] shadow-sm border border-black/5 flex flex-col"
+                    whileHover={hoverEffect}
+                    className="bg-white dark:bg-[#1c1c1e] p-4 sm:p-6 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-black/5 flex flex-col"
                 >
                     <div className="flex items-center gap-3 mb-4">
                         <div className="p-2 bg-slate-100 dark:bg-white/5 rounded-xl"><ImageIcon size={20} className="text-slate-500"/></div>
@@ -1200,28 +1247,28 @@ export function EstadisticasDashboard({
                     initial="hidden"
                     animate="visible"
                     whileHover={hoverEffect} 
-                    className="bg-rose-600 p-6 rounded-[2.5rem] shadow-xl shadow-rose-500/20 text-white relative overflow-hidden"
+                    className="bg-rose-600 p-4 sm:p-6 rounded-[2rem] sm:rounded-[2.5rem] shadow-xl shadow-rose-500/20 text-white relative overflow-hidden"
                 >
-                    <div className="absolute top-0 right-0 p-10 opacity-10"><Timer size={100} /></div>
+                    <div className="absolute top-0 right-0 p-10 opacity-10"><Timer size={80} /></div>
                     <div className="relative z-10">
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="p-2 bg-white/20 rounded-xl"><Zap size={20}/></div>
+                        <div className="flex items-center gap-3 mb-3 sm:mb-4">
+                            <div className="p-2 bg-white/20 rounded-xl"><Zap size={18}/></div>
                             <span className="text-xs font-bold uppercase tracking-widest opacity-80">Tiempo de Corte</span>
                         </div>
-                        <p className="text-3xl sm:text-4xl font-black tracking-tighter">{productionMetrics.actual.minutosTotales.toFixed(0)} <span className="text-lg opacity-60">min</span></p>
-                        <div className="flex items-center gap-2 mt-4 bg-white/10 w-fit px-3 py-1 rounded-lg">
+                        <p className="text-2xl sm:text-4xl font-black tracking-tighter">{productionMetrics.actual.minutosTotales.toFixed(0)} <span className="text-base sm:text-lg opacity-60">min</span></p>
+                        <div className="flex items-center gap-2 mt-3 sm:mt-4 bg-white/10 w-fit px-3 py-1 rounded-lg">
                             {productionMetrics.variacionMinutos >= 0 ? <TrendingUp size={14}/> : <TrendingDown size={14}/>}
-                            <span className="text-xs font-bold">{Math.abs(productionMetrics.variacionMinutos).toFixed(1)}% vs mes anterior</span>
+                            <span className="text-xs font-bold">{Math.abs(productionMetrics.variacionMinutos).toFixed(1)}% vs mes ant.</span>
                         </div>
                     </div>
                 </motion.div>
 
-                <motion.div 
+                <motion.div
                     variants={itemVariants}
                     initial="hidden"
                     animate="visible"
-                    whileHover={hoverEffect} 
-                    className="bg-white dark:bg-[#1c1c1e] p-6 rounded-[2.5rem] shadow-sm border border-black/5 flex flex-col h-full"
+                    whileHover={hoverEffect}
+                    className="bg-white dark:bg-[#1c1c1e] p-4 sm:p-6 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-black/5 flex flex-col h-full"
                 >
                     <div className="flex items-center gap-3 mb-4">
                         <div className="p-2 bg-slate-100 dark:bg-white/5 rounded-xl"><Layers size={20} className="text-slate-500"/></div>
@@ -1291,118 +1338,118 @@ export function EstadisticasDashboard({
         )}
       </AnimatePresence>
 
-      <motion.div id="financial-kpis" variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-        <StatCard 
-            label="Ingresos Totales" 
-            value={metricas.actual.ingresos} 
+      <motion.div id="financial-kpis" variants={containerVariants} className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+        <StatCard
+            label="Ingresos Totales"
+            value={metricas.actual.ingresos}
             trend={metricas.variacionIngreso}
-            icon={<TrendingUp size={24}/>} 
+            icon={<TrendingUp size={24}/>}
             color="emerald"
             sub="Facturación Real"
             onClick={() => setSelectedDetail('INGRESOS')}
         />
-        <StatCard 
-            label="Egresos Operativos" 
-            value={metricas.egresosTotales} 
-            trend={0} 
-            icon={<Wallet size={24}/>} 
+        <StatCard
+            label="Egresos Operativos"
+            value={metricas.egresosTotales}
+            trend={0}
+            icon={<Wallet size={24}/>}
             color="rose"
-            sub={viewMode === 'GENERAL' ? "Insumos + Fijos + Nómina + Diseño" : "Solo Insumos + Nómina"}
+            sub={viewMode === 'GENERAL' ? "Insumos + Fijos + Nómina" : "Insumos + Nómina"}
             onClick={() => setSelectedDetail('EGRESOS')}
         />
-        <StatCard 
-            label="Utilidad Neta" 
-            value={metricas.utilidadNeta} 
+        <StatCard
+            label="Utilidad Neta"
+            value={metricas.utilidadNeta}
             trend={0}
-            icon={<DollarSign size={24}/>} 
+            icon={<DollarSign size={24}/>}
             color={metricas.utilidadNeta >= 0 ? "indigo" : "orange"}
             sub="Ganancia Libre"
             highlight
             onClick={() => setSelectedDetail('UTILIDAD')}
         />
-        <motion.div 
-            variants={itemVariants} 
+        <motion.div
+            variants={itemVariants}
             whileHover={hoverEffect}
-            className="bg-white dark:bg-[#1c1c1e] p-6 rounded-[2.5rem] shadow-sm border border-black/5 flex flex-col justify-between relative overflow-hidden cursor-pointer"
+            className="bg-white dark:bg-[#1c1c1e] p-4 sm:p-6 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-black/5 flex flex-col justify-between relative overflow-hidden cursor-pointer"
         >
             <div className="flex justify-between items-start z-10">
                 <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Punto de Equilibrio</p>
-                    <h3 className="text-2xl sm:text-3xl font-black italic tracking-tighter">{metricas.puntoEquilibrioPct.toFixed(0)}%</h3>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Equilibrio</p>
+                    <h3 className="text-xl sm:text-3xl font-black italic tracking-tighter">{metricas.puntoEquilibrioPct.toFixed(0)}%</h3>
                 </div>
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-2xl"><Target size={24}/></div>
+                <div className="p-2 sm:p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-xl sm:rounded-2xl"><Target size={20}/></div>
             </div>
-            <div className="mt-4 z-10">
-                <div className="h-3 w-full bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
-                    <motion.div 
-                        initial={{ width: 0 }} 
-                        animate={{ width: `${Math.min(metricas.puntoEquilibrioPct, 100)}%` }} 
+            <div className="mt-3 sm:mt-4 z-10">
+                <div className="h-2.5 sm:h-3 w-full bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
+                    <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${Math.min(metricas.puntoEquilibrioPct, 100)}%` }}
                         transition={{ duration: 1.5, ease: "easeOut" }}
                         className={cn("h-full rounded-full", metricas.puntoEquilibrioPct >= 100 ? "bg-emerald-500" : "bg-blue-500")}
                     />
                 </div>
                 <p className="text-[9px] font-bold text-slate-400 mt-2 text-right uppercase">
-                    {metricas.puntoEquilibrioPct >= 100 ? "¡Costos Cubiertos!" : "Cobertura de Costos Fijos"}
+                    {metricas.puntoEquilibrioPct >= 100 ? "¡Cubierto!" : "Costos Fijos"}
                 </p>
             </div>
         </motion.div>
       </motion.div>
 
-      <motion.div variants={containerVariants} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <motion.div variants={containerVariants} className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
           <motion.div variants={itemVariants} whileHover={hoverEffect}>
-            <Card className="p-6 sm:p-8 rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col justify-between h-full">
-                <h3 className="text-lg font-black uppercase italic mb-6 flex items-center gap-2">
-                    <Activity className="w-5 h-5 text-slate-400"/> Eficiencia Operativa
+            <Card className="p-4 sm:p-8 rounded-[2rem] sm:rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col justify-between h-full">
+                <h3 className="text-base sm:text-lg font-black uppercase italic mb-4 sm:mb-6 flex items-center gap-2">
+                    <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400"/> Eficiencia Operativa
                 </h3>
-                <div className="space-y-6">
-                    <div className="flex justify-between items-center p-4 bg-slate-50 dark:bg-black/20 rounded-2xl">
+                <div className="space-y-3 sm:space-y-6">
+                    <div className="flex justify-between items-center p-3 sm:p-4 bg-slate-50 dark:bg-black/20 rounded-2xl">
                         <div>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ticket Promedio</p>
-                            <p className="text-2xl font-black">${metricas.ticketPromedio.toFixed(2)}</p>
+                            <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Ticket Prom.</p>
+                            <p className="text-lg sm:text-2xl font-black">${metricas.ticketPromedio.toFixed(2)}</p>
                         </div>
                         <div className="text-right">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ingreso / Empleado</p>
-                            <p className="text-2xl font-black text-blue-600">${metricas.ingresoPorEmpleado.toFixed(0)}</p>
+                            <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Ing. / Emp.</p>
+                            <p className="text-lg sm:text-2xl font-black text-blue-600">${metricas.ingresoPorEmpleado.toFixed(0)}</p>
                         </div>
                     </div>
-                    <div className="flex justify-between items-center p-4 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-emerald-500/10">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 rounded-xl"><Percent size={18}/></div>
+                    <div className="flex justify-between items-center p-3 sm:p-4 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-emerald-500/10">
+                        <div className="flex items-center gap-2 sm:gap-3">
+                            <div className="p-1.5 sm:p-2 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 rounded-xl"><Percent size={16}/></div>
                             <span className="text-xs font-black uppercase text-emerald-700 dark:text-emerald-400">Margen Real</span>
                         </div>
-                        <span className="text-2xl font-black text-emerald-600">{metricas.margenGanancia.toFixed(1)}%</span>
+                        <span className="text-xl sm:text-2xl font-black text-emerald-600">{metricas.margenGanancia.toFixed(1)}%</span>
                     </div>
                 </div>
             </Card>
           </motion.div>
 
           <motion.div id="main-chart-section" variants={itemVariants} className="lg:col-span-2">
-            <Card className="p-6 sm:p-8 rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm relative overflow-hidden h-full">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-                    <div className="flex items-center gap-3">
-                        <BarChart3 className="w-5 h-5 text-slate-400"/> 
-                        <h3 className="text-lg font-black uppercase italic">Flujo Mensual</h3>
+            <Card className="p-4 sm:p-8 rounded-[2rem] sm:rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm relative overflow-hidden h-full">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-3 sm:gap-4">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                        <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400"/>
+                        <h3 className="text-base sm:text-lg font-black uppercase italic">Flujo Mensual</h3>
                     </div>
-                    
-                    <div className="flex gap-1 bg-slate-100 dark:bg-black/20 p-1 rounded-xl overflow-x-auto max-w-full">
+
+                    <div className="flex gap-1 bg-slate-100 dark:bg-black/20 p-1 rounded-xl overflow-x-auto max-w-full self-stretch sm:self-auto">
                         {['TODAS', '1', '2', '3', '4', '5'].map((w) => (
                             <button
                                 key={w}
                                 onClick={() => setSelectedWeek(w)}
                                 className={cn(
-                                    "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all whitespace-nowrap",
-                                    selectedWeek === w 
-                                        ? "bg-white dark:bg-white/10 text-blue-600 shadow-sm" 
+                                    "px-2 sm:px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all whitespace-nowrap flex-1 sm:flex-none",
+                                    selectedWeek === w
+                                        ? "bg-white dark:bg-white/10 text-blue-600 shadow-sm"
                                         : "text-slate-400 hover:text-slate-600"
                                 )}
                             >
-                                {w === 'TODAS' ? 'Mes Completo' : `Sem ${w}`}
+                                {w === 'TODAS' ? 'Mes' : `S${w}`}
                             </button>
                         ))}
                     </div>
                 </div>
-                
-                <div className="h-[250px] w-full mt-4">
+
+                <div className="h-[200px] sm:h-[250px] w-full mt-3 sm:mt-4">
                     <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={chartData} onClick={handleChartClick}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} strokeOpacity={0.05} />
@@ -1436,67 +1483,67 @@ export function EstadisticasDashboard({
           </motion.div>
       </motion.div>
 
-      <motion.div id="debt-analysis-section" variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <motion.div id="debt-analysis-section" variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           <motion.div variants={itemVariants} whileHover={hoverEffect}>
-            <Card className="p-6 sm:p-8 rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col relative overflow-hidden h-full">
-                <h3 className="text-lg font-black uppercase italic mb-6 flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-slate-400"/> Antigüedad de Deuda
+            <Card className="p-4 sm:p-8 rounded-[2rem] sm:rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col relative overflow-hidden h-full">
+                <h3 className="text-base sm:text-lg font-black uppercase italic mb-4 sm:mb-6 flex items-center gap-2">
+                    <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400"/> Antigüedad de Deuda
                 </h3>
-                <div className="flex gap-4">
-                    <div className="flex-1 p-4 bg-slate-50 dark:bg-white/5 rounded-3xl border border-slate-100 dark:border-white/5">
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Corriente (&lt;30d)</p>
-                        <p className="text-xl sm:text-2xl font-black text-slate-700 dark:text-white">${analisisDeuda.deudaCorriente.toLocaleString()}</p>
-                        <div className="h-1.5 w-full bg-slate-200 mt-3 rounded-full overflow-hidden">
+                <div className="flex gap-3 sm:gap-4">
+                    <div className="flex-1 p-3 sm:p-4 bg-slate-50 dark:bg-white/5 rounded-2xl sm:rounded-3xl border border-slate-100 dark:border-white/5">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 sm:mb-2">&lt;30d</p>
+                        <p className="text-base sm:text-2xl font-black text-slate-700 dark:text-white">${analisisDeuda.deudaCorriente.toLocaleString()}</p>
+                        <div className="h-1.5 w-full bg-slate-200 mt-2 sm:mt-3 rounded-full overflow-hidden">
                             <motion.div initial={{width:0}} animate={{width: `${(analisisDeuda.deudaCorriente / (analisisDeuda.totalDeuda || 1)) * 100}%`}} className="h-full bg-blue-500 rounded-full" />
                         </div>
                     </div>
-                    <div className="flex-1 p-4 bg-rose-50 dark:bg-rose-900/10 rounded-3xl border border-rose-100 dark:border-rose-900/20">
-                        <div className="flex justify-between items-center mb-2">
-                            <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest">Crítica (&gt;30d)</p>
+                    <div className="flex-1 p-3 sm:p-4 bg-rose-50 dark:bg-rose-900/10 rounded-2xl sm:rounded-3xl border border-rose-100 dark:border-rose-900/20">
+                        <div className="flex justify-between items-center mb-1 sm:mb-2">
+                            <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest">&gt;30d</p>
                             <ShieldAlert className="w-3 h-3 text-rose-500" />
                         </div>
-                        <p className="text-xl sm:text-2xl font-black text-rose-600">${analisisDeuda.deudaCritica.toLocaleString()}</p>
-                        <div className="h-1.5 w-full bg-rose-200 mt-3 rounded-full overflow-hidden">
+                        <p className="text-base sm:text-2xl font-black text-rose-600">${analisisDeuda.deudaCritica.toLocaleString()}</p>
+                        <div className="h-1.5 w-full bg-rose-200 mt-2 sm:mt-3 rounded-full overflow-hidden">
                             <motion.div initial={{width:0}} animate={{width: `${(analisisDeuda.deudaCritica / (analisisDeuda.totalDeuda || 1)) * 100}%`}} className="h-full bg-rose-500 rounded-full" />
                         </div>
                     </div>
                 </div>
-                <div className="mt-4 text-center cursor-pointer hover:bg-slate-50 p-2 rounded-xl transition-colors" onClick={() => setSelectedDetail('DEUDA')}>
+                <div className="mt-3 sm:mt-4 text-center cursor-pointer hover:bg-slate-50 p-2 rounded-xl transition-colors" onClick={() => setSelectedDetail('DEUDA')}>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                        Total por Cobrar: <span className="text-slate-800 dark:text-white">${analisisDeuda.totalDeuda.toLocaleString()}</span>
+                        Total: <span className="text-slate-800 dark:text-white">${analisisDeuda.totalDeuda.toLocaleString()}</span>
                     </p>
                 </div>
             </Card>
           </motion.div>
 
           <motion.div variants={itemVariants} className="lg:col-span-2">
-            <Card className="p-6 sm:p-8 rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col h-full">
-                <h3 className="text-lg font-black uppercase italic mb-6 flex items-center gap-2">
-                    <AlertCircle className="w-5 h-5 text-slate-400"/> Cartera de Clientes Deudores {viewMode !== 'GENERAL' && `(${viewMode})`}
+            <Card className="p-4 sm:p-8 rounded-[2rem] sm:rounded-[3rem] border-0 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col h-full">
+                <h3 className="text-base sm:text-lg font-black uppercase italic mb-4 sm:mb-6 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400"/> Clientes Deudores — Todos los tiempos {viewMode !== 'GENERAL' && `(${viewMode})`}
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 overflow-y-auto pr-2 max-h-[300px] custom-scrollbar">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 overflow-y-auto pr-1 sm:pr-2 max-h-[280px] sm:max-h-[300px] custom-scrollbar">
                     {analisisDeuda.topClientesDeuda.length > 0 ? analisisDeuda.topClientesDeuda.slice(0, 6).map((cliente, idx) => (
-                        <motion.div 
+                        <motion.div
                             key={idx}
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: idx * 0.05 }}
                             whileHover={{ scale: 1.02 }}
                             onClick={() => setSelectedClientDebt(cliente)}
-                            className="flex justify-between items-center p-4 rounded-[2rem] bg-slate-50 dark:bg-black/20 hover:bg-slate-100 transition-all cursor-pointer border border-transparent hover:border-slate-200"
+                            className="flex justify-between items-center p-3 sm:p-4 rounded-[1.5rem] sm:rounded-[2rem] bg-slate-50 dark:bg-black/20 hover:bg-slate-100 transition-all cursor-pointer border border-transparent hover:border-slate-200"
                         >
-                            <div className="flex items-center gap-4 overflow-hidden">
-                                <div className="w-10 h-10 rounded-2xl bg-white dark:bg-white/10 flex items-center justify-center font-black text-xs text-slate-500 shadow-sm shrink-0">
+                            <div className="flex items-center gap-3 sm:gap-4 overflow-hidden">
+                                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-white dark:bg-white/10 flex items-center justify-center font-black text-xs text-slate-500 shadow-sm shrink-0">
                                     {idx + 1}
                                 </div>
                                 <div className="flex flex-col overflow-hidden">
-                                    <span className="text-sm font-bold text-slate-700 dark:text-slate-200 truncate">{cliente.nombreCliente}</span>
+                                    <span className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 truncate">{cliente.nombreCliente}</span>
                                     <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1 mt-0.5">
-                                        <Layers size={12} /> {cliente.ordenes.length} Órdenes
+                                        <Layers size={10} /> {cliente.ordenes.length} Órd.
                                     </span>
                                 </div>
                             </div>
-                            <span className="text-base font-black text-rose-600">${cliente.montoTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                            <span className="text-sm sm:text-base font-black text-rose-600 shrink-0">${cliente.montoTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
                         </motion.div>
                     )) : (
                         <div className="col-span-full py-10 text-center text-slate-400 text-xs font-bold uppercase tracking-widest">
@@ -1513,18 +1560,18 @@ export function EstadisticasDashboard({
         {selectedDetail && (
             <Dialog open={!!selectedDetail} onOpenChange={(o) => !o && setSelectedDetail(null)}>
                 <DialogContent className="w-[95vw] max-w-4xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] sm:rounded-[3rem] shadow-2xl overflow-hidden">
-                    <motion.div 
+                    <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: 20 }}
-                        className="p-6 sm:p-8 pb-0"
+                        className="p-4 sm:p-8 pb-0"
                     >
-                        <DialogHeader className="mb-6">
-                            <DialogTitle className="text-2xl sm:text-3xl font-black italic uppercase tracking-tighter text-slate-900 dark:text-white flex items-center gap-4">
-                                {selectedDetail === 'INGRESOS' && <div className="p-3 bg-emerald-100 rounded-2xl"><TrendingUp className="text-emerald-600 w-6 h-6"/></div>}
-                                {selectedDetail === 'EGRESOS' && <div className="p-3 bg-rose-100 rounded-2xl"><Wallet className="text-rose-600 w-6 h-6"/></div>}
-                                {selectedDetail === 'UTILIDAD' && <div className="p-3 bg-indigo-100 rounded-2xl"><DollarSign className="text-indigo-600 w-6 h-6"/></div>}
-                                {selectedDetail === 'DEUDA' && <div className="p-3 bg-orange-100 rounded-2xl"><AlertCircle className="text-orange-600 w-6 h-6"/></div>}
+                        <DialogHeader className="mb-4 sm:mb-6">
+                            <DialogTitle className="text-xl sm:text-3xl font-black italic uppercase tracking-tighter text-slate-900 dark:text-white flex items-center gap-3 sm:gap-4">
+                                {selectedDetail === 'INGRESOS' && <div className="p-2 sm:p-3 bg-emerald-100 rounded-xl sm:rounded-2xl"><TrendingUp className="text-emerald-600 w-5 h-5 sm:w-6 sm:h-6"/></div>}
+                                {selectedDetail === 'EGRESOS' && <div className="p-2 sm:p-3 bg-rose-100 rounded-xl sm:rounded-2xl"><Wallet className="text-rose-600 w-5 h-5 sm:w-6 sm:h-6"/></div>}
+                                {selectedDetail === 'UTILIDAD' && <div className="p-2 sm:p-3 bg-indigo-100 rounded-xl sm:rounded-2xl"><DollarSign className="text-indigo-600 w-5 h-5 sm:w-6 sm:h-6"/></div>}
+                                {selectedDetail === 'DEUDA' && <div className="p-2 sm:p-3 bg-orange-100 rounded-xl sm:rounded-2xl"><AlertCircle className="text-orange-600 w-5 h-5 sm:w-6 sm:h-6"/></div>}
                                 <div className="flex flex-col">
                                     <span>Detalle {selectedDetail?.toLowerCase()}</span>
                                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
@@ -1535,25 +1582,25 @@ export function EstadisticasDashboard({
                         </DialogHeader>
                     </motion.div>
 
-                    <div className="p-6 sm:p-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                    <div className="p-4 sm:p-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
                         {selectedDetail === 'EGRESOS' && (
                             <Tabs defaultValue="insumos" className="w-full">
-                                <TabsList className="bg-slate-100 dark:bg-white/5 p-1.5 rounded-full mb-8 h-auto flex flex-wrap gap-1">
-                                    <TabsTrigger value="insumos" className="rounded-full px-6 py-2.5 font-bold uppercase text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1">
-                                        Insumos (${(modalData as any)?.insumos?.reduce((a:any,b:any)=>a+(Number(b.monto) || 0), 0).toFixed(0)})
+                                <TabsList className="bg-slate-100 dark:bg-white/5 p-1 sm:p-1.5 rounded-full mb-5 sm:mb-8 h-auto flex flex-wrap gap-1">
+                                    <TabsTrigger value="insumos" className="rounded-full px-3 sm:px-6 py-2 sm:py-2.5 font-bold uppercase text-[9px] sm:text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1">
+                                        Insumos<span className="hidden sm:inline"> (${(modalData as any)?.insumos?.reduce((a:any,b:any)=>a+(Number(b.monto) || 0), 0).toFixed(0)})</span>
                                     </TabsTrigger>
                                     {viewMode === 'GENERAL' && (
                                         <>
-                                            <TabsTrigger value="fijos" className="rounded-full px-6 py-2.5 font-bold uppercase text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1">
-                                                Fijos (${(modalData as any)?.fijos?.reduce((a:any,b:any)=>a+(Number(b.monto) || 0), 0).toFixed(0)})
+                                            <TabsTrigger value="fijos" className="rounded-full px-3 sm:px-6 py-2 sm:py-2.5 font-bold uppercase text-[9px] sm:text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1">
+                                                Fijos<span className="hidden sm:inline"> (${(modalData as any)?.fijos?.reduce((a:any,b:any)=>a+(Number(b.monto) || 0), 0).toFixed(0)})</span>
                                             </TabsTrigger>
-                                            <TabsTrigger value="diseno" className="rounded-full px-6 py-2.5 font-bold uppercase text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1">
-                                                Diseño (${(modalData as any)?.disenoItems?.reduce((a:any,b:any)=>a+(Number(b.monto) || 0), 0).toFixed(0)})
+                                            <TabsTrigger value="diseno" className="rounded-full px-3 sm:px-6 py-2 sm:py-2.5 font-bold uppercase text-[9px] sm:text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1">
+                                                Diseño<span className="hidden sm:inline"> (${(modalData as any)?.disenoItems?.reduce((a:any,b:any)=>a+(Number(b.monto) || 0), 0).toFixed(0)})</span>
                                             </TabsTrigger>
                                         </>
                                     )}
-                                    <TabsTrigger value="nomina" className="rounded-full px-6 py-2.5 font-bold uppercase text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1">
-                                        Nómina (${(modalData as any)?.nomina?.reduce((a:any,b:any)=>a+(Number(b.totalUSD) || 0), 0).toFixed(0)})
+                                    <TabsTrigger value="nomina" className="rounded-full px-3 sm:px-6 py-2 sm:py-2.5 font-bold uppercase text-[9px] sm:text-[10px] data-[state=active]:bg-white data-[state=active]:shadow-md flex-1">
+                                        Nómina<span className="hidden sm:inline"> (${(modalData as any)?.nomina?.reduce((a:any,b:any)=>a+(Number(b.totalUSD) || 0), 0).toFixed(0)})</span>
                                     </TabsTrigger>
                                 </TabsList>
                                 
@@ -1781,7 +1828,7 @@ export function EstadisticasDashboard({
                                     className="text-center py-10 bg-slate-50 dark:bg-white/5 rounded-[2.5rem]"
                                 >
                                     <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Resultado Neto</p>
-                                    <div className={cn("text-6xl sm:text-7xl font-black tracking-tighter mb-4", metricas.utilidadNeta >= 0 ? "text-indigo-600" : "text-red-500")}>
+                                    <div className={cn("text-3xl sm:text-5xl md:text-7xl font-black tracking-tighter mb-4 break-words", metricas.utilidadNeta >= 0 ? "text-indigo-600" : "text-red-500")}>
                                         ${metricas.utilidadNeta.toFixed(2)}
                                     </div>
                                     <div className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-black/20 rounded-full shadow-sm border border-slate-100 dark:border-white/10">
@@ -1831,23 +1878,23 @@ export function EstadisticasDashboard({
       <AnimatePresence>
         {dayDetail && (
             <Dialog open={!!dayDetail} onOpenChange={(o) => !o && setDayDetail(null)}>
-                <DialogContent className="w-[95vw] max-w-xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] shadow-2xl overflow-hidden">
-                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-8">
+                <DialogContent className="w-[95vw] max-w-xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden">
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-5 sm:p-8">
                         <DialogHeader>
-                            <div className="flex flex-col items-center text-center pb-6 border-b border-slate-100 dark:border-white/5">
-                                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-[1.5rem] text-blue-600 mb-4">
-                                    <CalendarDays size={32}/>
+                            <div className="flex flex-col items-center text-center pb-4 sm:pb-6 border-b border-slate-100 dark:border-white/5">
+                                <div className="p-3 sm:p-4 bg-blue-50 dark:bg-blue-900/20 rounded-[1.25rem] sm:rounded-[1.5rem] text-blue-600 mb-3 sm:mb-4">
+                                    <CalendarDays size={24}/>
                                 </div>
-                                <DialogTitle className="text-2xl font-black uppercase italic text-slate-900 dark:text-white">
+                                <DialogTitle className="text-xl sm:text-2xl font-black uppercase italic text-slate-900 dark:text-white">
                                     {dayDetail.date.toLocaleDateString('es-VE', { weekday: 'long', day: 'numeric' })}
                                 </DialogTitle>
-                                <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">
+                                <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">
                                     {dayDetail.date.toLocaleDateString('es-VE', { month: 'long', year: 'numeric' })}
                                 </p>
                             </div>
                         </DialogHeader>
 
-                        <div className="mt-8 space-y-8">
+                        <div className="mt-5 sm:mt-8 space-y-5 sm:space-y-8">
                             {/* SECCIÓN INGRESOS AGRUPADOS */}
                             <div>
                                 <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 mb-4 flex items-center gap-2">
@@ -1946,19 +1993,19 @@ export function EstadisticasDashboard({
       <AnimatePresence>
         {selectedMaterialDetail && (
             <Dialog open={!!selectedMaterialDetail} onOpenChange={(o) => !o && setSelectedMaterialDetail(null)}>
-                <DialogContent className="w-[95vw] max-w-2xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] shadow-2xl overflow-hidden">
-                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-8">
+                <DialogContent className="w-[95vw] max-w-2xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden">
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-5 sm:p-8">
                         <DialogHeader>
-                            <div className="flex justify-between items-start mb-6">
-                                <div>
-                                    <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Reporte de Material</p>
-                                    <DialogTitle className="text-3xl font-black uppercase italic text-slate-900 dark:text-white leading-none">
+                            <div className="flex justify-between items-start mb-4 sm:mb-6 gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Material</p>
+                                    <DialogTitle className="text-xl sm:text-3xl font-black uppercase italic text-slate-900 dark:text-white leading-none truncate">
                                         {selectedMaterialDetail.label}
                                     </DialogTitle>
                                 </div>
-                                <div className="text-right bg-blue-50 px-4 py-2 rounded-2xl">
-                                    <p className="text-[9px] font-black uppercase text-blue-400 tracking-widest mb-1">Total Generado</p>
-                                    <p className="text-2xl font-black text-blue-600 tracking-tighter">${selectedMaterialDetail.revenue.toLocaleString()}</p>
+                                <div className="text-right bg-blue-50 px-3 sm:px-4 py-2 rounded-2xl shrink-0">
+                                    <p className="text-[9px] font-black uppercase text-blue-400 tracking-widest mb-1">Total</p>
+                                    <p className="text-xl sm:text-2xl font-black text-blue-600 tracking-tighter">${selectedMaterialDetail.revenue.toLocaleString()}</p>
                                 </div>
                             </div>
                         </DialogHeader>
@@ -2010,19 +2057,19 @@ export function EstadisticasDashboard({
       <AnimatePresence>
         {selectedClientDebt && (
             <Dialog open={!!selectedClientDebt} onOpenChange={(o) => !o && setSelectedClientDebt(null)}>
-                <DialogContent className="w-[95vw] max-w-2xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] shadow-2xl overflow-hidden">
-                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-8">
+                <DialogContent className="w-[95vw] max-w-2xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden">
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-5 sm:p-8">
                         <DialogHeader>
-                            <div className="flex justify-between items-start mb-6">
-                                <div>
+                            <div className="flex justify-between items-start mb-4 sm:mb-6 gap-3">
+                                <div className="min-w-0">
                                     <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Cliente</p>
-                                    <DialogTitle className="text-3xl font-black uppercase italic text-slate-900 dark:text-white leading-none">
+                                    <DialogTitle className="text-xl sm:text-3xl font-black uppercase italic text-slate-900 dark:text-white leading-none truncate">
                                         {selectedClientDebt.nombreCliente}
                                     </DialogTitle>
                                 </div>
-                                <div className="text-right bg-rose-50 px-4 py-2 rounded-2xl">
-                                    <p className="text-[9px] font-black uppercase text-rose-400 tracking-widest mb-1">Total Pendiente</p>
-                                    <p className="text-2xl font-black text-rose-600 tracking-tighter">${selectedClientDebt.montoTotal.toLocaleString()}</p>
+                                <div className="text-right bg-rose-50 px-3 sm:px-4 py-2 rounded-2xl shrink-0">
+                                    <p className="text-[9px] font-black uppercase text-rose-400 tracking-widest mb-1">Pendiente</p>
+                                    <p className="text-xl sm:text-2xl font-black text-rose-600 tracking-tighter">${selectedClientDebt.montoTotal.toLocaleString()}</p>
                                 </div>
                             </div>
                         </DialogHeader>
@@ -2083,31 +2130,33 @@ function StatCard({ label, value, trend, icon, color, sub, highlight, onClick }:
     }
 
     return (
-        <motion.div 
+        <motion.div
             whileHover={hoverEffect}
             whileTap={tapEffect}
             variants={itemVariants}
             onClick={onClick}
             className={cn(
-                "p-5 sm:p-6 rounded-[2rem] sm:rounded-[2.5rem] bg-white dark:bg-[#1c1c1e] shadow-sm border border-black/5 relative overflow-hidden group transition-all cursor-pointer hover:shadow-xl",
+                "p-4 sm:p-6 rounded-[1.75rem] sm:rounded-[2.5rem] bg-white dark:bg-[#1c1c1e] shadow-sm border border-black/5 relative overflow-hidden group transition-all cursor-pointer hover:shadow-xl",
                 highlight && "ring-2 ring-indigo-500/20 shadow-indigo-500/10"
             )}
         >
-            <div className="flex justify-between items-start mb-4">
-                <div className={cn("p-3 rounded-2xl", colors[color])}>{icon}</div>
+            <div className="flex justify-between items-start mb-3 sm:mb-4">
+                <div className={cn("p-2 sm:p-3 rounded-xl sm:rounded-2xl", colors[color])}>
+                    {React.cloneElement(icon, { size: 18 })}
+                </div>
                 {trend !== 0 && (
                     <div className={cn("flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black", trend > 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
-                        {trend > 0 ? <TrendingUp size={12}/> : <TrendingDown size={12}/>}
+                        {trend > 0 ? <TrendingUp size={10}/> : <TrendingDown size={10}/>}
                         {Math.abs(trend).toFixed(1)}%
                     </div>
                 )}
             </div>
             <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</p>
-                <p className="text-2xl sm:text-3xl font-black tracking-tighter text-slate-900 dark:text-white">
+                <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 sm:mb-1 truncate">{label}</p>
+                <p className="text-lg sm:text-3xl font-black tracking-tighter text-slate-900 dark:text-white">
                     ${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                 </p>
-                <p className="text-[9px] font-bold text-slate-400 mt-2 uppercase tracking-wide opacity-60">{sub}</p>
+                <p className="text-[9px] font-bold text-slate-400 mt-1 sm:mt-2 uppercase tracking-wide opacity-60 truncate hidden sm:block">{sub}</p>
             </div>
         </motion.div>
     )
