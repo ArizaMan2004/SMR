@@ -16,6 +16,7 @@ import { getLastOrderNumber } from "@/lib/firebase/ordenes";
 
 // NUEVOS IMPORT PARA CLIENTES
 import { subscribeToClients } from "@/lib/services/clientes-service";
+import { subscribeToCatalogoProducts, calcPrecioM2, type CatalogoProducto } from "@/lib/services/catalog-service";
 import { db } from "@/lib/firebase";
 import { collection, addDoc } from "firebase/firestore";
 
@@ -43,22 +44,32 @@ import {
     User, Calculator, TrendingUp, Sparkles, Layers, Zap, Wallet, X,
     DollarSign, CheckCircle2, Calendar, Pencil, RotateCcw, Check, 
     AlertCircle, Hourglass, Banknote, ChevronDown, Building2, Users,
-    Search, Filter, ArrowUp, ArrowDown
-} from "lucide-react"; 
+    Search, Filter, ArrowUp, ArrowDown, Ruler, Package, History
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 // --- CONSTANTES ---
 const BACKUP_KEY = 'smr_budget_autosave'
 
-const SMR_CATALOG = [
-    "Impresión de Alta Resolución en Vinil Adhesivo ( )", 
-    "Letras Corpóreas en Acrílico con Iluminación LED ( )",
-    "Medallas en Acrílico Personalizadas ( )", 
+// Sugerencias genéricas de respaldo: solo se muestran si no hay ninguna coincidencia real en el inventario
+const SMR_CATALOG_FALLBACK = [
+    "Impresión de Alta Resolución en Vinil Adhesivo",
+    "Letras Corpóreas en Acrílico con Iluminación LED",
+    "Medallas en Acrílico Personalizadas",
     "Servicio de Diseño Gráfico Publicitario",
-    "Corte Láser en MDF ( )",
+    "Corte Láser en MDF",
     "Instalación de Vinil en Vidrieras"
 ];
+
+// Búsqueda por palabras (todas deben aparecer, en cualquier orden) — más tolerante que un "includes" plano,
+// y permite que la predicción encuentre coincidencias tanto en el nombre como en la descripción/detalle del ítem.
+const matchesQuery = (haystack: string, query: string) => {
+    const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return false;
+    const target = haystack.toLowerCase();
+    return words.every(w => target.includes(w));
+};
 
 export default function BudgetEntryView({
     rates = { usd: 0, eur: 0, usdt: 0 }, 
@@ -84,18 +95,26 @@ export default function BudgetEntryView({
     };
 
     const [budgetData, setBudgetData] = useState(initialBudgetState);
-    const [newItem, setNewItem] = useState({ 
-        id: null as number | null, 
-        subCliente: '', 
-        descripcion: '', 
-        cantidad: 1, 
-        precioUnitarioUSD: 0 
+    const [newItem, setNewItem] = useState({
+        id: null as number | null,
+        subCliente: '',
+        descripcion: '',
+        cantidad: 1,
+        precioUnitarioUSD: 0,
+        unidad: 'und' as 'und' | 'm2',
+        medidaXCm: 0,
+        medidaYCm: 0,
     });
-    
-    const [history, setHistory] = useState<any[]>([]); 
+
+    const [history, setHistory] = useState<any[]>([]);
     const [clientsList, setClientsList] = useState<any[]>([]); // ESTADO PARA LOS CLIENTES DE LA BD
     const [showClientSuggestions, setShowClientSuggestions] = useState(false);
-    
+
+    // --- CATÁLOGO DE INVENTARIO (mercancía por unidad + materiales por m² como viniles) ---
+    const [catalogProductos, setCatalogProductos] = useState<CatalogoProducto[]>([]);
+    const [selectedCatalogProduct, setSelectedCatalogProduct] = useState<CatalogoProducto | null>(null);
+    const [selectedVarianteId, setSelectedVarianteId] = useState<string | null>(null);
+
     const [isLoading, setIsLoading] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [recoveredDraft, setRecoveredDraft] = useState<any>(null);
@@ -138,6 +157,80 @@ export default function BudgetEntryView({
         return Array.from(new Set(budgetData.items.map(i => i.subCliente).filter(sc => sc && sc.trim() !== '')));
     }, [budgetData.items, budgetData.isMaster]);
 
+    // --- PREDICCIÓN DE NOMBRES Y DETALLES: busca en el inventario real (mercancía + materiales m²) ---
+    const catalogSuggestions = useMemo(() => {
+        const q = newItem.descripcion.trim();
+        if (q.length < 2) return [];
+        return catalogProductos
+            .filter(p => p.activo !== false)
+            .filter(p => matchesQuery(`${p.nombre} ${p.descripcion || ''}`, q))
+            .slice(0, 8);
+    }, [catalogProductos, newItem.descripcion]);
+
+    // --- APRENDIZAJE DE PRESUPUESTOS ANTERIORES: aprende nombres muy específicos que no están en el catálogo ---
+    // (ej. "Aviso tipo bastidor medidas 1.50 x 1.20cm") y también recuerda el precio/medidas que se usó la última vez.
+    const historicalSuggestions = useMemo(() => {
+        const q = newItem.descripcion.trim();
+        if (q.length < 2) return [];
+
+        const map = new Map<string, {
+            descripcion: string; precioUnitarioUSD: number; unidad: 'und' | 'm2';
+            medidaXCm: number; medidaYCm: number; catalogProductoId: string | null; catalogVarianteId: string | null;
+            count: number; lastUsed: number;
+        }>();
+
+        history.forEach((entry: any) => {
+            const ts = entry.dateCreated ? new Date(entry.dateCreated).getTime() : 0;
+            (entry.items || []).forEach((item: any) => {
+                const desc = (item.descripcion || '').trim();
+                if (!desc) return;
+                const key = desc.toLowerCase();
+                const existing = map.get(key);
+                if (existing) {
+                    existing.count += 1;
+                    if (ts >= existing.lastUsed) {
+                        existing.lastUsed = ts;
+                        existing.precioUnitarioUSD = item.precioUnitarioUSD || 0;
+                        existing.unidad = item.unidad === 'm2' ? 'm2' : 'und';
+                        existing.medidaXCm = item.medidaXCm || 0;
+                        existing.medidaYCm = item.medidaYCm || 0;
+                        existing.catalogProductoId = item.catalogProductoId || null;
+                        existing.catalogVarianteId = item.catalogVarianteId || null;
+                    }
+                } else {
+                    map.set(key, {
+                        descripcion: desc,
+                        precioUnitarioUSD: item.precioUnitarioUSD || 0,
+                        unidad: item.unidad === 'm2' ? 'm2' : 'und',
+                        medidaXCm: item.medidaXCm || 0,
+                        medidaYCm: item.medidaYCm || 0,
+                        catalogProductoId: item.catalogProductoId || null,
+                        catalogVarianteId: item.catalogVarianteId || null,
+                        count: 1,
+                        lastUsed: ts,
+                    });
+                }
+            });
+        });
+
+        return Array.from(map.values())
+            .filter(h => matchesQuery(h.descripcion, q))
+            .sort((a, b) => (b.count - a.count) || (b.lastUsed - a.lastUsed))
+            .slice(0, 6);
+    }, [history, newItem.descripcion]);
+
+    const fallbackSuggestions = useMemo(() => {
+        if (catalogSuggestions.length > 0 || historicalSuggestions.length > 0) return [];
+        const q = newItem.descripcion.trim();
+        if (q.length < 2) return [];
+        return SMR_CATALOG_FALLBACK.filter(s => matchesQuery(s, q));
+    }, [catalogSuggestions, historicalSuggestions, newItem.descripcion]);
+
+    const varianteSeleccionada = useMemo(() => {
+        if (!selectedCatalogProduct || !selectedVarianteId) return null;
+        return selectedCatalogProduct.variantes?.find(v => v.id === selectedVarianteId) || null;
+    }, [selectedCatalogProduct, selectedVarianteId]);
+
     // --- BACKUP LOCAL: cargar al montar ---
     useEffect(() => {
         const raw = localStorage.getItem(BACKUP_KEY)
@@ -179,6 +272,9 @@ export default function BudgetEntryView({
             setClientsList(data);
         });
 
+        // SUSCRIBIR AL CATÁLOGO DE INVENTARIO (mismo origen de datos que el Order Wizard)
+        const unsubscribeCatalog = subscribeToCatalogoProducts(setCatalogProductos);
+
         // DETECTAR CLICS AFUERA PARA CERRAR LOS BUSCADORES
         function handleClickOutside(event: any) {
             if (clientRef.current && !clientRef.current.contains(event.target)) {
@@ -192,6 +288,7 @@ export default function BudgetEntryView({
 
         return () => {
             unsubscribeClients();
+            unsubscribeCatalog();
             document.removeEventListener("mousedown", handleClickOutside);
         };
     }, [fetchHistory]);
@@ -249,6 +346,52 @@ export default function BudgetEntryView({
         );
     };
 
+    // --- LÓGICA DE CATÁLOGO / INVENTARIO (coherente con el Order Wizard) ---
+    const handleSelectCatalogProduct = (prod: CatalogoProducto, varianteId?: string | null) => {
+        const variante = varianteId ? prod.variantes?.find(v => v.id === varianteId) : null;
+        const precio = (prod.precioBase || 0) + (variante?.precioAjuste || 0);
+        setSelectedCatalogProduct(prod);
+        setSelectedVarianteId(varianteId ?? null);
+        setNewItem(prev => ({
+            ...prev,
+            descripcion: variante ? `${prod.nombre} — ${variante.nombre}` : prod.nombre,
+            precioUnitarioUSD: precio,
+            unidad: prod.tipoVenta === 'metro_cuadrado' ? 'm2' : 'und',
+        }));
+        setShowSuggestions(false);
+        clearError('descripcion');
+    };
+
+    const clearCatalogSelection = () => {
+        setSelectedCatalogProduct(null);
+        setSelectedVarianteId(null);
+        setNewItem(prev => ({ ...prev, unidad: 'und', medidaXCm: 0, medidaYCm: 0 }));
+    };
+
+    // Selecciona una sugerencia aprendida de presupuestos anteriores: recupera nombre, precio, unidad y medidas de la última vez
+    const handleSelectHistorical = (h: typeof historicalSuggestions[number]) => {
+        const catalogProd = h.catalogProductoId ? catalogProductos.find(p => p.id === h.catalogProductoId) || null : null;
+        setSelectedCatalogProduct(catalogProd);
+        setSelectedVarianteId(catalogProd ? h.catalogVarianteId : null);
+        setNewItem(prev => ({
+            ...prev,
+            descripcion: h.descripcion,
+            precioUnitarioUSD: h.precioUnitarioUSD,
+            unidad: h.unidad,
+            medidaXCm: h.unidad === 'm2' ? h.medidaXCm : 0,
+            medidaYCm: h.unidad === 'm2' ? h.medidaYCm : 0,
+        }));
+        setShowSuggestions(false);
+        clearError('descripcion');
+    };
+
+    const computeNewItemTotal = () => {
+        if (newItem.unidad === 'm2' && newItem.medidaXCm > 0 && newItem.medidaYCm > 0) {
+            return calcPrecioM2(newItem.precioUnitarioUSD, newItem.medidaYCm, newItem.medidaXCm, newItem.cantidad).subtotal;
+        }
+        return newItem.cantidad * newItem.precioUnitarioUSD;
+    };
+
     // --- LÓGICA DE ITEMS ---
     const handleAddOrUpdateItem = () => {
         const newErrors: any = {};
@@ -257,6 +400,7 @@ export default function BudgetEntryView({
         if (budgetData.isMaster && !newItem.subCliente.trim()) { newErrors.subCliente = true; hasError = true; }
         if (!newItem.descripcion.trim()) { newErrors.descripcion = true; hasError = true; }
         if (newItem.cantidad <= 0) { newErrors.cantidad = true; hasError = true; }
+        if (newItem.unidad === 'm2' && (newItem.medidaXCm <= 0 || newItem.medidaYCm <= 0)) { newErrors.medidas = true; hasError = true; }
 
         if (hasError) {
             setErrors((prev: any) => ({ ...prev, ...newErrors }));
@@ -266,39 +410,50 @@ export default function BudgetEntryView({
 
         const subC = newItem.subCliente.trim();
         const desc = newItem.descripcion.trim() || "Concepto General";
-        const calculatedTotal = newItem.cantidad * newItem.precioUnitarioUSD;
+        const calculatedTotal = computeNewItemTotal();
+        const catalogRefs = {
+            catalogProductoId: selectedCatalogProduct?.id || null,
+            catalogVarianteId: selectedVarianteId || null,
+        };
 
         if (newItem.id) {
             setBudgetData((prev: any) => ({
                 ...prev,
-                items: prev.items.map((item: any) => 
-                    item.id === newItem.id 
-                    ? { ...newItem, subCliente: subC, descripcion: desc, totalUSD: calculatedTotal } 
+                items: prev.items.map((item: any) =>
+                    item.id === newItem.id
+                    ? { ...newItem, ...catalogRefs, subCliente: subC, descripcion: desc, totalUSD: calculatedTotal }
                     : item
                 )
             }));
             toast.success("Concepto actualizado");
         } else {
-            setBudgetData((prev: any) => ({ 
-                ...prev, 
-                items: [...prev.items, { ...newItem, subCliente: subC, descripcion: desc, id: Date.now(), totalUSD: calculatedTotal }] 
+            setBudgetData((prev: any) => ({
+                ...prev,
+                items: [...prev.items, { ...newItem, ...catalogRefs, subCliente: subC, descripcion: desc, id: Date.now(), totalUSD: calculatedTotal }]
             }));
             toast.success("Concepto añadido");
         }
 
-        setNewItem({ id: null, subCliente: budgetData.isMaster ? subC : '', descripcion: '', cantidad: 1, precioUnitarioUSD: 0 });
+        setNewItem({ id: null, subCliente: budgetData.isMaster ? subC : '', descripcion: '', cantidad: 1, precioUnitarioUSD: 0, unidad: 'und', medidaXCm: 0, medidaYCm: 0 });
+        setSelectedCatalogProduct(null);
+        setSelectedVarianteId(null);
         setShowSuggestions(false);
-        setErrors((prev:any) => ({ ...prev, subCliente: false, descripcion: false, cantidad: false, precio: false })); 
+        setErrors((prev:any) => ({ ...prev, subCliente: false, descripcion: false, cantidad: false, precio: false, medidas: false }));
     };
 
     const handleEditItemRequest = (item: any) => {
         setNewItem({
             id: item.id,
-            subCliente: item.subCliente || '', 
+            subCliente: item.subCliente || '',
             descripcion: item.descripcion,
             cantidad: item.cantidad,
-            precioUnitarioUSD: item.precioUnitarioUSD
+            precioUnitarioUSD: item.precioUnitarioUSD,
+            unidad: item.unidad === 'm2' ? 'm2' : 'und',
+            medidaXCm: item.medidaXCm || 0,
+            medidaYCm: item.medidaYCm || 0,
         });
+        setSelectedCatalogProduct(item.catalogProductoId ? catalogProductos.find(p => p.id === item.catalogProductoId) || null : null);
+        setSelectedVarianteId(item.catalogVarianteId || null);
         setErrors({});
     };
 
@@ -393,8 +548,10 @@ export default function BudgetEntryView({
                     nombre: item.descripcion,
                     cantidad: item.cantidad,
                     precioUnitario: item.precioUnitarioUSD,
-                    unidad: 'und',
-                    tipoServicio: 'OTROS',
+                    unidad: item.unidad === 'm2' ? 'm2' : 'und',
+                    medidaXCm: item.medidaXCm || 0,
+                    medidaYCm: item.medidaYCm || 0,
+                    tipoServicio: item.unidad === 'm2' ? 'IMPRESION' : 'OTROS',
                     subtotal: item.totalUSD
                 })),
                 totalUSD: data.totalUSD || totalUSD,
@@ -520,7 +677,7 @@ export default function BudgetEntryView({
                 </div>
             </header>
 
-            <div className="grid grid-cols-3 gap-2 sm:gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-6">
                 <StatCard label="Total USD" value={`$${totalUSD.toFixed(2)}`} icon={<Wallet />} color="blue" />
                 <StatCard label="Monto Bs." value={`${(totalUSD * safeRates.usd).toLocaleString('es-VE', { maximumFractionDigits: 0 })}`} icon={<Calculator />} color="emerald" />
                 <StatCard label="Tasa BCV" value={safeRates.usd.toFixed(2)} icon={<TrendingUp />} color="amber" />
@@ -706,15 +863,101 @@ export default function BudgetEntryView({
                                             placeholder={errors.descripcion ? "⚠️ Descripción requerida..." : "Nombre del ítem...\nDetalles adicionales..."}
                                         />
                                         <AnimatePresence>
-                                            {showSuggestions && newItem.descripcion.length > 1 && (
-                                                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="absolute left-0 right-0 top-full mt-2 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl z-50 border border-slate-100 dark:border-slate-700 overflow-hidden">
-                                                    {SMR_CATALOG.filter(s => s.toLowerCase().includes(newItem.descripcion.toLowerCase())).map((s, i) => (
-                                                        <button key={i} onClick={() => { setNewItem({...newItem, descripcion: s}); setShowSuggestions(false); clearError('descripcion'); }} className="w-full text-left p-4 hover:bg-blue-50 dark:hover:bg-blue-500/10 font-bold text-xs uppercase border-b last:border-none text-slate-600 dark:text-slate-300">{s}</button>
+                                            {showSuggestions && newItem.descripcion.length > 1 && (historicalSuggestions.length > 0 || catalogSuggestions.length > 0 || fallbackSuggestions.length > 0) && (
+                                                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="absolute left-0 right-0 top-full mt-2 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl z-50 border border-slate-100 dark:border-slate-700 overflow-hidden max-h-72 overflow-y-auto">
+                                                    {historicalSuggestions.length > 0 && (
+                                                        <p className="px-4 pt-3 pb-1 text-[9px] font-black uppercase tracking-widest text-amber-500">De tus presupuestos anteriores</p>
+                                                    )}
+                                                    {historicalSuggestions.map((h, i) => (
+                                                        <button key={`hist-${i}`} onClick={() => handleSelectHistorical(h)} className="w-full text-left p-3 px-4 hover:bg-amber-50 dark:hover:bg-amber-500/10 border-b last:border-none border-slate-50 dark:border-slate-700/50 flex items-center gap-3">
+                                                            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-amber-50 text-amber-500 dark:bg-amber-900/30">
+                                                                <History className="w-4 h-4" />
+                                                            </div>
+                                                            <div className="min-w-0 flex-1">
+                                                                <p className="font-bold text-xs uppercase text-slate-700 dark:text-slate-200 truncate">{h.descripcion}</p>
+                                                                <p className="text-[9px] text-slate-400 font-bold">
+                                                                    Usado {h.count}x
+                                                                    {h.unidad === 'm2' && h.medidaXCm > 0 && h.medidaYCm > 0 ? ` · ${h.medidaXCm}x${h.medidaYCm}cm` : ''}
+                                                                </p>
+                                                            </div>
+                                                            <span className="text-[10px] font-black text-amber-600 shrink-0">
+                                                                ${h.precioUnitarioUSD}{h.unidad === 'm2' ? '/m²' : ''}
+                                                            </span>
+                                                        </button>
                                                     ))}
+                                                    {catalogSuggestions.length > 0 && (
+                                                        <p className="px-4 pt-3 pb-1 text-[9px] font-black uppercase tracking-widest text-blue-400">Del inventario</p>
+                                                    )}
+                                                    {catalogSuggestions.map((prod) => (
+                                                        <button key={prod.id} onClick={() => handleSelectCatalogProduct(prod)} className="w-full text-left p-3 px-4 hover:bg-blue-50 dark:hover:bg-blue-500/10 border-b last:border-none border-slate-50 dark:border-slate-700/50 flex items-center gap-3">
+                                                            <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", prod.tipoVenta === 'metro_cuadrado' ? "bg-indigo-50 text-indigo-500 dark:bg-indigo-900/30" : "bg-emerald-50 text-emerald-500 dark:bg-emerald-900/30")}>
+                                                                {prod.tipoVenta === 'metro_cuadrado' ? <Ruler className="w-4 h-4" /> : <Package className="w-4 h-4" />}
+                                                            </div>
+                                                            <div className="min-w-0 flex-1">
+                                                                <p className="font-bold text-xs uppercase text-slate-700 dark:text-slate-200 truncate">{prod.nombre}</p>
+                                                                {prod.descripcion && <p className="text-[10px] text-slate-400 truncate">{prod.descripcion}</p>}
+                                                            </div>
+                                                            <span className="text-[10px] font-black text-blue-600 shrink-0">
+                                                                ${prod.precioBase}{prod.tipoVenta === 'metro_cuadrado' ? '/m²' : ''}
+                                                            </span>
+                                                        </button>
+                                                    ))}
+                                                    {fallbackSuggestions.length > 0 && (
+                                                        <>
+                                                            <p className="px-4 pt-3 pb-1 text-[9px] font-black uppercase tracking-widest text-slate-300">Sugerencias generales</p>
+                                                            {fallbackSuggestions.map((s, i) => (
+                                                                <button key={i} onClick={() => { clearCatalogSelection(); setNewItem(prev => ({...prev, descripcion: s})); setShowSuggestions(false); clearError('descripcion'); }} className="w-full text-left p-4 hover:bg-blue-50 dark:hover:bg-blue-500/10 font-bold text-xs uppercase border-b last:border-none text-slate-600 dark:text-slate-300">{s}</button>
+                                                            ))}
+                                                        </>
+                                                    )}
                                                 </motion.div>
                                             )}
                                         </AnimatePresence>
                                     </div>
+
+                                    {/* PRODUCTO DE INVENTARIO SELECCIONADO: variantes + quitar */}
+                                    {selectedCatalogProduct && (
+                                        <div className="flex flex-wrap items-center gap-2 px-1">
+                                            <Badge className={cn("border-none font-black text-[9px] uppercase gap-1.5", selectedCatalogProduct.tipoVenta === 'metro_cuadrado' ? "bg-indigo-100 text-indigo-700" : "bg-emerald-100 text-emerald-700")}>
+                                                {selectedCatalogProduct.tipoVenta === 'metro_cuadrado' ? <Ruler className="w-3 h-3" /> : <Package className="w-3 h-3" />}
+                                                {selectedCatalogProduct.nombre}
+                                            </Badge>
+                                            {selectedCatalogProduct.tieneVariantes && selectedCatalogProduct.variantes?.length > 0 && (
+                                                <>
+                                                    <button type="button" onClick={() => handleSelectCatalogProduct(selectedCatalogProduct, null)} className={cn("px-2.5 py-1 rounded-lg border text-[9px] font-black uppercase transition-all", !selectedVarianteId ? "bg-blue-600 border-blue-600 text-white" : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500")}>
+                                                        Base
+                                                    </button>
+                                                    {selectedCatalogProduct.variantes.map(v => (
+                                                        <button type="button" key={v.id} onClick={() => handleSelectCatalogProduct(selectedCatalogProduct, v.id)} className={cn("px-2.5 py-1 rounded-lg border text-[9px] font-black uppercase transition-all", selectedVarianteId === v.id ? "bg-blue-600 border-blue-600 text-white" : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500")}>
+                                                            {v.nombre}{v.precioAjuste ? ` +$${v.precioAjuste}` : ''}
+                                                        </button>
+                                                    ))}
+                                                </>
+                                            )}
+                                            <button type="button" onClick={clearCatalogSelection} className="text-[9px] font-black uppercase text-red-400 hover:text-red-500 flex items-center gap-1 ml-auto">
+                                                <X className="w-3 h-3" /> Quitar
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* MEDIDAS EN M² (viniles / materiales por metro cuadrado) */}
+                                    {newItem.unidad === 'm2' && (
+                                        <div className={cn("p-3 rounded-2xl border space-y-2", errors.medidas ? "border-red-200 bg-red-50/40" : "border-indigo-100 bg-indigo-50/50 dark:border-indigo-900/40 dark:bg-indigo-900/10")}>
+                                            <Label className={cn("text-[9px] font-black uppercase flex items-center gap-1.5", errors.medidas ? "text-red-500" : "text-indigo-500")}>
+                                                <Ruler className="w-3 h-3" /> Medidas del material {errors.medidas && "(Requerido)"}
+                                            </Label>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <Input type="number" value={newItem.medidaXCm === 0 ? '' : newItem.medidaXCm} onChange={e => { setNewItem({...newItem, medidaXCm: Number(e.target.value) || 0}); clearError('medidas'); }} className="h-10 rounded-xl border-none bg-white dark:bg-slate-900 font-black text-center text-sm" placeholder="Ancho (cm)" />
+                                                <Input type="number" value={newItem.medidaYCm === 0 ? '' : newItem.medidaYCm} onChange={e => { setNewItem({...newItem, medidaYCm: Number(e.target.value) || 0}); clearError('medidas'); }} className="h-10 rounded-xl border-none bg-white dark:bg-slate-900 font-black text-center text-sm" placeholder="Alto (cm)" />
+                                            </div>
+                                            {newItem.medidaXCm > 0 && newItem.medidaYCm > 0 && (
+                                                <p className="text-[10px] font-bold text-indigo-500 text-center">
+                                                    {((newItem.medidaXCm / 100) * (newItem.medidaYCm / 100)).toFixed(2)} m² × {newItem.cantidad || 1} pieza(s) · ${newItem.precioUnitarioUSD}/m²
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+
                                     <div className="grid grid-cols-12 gap-2 sm:gap-3">
                                         <div className="col-span-3">
                                             <Input
@@ -735,7 +978,7 @@ export default function BudgetEntryView({
                                                 value={newItem.precioUnitarioUSD === 0 ? '' : newItem.precioUnitarioUSD}
                                                 onChange={(e) => { setNewItem({...newItem, precioUnitarioUSD: Number(e.target.value) || 0}); clearError('precio'); }}
                                                 className="h-11 sm:h-14 rounded-xl bg-white dark:bg-slate-900 border-none pl-8 sm:pl-10 font-black text-blue-600 text-sm"
-                                                placeholder="Precio Unit."
+                                                placeholder={newItem.unidad === 'm2' ? "Precio /m²" : "Precio Unit."}
                                             />
                                         </div>
                                         <div className="col-span-3">
@@ -794,6 +1037,11 @@ export default function BudgetEntryView({
                                                     <TableRow key={item.id} className={cn("border-b dark:border-slate-800 transition-colors", newItem.id === item.id && "bg-amber-50 dark:bg-amber-500/5", budgetData.isMaster && "border-none")}>
                                                         <TableCell className="px-3 sm:px-8 font-bold uppercase text-[10px] sm:text-[11px] text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed py-3 sm:py-4">
                                                             {item.descripcion} <span className="ml-1 text-slate-400 font-black italic">x{item.cantidad}</span>
+                                                            {item.unidad === 'm2' && item.medidaXCm > 0 && item.medidaYCm > 0 && (
+                                                                <Badge variant="outline" className="ml-2 border-indigo-200 text-indigo-500 font-black text-[8px] h-4 px-1.5 gap-1 align-middle normal-case">
+                                                                    <Ruler className="w-2.5 h-2.5" /> {item.medidaXCm}x{item.medidaYCm}cm
+                                                                </Badge>
+                                                            )}
                                                         </TableCell>
                                                         <TableCell className="text-right px-3 sm:px-8 font-black text-blue-600 text-xs sm:text-sm tracking-tight">${item.totalUSD.toFixed(2)}</TableCell>
                                                         <TableCell className="pr-1 sm:pr-6">
@@ -927,11 +1175,11 @@ export default function BudgetEntryView({
                                                 <option value="MONTH">Últimos 30 días</option>
                                             </select>
                                         </div>
-                                        <div className="grid grid-cols-3 gap-2">
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                             <div className="relative">
                                                 <DollarSign className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-                                                <Input 
-                                                    type="number" placeholder="Min" 
+                                                <Input
+                                                    type="number" placeholder="Min"
                                                     value={filters.minMonto} onChange={e => setFilters({...filters, minMonto: e.target.value})}
                                                     className="h-9 pl-6 text-xs rounded-xl border-none bg-white dark:bg-slate-900 font-bold"
                                                 />
