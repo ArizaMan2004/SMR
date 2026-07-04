@@ -56,7 +56,7 @@ export function EmpleadosForm({ onSubmit, isLoading }: EmpleadosFormProps) {
           <ShieldCheck className="text-white/20 w-8 h-8" />
         </div>
 
-        <form onSubmit={handleSubmit} className="p-8 space-y-6">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-8 space-y-6">
           <div className="space-y-5">
             {/* Input Nombre */}
             <div className="space-y-1.5">

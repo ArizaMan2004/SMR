@@ -1058,7 +1058,7 @@ export default function Dashboard() {
 
                 {activeView === "notifications_full" && (
                     <div className="max-w-4xl mx-auto space-y-6">
-                        <div className="flex items-center justify-between mb-8">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-8">
                             <div>
                                 <h2 className="text-3xl font-extrabold tracking-tight">Centro de Actividades</h2>
                                 <p className="text-muted-foreground">Historial completo de eventos y notificaciones del sistema</p>

@@ -154,7 +154,7 @@ export function ProfileSettingsView() {
             </div>
 
             <Tabs defaultValue="perfil" className="w-full">
-                <TabsList className="bg-slate-100 dark:bg-white/5 p-1.5 rounded-2xl mb-6 flex w-fit gap-2">
+                <TabsList className="bg-slate-100 dark:bg-white/5 p-1.5 rounded-2xl mb-6 flex flex-wrap w-fit gap-2">
                     <TabsTrigger value="perfil" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                         <UserCircle className="w-4 h-4 mr-2 inline-block"/> Datos Personales
                     </TabsTrigger>

@@ -423,7 +423,7 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
 
                                                     {/* Menú de Acciones (Hover) */}
                                                     {editingPriceIndex !== item.originalIndex && (
-                                                        <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
+                                                        <div className="flex gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity ml-2">
                                                             <Button 
                                                                 variant="ghost" 
                                                                 size="icon" 

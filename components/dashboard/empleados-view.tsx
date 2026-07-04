@@ -620,19 +620,19 @@ export function EmpleadosView({ empleados, pagos, rates, tareas = [] }: Empleado
                             <p className="text-xs sm:text-sm font-bold text-blue-600 mt-2 uppercase tracking-widest">Equivale a Bs. {(total * (rates?.usd || 0)).toLocaleString('es-VE', {minimumFractionDigits: 2})}</p>
                         </div>
 
-                        <div className={`grid gap-4 ${taskCom > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                        <div className={`grid gap-4 grid-cols-2 ${taskCom > 0 ? 'sm:grid-cols-3' : ''}`}>
                             <div className="p-4 bg-white dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 rounded-2xl shadow-sm text-center">
                                 <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">Sueldo Base</span>
-                                <span className="text-xl font-black text-slate-800 dark:text-white">${sBase}</span>
+                                <span className="text-xl font-black text-slate-800 dark:text-white truncate block">${sBase}</span>
                             </div>
                             <div className="p-4 bg-white dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 rounded-2xl shadow-sm text-center">
                                 <span className="text-[9px] font-black uppercase tracking-widest text-emerald-500 block mb-1">Comisiones</span>
-                                <span className="text-xl font-black text-emerald-600">${comisiones.toFixed(2)}</span>
+                                <span className="text-xl font-black text-emerald-600 truncate block">${comisiones.toFixed(2)}</span>
                             </div>
                             {taskCom > 0 && (
                                 <div className="p-4 bg-purple-50 dark:bg-purple-500/10 border border-purple-100 dark:border-purple-500/20 rounded-2xl shadow-sm text-center">
                                     <span className="text-[9px] font-black uppercase tracking-widest text-purple-500 block mb-1">Bonos Tareas ({tareasModal.length})</span>
-                                    <span className="text-xl font-black text-purple-600">${taskCom.toFixed(2)}</span>
+                                    <span className="text-xl font-black text-purple-600 truncate block">${taskCom.toFixed(2)}</span>
                                 </div>
                             )}
                         </div>
@@ -981,18 +981,18 @@ function EmpleadoCard({ emp, rates, onPagar, onEdit, onDelete, onAddCom, onTarif
 
         {/* BALANCE */}
         <div className="flex-1 w-full lg:max-w-md bg-[#F8F9FB] dark:bg-black/20 rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-6 flex flex-row justify-between items-center border border-black/5 gap-4 text-center shadow-inner">
-           <div className="flex-1">
+           <div className="flex-1 min-w-0">
                <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Por Pagar</p>
-               <p className="text-3xl sm:text-4xl md:text-5xl font-black dark:text-white italic tracking-tighter">${total.toFixed(2)}</p>
+               <p className="text-3xl sm:text-4xl md:text-5xl font-black dark:text-white italic tracking-tighter truncate">${total.toFixed(2)}</p>
                <p className="text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-widest hidden sm:block">
                  Base: ${emp.montoSueldo}
                  {taskCom > 0 && <span className="text-purple-500 ml-2">+ ${taskCom.toFixed(0)}</span>}
                </p>
            </div>
            <div className="h-10 w-[1px] bg-slate-200 dark:bg-white/10" />
-           <div className="flex-1">
+           <div className="flex-1 min-w-0">
                <p className="text-[9px] sm:text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-1">Equiv BCV</p>
-               <p className="text-base sm:text-xl md:text-2xl font-black text-slate-700 dark:text-slate-300 italic">{rates?.usd ? formatBs(total, rates.usd) : "---"}</p>
+               <p className="text-base sm:text-xl md:text-2xl font-black text-slate-700 dark:text-slate-300 italic truncate">{rates?.usd ? formatBs(total, rates.usd) : "---"}</p>
            </div>
         </div>
 

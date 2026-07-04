@@ -885,7 +885,7 @@ export function ClientsAndPaymentsView({
                                             {summary.ordenesPendientes.map((orden) => (
                                                 <React.Fragment key={orden.id}>
                                                     <TableRow className="border-0 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
-                                                        <TableCell className="pl-10 font-black text-slate-400 text-xs italic">ORDEN #{orden.ordenNumero}</TableCell>
+                                                        <TableCell className="pl-4 sm:pl-10 font-black text-slate-400 text-xs italic">ORDEN #{orden.ordenNumero}</TableCell>
                                                         <TableCell className="text-right font-black text-rose-600 text-lg tracking-tight">
                                                             {formatCurrency(Number(orden.totalUSD) - (Number(orden.montoPagadoUSD) || 0))}
                                                         </TableCell>
@@ -900,7 +900,7 @@ export function ClientsAndPaymentsView({
                                                                 Liquidar
                                                             </Button>
                                                         </TableCell>
-                                                        <TableCell className="pr-10 text-right w-10">
+                                                        <TableCell className="pr-4 sm:pr-10 text-right w-10">
                                                             <Button 
                                                                 variant="ghost" 
                                                                 size="icon" 
@@ -1001,11 +1001,11 @@ export function ClientsAndPaymentsView({
                     <Table>
                         <TableHeader className="bg-slate-100/50 dark:bg-white/5">
                             <TableRow className="border-0">
-                                <TableHead className="pl-10 uppercase text-[10px] font-black text-slate-400 py-6">N° Orden</TableHead>
-                                <TableHead className="uppercase text-[10px] font-black text-slate-400 py-6">Cliente</TableHead>
-                                <TableHead className="text-right uppercase text-[10px] font-black text-slate-400 py-6">Inversión</TableHead>
-                                <TableHead className="text-center uppercase text-[10px] font-black text-slate-400 py-6">Estado</TableHead>
-                                <TableHead className="text-center uppercase text-[10px] font-black text-slate-400 py-6 pr-10">Detalles</TableHead>
+                                <TableHead className="pl-4 sm:pl-10 uppercase text-[10px] font-black text-slate-400 py-4 sm:py-6">N° Orden</TableHead>
+                                <TableHead className="uppercase text-[10px] font-black text-slate-400 py-4 sm:py-6">Cliente</TableHead>
+                                <TableHead className="text-right uppercase text-[10px] font-black text-slate-400 py-4 sm:py-6">Inversión</TableHead>
+                                <TableHead className="text-center uppercase text-[10px] font-black text-slate-400 py-4 sm:py-6">Estado</TableHead>
+                                <TableHead className="text-center uppercase text-[10px] font-black text-slate-400 py-4 sm:py-6 pr-4 sm:pr-10">Detalles</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -1015,7 +1015,7 @@ export function ClientsAndPaymentsView({
                                     .map((orden: any) => (
                                     <React.Fragment key={orden.id}>
                                         <TableRow className="border-b border-slate-100 dark:border-white/5 hover:bg-white dark:hover:bg-white/5 transition-all">
-                                            <TableCell className="pl-10 font-black text-slate-900 dark:text-white text-xs">#{orden.ordenNumero}</TableCell>
+                                            <TableCell className="pl-4 sm:pl-10 font-black text-slate-900 dark:text-white text-xs">#{orden.ordenNumero}</TableCell>
                                             <TableCell>
                                                 <div className="flex flex-col">
                                                     <span className="font-black text-slate-900 dark:text-white tracking-tight italic uppercase text-xs">{orden.cliente?.nombreRazonSocial || 'S/N'}</span>
@@ -1029,7 +1029,7 @@ export function ClientsAndPaymentsView({
                                                     <span className="text-[9px] font-black uppercase tracking-widest">Liquidada</span>
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="text-center pr-10">
+                                            <TableCell className="text-center pr-4 sm:pr-10">
                                                 <Button variant="ghost" size="icon" onClick={() => setExpandedOrdenId(expandedOrdenId === orden.id ? null : orden.id)} className="rounded-full">
                                                     {expandedOrdenId === orden.id ? <ChevronUp className="w-5 h-5"/> : <ChevronDown className="w-5 h-5"/>}
                                                 </Button>
@@ -1229,7 +1229,7 @@ export function ClientsAndPaymentsView({
                                                     <span className="text-xs font-bold">{rates.usdt.toFixed(2)}</span>
                                                 </button>
                                             </div>
-                                            <div className="grid grid-cols-2 gap-4">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                 <div className="space-y-2">
                                                     <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Monto en Bs.</label>
                                                     <div className="relative">
@@ -1578,7 +1578,7 @@ function GlobalPaymentHistoryModal({ isOpen, onClose, onDeleteBatch, onViewImage
                                             <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="overflow-hidden">
                                                 <div className="p-5 space-y-2 bg-white dark:bg-black/10 border-t border-slate-200 dark:border-white/5">
                                                     <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Distribución del Dinero:</p>
-                                                    <div className="grid grid-cols-2 gap-3">
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                                         {group.distribucion.map((item: any, idx: number) => (
                                                             <div key={idx} className="flex justify-between items-center text-xs font-bold p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-white/5">
                                                                 <span className="text-slate-600 dark:text-slate-300">Orden #{item.ordenNumero}</span>

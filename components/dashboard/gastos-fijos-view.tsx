@@ -275,7 +275,7 @@ export function GastosFijosView({ gastos, rates, onNotification }: ViewProps) {
 
       {/* FORMULARIO */}
       <Dialog open={showForm} onOpenChange={(open) => { setShowForm(open); if(!open) setEditingGasto(null); }}>
-        <DialogContent className="max-w-xl p-0 border-none bg-transparent shadow-none overflow-visible">
+        <DialogContent className="w-[95vw] max-w-xl p-0 border-none bg-transparent shadow-none overflow-visible">
             <DialogTitle className="sr-only">Formulario Global</DialogTitle>
             <GastosFijosForm 
                 onSubmit={handleSave} 

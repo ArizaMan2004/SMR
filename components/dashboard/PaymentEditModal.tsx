@@ -259,7 +259,7 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
                     {/* SELECCIÓN DE BILLETERA */}
                     <div className="space-y-2">
                         <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Destino del Dinero</Label>
-                        <div className="grid grid-cols-4 gap-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                             <WalletOption id="cash_usd" label="Caja" icon={Wallet} active={wallet} onClick={setWallet} color="emerald" />
                             <WalletOption id="bank_bs" label="Banco" icon={Landmark} active={wallet} onClick={setWallet} color="blue" />
                             <WalletOption id="zelle" label="Zelle" icon={CreditCard} active={wallet} onClick={setWallet} color="purple" />

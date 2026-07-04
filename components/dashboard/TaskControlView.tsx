@@ -815,7 +815,7 @@ export function TaskControlView({ currentUser, empleadosDb, rates }: TaskControl
                         </div>
 
                         {/* Tipo + Orden */}
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-2">
                                 <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Tipo</Label>
                                 <Select value={assignTipo} onValueChange={setAssignTipo}>
@@ -836,7 +836,7 @@ export function TaskControlView({ currentUser, empleadosDb, rates }: TaskControl
                         </div>
 
                         {/* Cantidad / Tiempo / Medidas */}
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             {assignTipo === 'CORTE_LASER' ? (
                                 <div className="space-y-2 col-span-2">
                                     <Label className="text-[10px] font-black uppercase text-orange-500 ml-2">Tiempo de Máquina (Min)</Label>
@@ -930,7 +930,7 @@ export function TaskControlView({ currentUser, empleadosDb, rates }: TaskControl
 
                             {/* O por porcentaje */}
                             {!parseFloat(assignMontoDirecto) && (
-                                <div className="grid grid-cols-2 gap-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <div className="space-y-1">
                                         <Label className="text-[9px] font-black uppercase text-slate-400 ml-1">Base ($) ÷ %</Label>
                                         <div className="relative">
@@ -991,7 +991,7 @@ export function TaskControlView({ currentUser, empleadosDb, rates }: TaskControl
                         </div>
 
                         {/* Tipo + Orden */}
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-2">
                                 <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Tipo</Label>
                                 <Select value={editForm.tipo} onValueChange={v => setEditForm(p => ({ ...p, tipo: v }))}>
@@ -1011,7 +1011,7 @@ export function TaskControlView({ currentUser, empleadosDb, rates }: TaskControl
                         </div>
 
                         {/* Detalles */}
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-2">
                                 <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Cantidad</Label>
                                 <Input type="number" value={editForm.cantidad} onChange={e => setEditForm(p => ({ ...p, cantidad: e.target.value }))}
@@ -1030,7 +1030,7 @@ export function TaskControlView({ currentUser, empleadosDb, rates }: TaskControl
                         </div>
 
                         {/* Estado y Estado de Pago */}
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-2">
                                 <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Estado de Revisión</Label>
                                 <Select value={editForm.estado} onValueChange={v => setEditForm(p => ({ ...p, estado: v }))}>
@@ -1061,7 +1061,7 @@ export function TaskControlView({ currentUser, empleadosDb, rates }: TaskControl
                         {/* Comisión */}
                         <div className="bg-slate-50 dark:bg-white/5 p-4 rounded-2xl space-y-3">
                             <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Comisión</p>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div className="space-y-1">
                                     <Label className="text-[9px] font-black uppercase text-slate-400 ml-1">Valor Base ($)</Label>
                                     <div className="relative">
@@ -1164,7 +1164,7 @@ export function TaskControlView({ currentUser, empleadosDb, rates }: TaskControl
 
                             {/* Cálculo por porcentaje (secundario) */}
                             {!parseFloat(reviewMontoDirecto) && (
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Valor Base ($)</Label>
                                         <div className="relative">
@@ -1463,7 +1463,7 @@ function SimpleTaskForm({ form, onChange }: { form: any; onChange: (key: string,
                     value={form.nombre} onChange={e => onChange('nombre', e.target.value)}
                     className="h-14 rounded-2xl bg-slate-50 dark:bg-white/5 border-none font-bold" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-2">
                     <Label className="text-[10px] font-black uppercase text-slate-400 ml-2">Tipo</Label>
                     <Select value={form.tipo} onValueChange={v => onChange('tipo', v)}>
@@ -1482,7 +1482,7 @@ function SimpleTaskForm({ form, onChange }: { form: any; onChange: (key: string,
                         className="h-14 rounded-2xl bg-slate-50 dark:bg-white/5 border-none font-bold" />
                 </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {form.tipo === 'CORTE_LASER' ? (
                     <div className="space-y-2 col-span-2">
                         <Label className="text-[10px] font-black uppercase text-orange-500 ml-2">Tiempo Máquina (Min)</Label>

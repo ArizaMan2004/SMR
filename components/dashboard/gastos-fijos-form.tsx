@@ -83,7 +83,7 @@ export function GastosFijosForm({ onSubmit, isLoading, rates, initialData }: any
            <ShieldCheck className="absolute right-8 top-8 text-white/10 w-24 h-24 -rotate-12" />
         </div>
 
-        <form onSubmit={handleSubmit} className="p-8 -mt-8 bg-white dark:bg-[#1c1c1e] rounded-t-[3rem] space-y-6">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-8 -mt-8 bg-white dark:bg-[#1c1c1e] rounded-t-[3rem] space-y-6">
           
           {/* Selector de Moneda */}
           <div className="flex p-1.5 bg-slate-100 dark:bg-white/5 rounded-[2rem] gap-1 shadow-inner">

@@ -157,64 +157,115 @@ export default function InventoryView() {
 
 // --- TABLA DE STOCK MODIFICADA PARA SOPORTAR EDICIÓN ---
 function StockTable({ items, isEditMode }: { items: any[], isEditMode: boolean }) {
+    if (items.length === 0) return <div className="p-20 text-center text-slate-300 dark:text-slate-700 font-bold uppercase text-[10px] tracking-widest italic">No hay artículos en inventario</div>
+
     return (
-        <div className="overflow-x-auto">
-            <table className="w-full text-left">
-                <thead className="bg-slate-50/50 dark:bg-white/[0.02]">
-                    <tr className="text-[10px] font-black uppercase tracking-widest opacity-40">
-                        <th className="px-8 py-6">Producto / Detalle</th>
-                        <th className="px-8 py-6 text-center">Existencia</th>
-                        <th className="px-8 py-6 text-right">Precio</th>
-                        <th className="px-8 py-6 text-right">Acción</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-black/5">
-                    {items.map(item => (
-                        <tr key={item.id} className="hover:bg-blue-500/[0.01] transition-colors">
-                            <td className="px-8 py-6">
-                                <p className="font-bold text-lg">{item.nombre}</p>
-                                <p className="text-xs opacity-40 font-medium italic">{item.detalle || 'Sin descripción'}</p>
-                            </td>
-                            <td className="px-8 py-6 text-center">
-                                <span className={cn(
-                                    "px-4 py-1.5 rounded-full font-black text-xs inline-flex items-center gap-2",
-                                    item.stockActual <= (item.minimo || 5) ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500"
-                                )}>
-                                    {item.stockActual} {item.unidad || 'UND'}
-                                </span>
-                            </td>
-                            <td className="px-8 py-6 text-right font-black text-blue-600">${Number(item.precio).toFixed(2)}</td>
-                            <td className="px-8 py-6">
-                                <div className="flex justify-end gap-2">
-                                    <AnimatePresence mode="wait">
-                                        {isEditMode ? (
-                                            <motion.div 
-                                                key="delete"
-                                                initial={{ opacity: 0, scale: 0.8 }} 
-                                                animate={{ opacity: 1, scale: 1 }} 
-                                                exit={{ opacity: 0, scale: 0.8 }}
-                                            >
-                                                <DeleteAction item={item} />
-                                            </motion.div>
-                                        ) : (
-                                            <motion.div 
-                                                key="actions"
-                                                initial={{ opacity: 0, scale: 0.8 }} 
-                                                animate={{ opacity: 1, scale: 1 }} 
-                                                exit={{ opacity: 0, scale: 0.8 }}
-                                                className="flex gap-2"
-                                            >
-                                                <QuickAction item={item} type="ENTRADA" />
-                                                <QuickAction item={item} type="SALIDA" />
-                                            </motion.div>
-                                        )}
-                                    </AnimatePresence>
-                                </div>
-                            </td>
+        <div className="w-full">
+            {/* MÓVIL: tarjetas (la tabla está oculta en pantallas pequeñas) */}
+            <div className="md:hidden divide-y divide-black/5">
+                {items.map(item => (
+                    <div key={item.id} className="p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <p className="font-bold text-base truncate">{item.nombre}</p>
+                                <p className="text-xs opacity-40 font-medium italic truncate">{item.detalle || 'Sin descripción'}</p>
+                            </div>
+                            <span className={cn(
+                                "px-3 py-1 rounded-full font-black text-[11px] inline-flex items-center gap-1.5 shrink-0",
+                                item.stockActual <= (item.minimo || 5) ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500"
+                            )}>
+                                {item.stockActual} {item.unidad || 'UND'}
+                            </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="font-black text-blue-600 text-lg">${Number(item.precio).toFixed(2)}</span>
+                            <AnimatePresence mode="wait">
+                                {isEditMode ? (
+                                    <motion.div
+                                        key="delete-m"
+                                        initial={{ opacity: 0, scale: 0.8 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        exit={{ opacity: 0, scale: 0.8 }}
+                                    >
+                                        <DeleteAction item={item} />
+                                    </motion.div>
+                                ) : (
+                                    <motion.div
+                                        key="actions-m"
+                                        initial={{ opacity: 0, scale: 0.8 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        exit={{ opacity: 0, scale: 0.8 }}
+                                        className="flex gap-2"
+                                    >
+                                        <QuickAction item={item} type="ENTRADA" />
+                                        <QuickAction item={item} type="SALIDA" />
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* DESKTOP: tabla tradicional (oculta en móvil) */}
+            <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-left">
+                    <thead className="bg-slate-50/50 dark:bg-white/[0.02]">
+                        <tr className="text-[10px] font-black uppercase tracking-widest opacity-40">
+                            <th className="px-8 py-6">Producto / Detalle</th>
+                            <th className="px-8 py-6 text-center">Existencia</th>
+                            <th className="px-8 py-6 text-right">Precio</th>
+                            <th className="px-8 py-6 text-right">Acción</th>
                         </tr>
-                    ))}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody className="divide-y divide-black/5">
+                        {items.map(item => (
+                            <tr key={item.id} className="hover:bg-blue-500/[0.01] transition-colors">
+                                <td className="px-8 py-6">
+                                    <p className="font-bold text-lg">{item.nombre}</p>
+                                    <p className="text-xs opacity-40 font-medium italic">{item.detalle || 'Sin descripción'}</p>
+                                </td>
+                                <td className="px-8 py-6 text-center">
+                                    <span className={cn(
+                                        "px-4 py-1.5 rounded-full font-black text-xs inline-flex items-center gap-2",
+                                        item.stockActual <= (item.minimo || 5) ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500"
+                                    )}>
+                                        {item.stockActual} {item.unidad || 'UND'}
+                                    </span>
+                                </td>
+                                <td className="px-8 py-6 text-right font-black text-blue-600">${Number(item.precio).toFixed(2)}</td>
+                                <td className="px-8 py-6">
+                                    <div className="flex justify-end gap-2">
+                                        <AnimatePresence mode="wait">
+                                            {isEditMode ? (
+                                                <motion.div
+                                                    key="delete"
+                                                    initial={{ opacity: 0, scale: 0.8 }}
+                                                    animate={{ opacity: 1, scale: 1 }}
+                                                    exit={{ opacity: 0, scale: 0.8 }}
+                                                >
+                                                    <DeleteAction item={item} />
+                                                </motion.div>
+                                            ) : (
+                                                <motion.div
+                                                    key="actions"
+                                                    initial={{ opacity: 0, scale: 0.8 }}
+                                                    animate={{ opacity: 1, scale: 1 }}
+                                                    exit={{ opacity: 0, scale: 0.8 }}
+                                                    className="flex gap-2"
+                                                >
+                                                    <QuickAction item={item} type="ENTRADA" />
+                                                    <QuickAction item={item} type="SALIDA" />
+                                                </motion.div>
+                                            )}
+                                        </AnimatePresence>
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
         </div>
     )
 }
@@ -267,32 +318,55 @@ function DeleteAction({ item }: { item: any }) {
 }
 
 function MovementTable({ data, color }: { data: any[], color: 'emerald' | 'red' }) {
+    if (data.length === 0) return <div className="p-20 text-center text-slate-300 dark:text-slate-700 font-bold uppercase text-[10px] tracking-widest italic">No hay movimientos registrados</div>
+
     return (
-        <div className="overflow-x-auto">
-            <table className="w-full text-left">
-                <thead className="bg-slate-50/50 dark:bg-white/[0.02]">
-                    <tr className="text-[10px] font-black uppercase tracking-widest opacity-40">
-                        <th className="px-8 py-6">Fecha y Hora</th>
-                        <th className="px-8 py-6">Producto</th>
-                        <th className="px-8 py-6">Motivo</th>
-                        <th className="px-8 py-6 text-right">Cantidad</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-black/5">
-                    {data.map(m => (
-                        <tr key={m.id}>
-                            <td className="px-8 py-6 text-[11px] font-bold opacity-60">
-                                {formatFecha(m.fecha)}
-                            </td>
-                            <td className="px-8 py-6 font-black">{m.productoNombre}</td>
-                            <td className="px-8 py-6 text-xs italic opacity-50">{m.motivo}</td>
-                            <td className={cn("px-8 py-6 text-right font-black text-lg", color === 'red' ? 'text-red-500' : 'text-emerald-500')}>
+        <div className="w-full">
+            {/* MÓVIL: tarjetas (la tabla está oculta en pantallas pequeñas) */}
+            <div className="md:hidden divide-y divide-black/5">
+                {data.map(m => (
+                    <div key={m.id} className="p-4 space-y-1.5">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <p className="font-black text-sm truncate">{m.productoNombre}</p>
+                                <p className="text-[11px] font-bold opacity-60">{formatFecha(m.fecha)}</p>
+                            </div>
+                            <span className={cn("font-black text-lg shrink-0", color === 'red' ? 'text-red-500' : 'text-emerald-500')}>
                                 {color === 'red' ? '-' : '+'}{m.cantidad}
-                            </td>
+                            </span>
+                        </div>
+                        <p className="text-xs italic opacity-50 truncate">{m.motivo}</p>
+                    </div>
+                ))}
+            </div>
+
+            {/* DESKTOP: tabla tradicional (oculta en móvil) */}
+            <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-left">
+                    <thead className="bg-slate-50/50 dark:bg-white/[0.02]">
+                        <tr className="text-[10px] font-black uppercase tracking-widest opacity-40">
+                            <th className="px-8 py-6">Fecha y Hora</th>
+                            <th className="px-8 py-6">Producto</th>
+                            <th className="px-8 py-6">Motivo</th>
+                            <th className="px-8 py-6 text-right">Cantidad</th>
                         </tr>
-                    ))}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody className="divide-y divide-black/5">
+                        {data.map(m => (
+                            <tr key={m.id}>
+                                <td className="px-8 py-6 text-[11px] font-bold opacity-60">
+                                    {formatFecha(m.fecha)}
+                                </td>
+                                <td className="px-8 py-6 font-black">{m.productoNombre}</td>
+                                <td className="px-8 py-6 text-xs italic opacity-50">{m.motivo}</td>
+                                <td className={cn("px-8 py-6 text-right font-black text-lg", color === 'red' ? 'text-red-500' : 'text-emerald-500')}>
+                                    {color === 'red' ? '-' : '+'}{m.cantidad}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
         </div>
     )
 }

@@ -290,10 +290,10 @@ export function HelpModal({ open, onClose, activeView, onNavigate }: HelpModalPr
                             </div>
                         </div>
 
-                        {/* Body — grid de tarjetas + detalle lateral */}
-                        <div className="flex flex-1 overflow-hidden">
+                        {/* Body — grid de tarjetas + detalle lateral (apilado en móvil, lateral en desktop) */}
+                        <div className="flex flex-col md:flex-row flex-1 overflow-y-auto md:overflow-hidden">
                             {/* Grid */}
-                            <div className="flex-1 overflow-y-auto p-6">
+                            <div className="flex-1 overflow-visible md:overflow-y-auto p-6">
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                                     {FEATURES.map(f => {
                                         const c = COLOR_MAP[f.color]
@@ -339,13 +339,13 @@ export function HelpModal({ open, onClose, activeView, onNavigate }: HelpModalPr
                             <AnimatePresence>
                                 {selected && (
                                     <motion.div
-                                        initial={{ width: 0, opacity: 0 }}
-                                        animate={{ width: 340, opacity: 1 }}
-                                        exit={{ width: 0, opacity: 0 }}
+                                        initial={{ opacity: 0 }}
+                                        animate={{ opacity: 1 }}
+                                        exit={{ opacity: 0 }}
                                         transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                                        className="shrink-0 border-l border-black/5 dark:border-white/5 overflow-hidden"
+                                        className="w-full md:w-[340px] shrink-0 border-t md:border-t-0 border-l-0 md:border-l border-black/5 dark:border-white/5 overflow-visible md:overflow-hidden"
                                     >
-                                        <div className="w-[340px] h-full overflow-y-auto p-6 space-y-5">
+                                        <div className="w-full h-auto md:h-full overflow-visible md:overflow-y-auto p-6 space-y-5">
                                             {(() => {
                                                 const c = COLOR_MAP[selected.color]
                                                 return (

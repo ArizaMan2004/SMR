@@ -215,7 +215,7 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
                     </div>
 
                     <div className="p-6 space-y-5">
-                        <div className="rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden bg-slate-50/50 dark:bg-slate-900/50">
+                        <div className="rounded-2xl border border-slate-100 dark:border-slate-800 overflow-x-auto bg-slate-50/50 dark:bg-slate-900/50">
                             <Table>
                                 <TableHeader className="bg-slate-100/50 dark:bg-slate-800/50">
                                     <TableRow className="hover:bg-transparent border-none">
@@ -245,7 +245,7 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
                                         return (
                                             <TableRow key={i} className="border-slate-100 dark:border-slate-800">
                                                 <TableCell className="text-[10px] font-bold text-center py-2">{qty}</TableCell>
-                                                <TableCell className="text-[10px] font-bold py-2">{m.name}</TableCell>
+                                                <TableCell className="text-[10px] font-bold py-2 max-w-[120px] truncate">{m.name}</TableCell>
                                                 <TableCell className="text-[10px] font-medium text-slate-400 text-center py-2">
                                                     {(m2Unitario * qty).toFixed(2)} m²
                                                 </TableCell>
@@ -258,7 +258,7 @@ const ReceiptModal = ({ isOpen, onClose, data, type, rates }: any) => {
                                         return (
                                             <TableRow key={i} className="border-slate-100 dark:border-slate-800">
                                                 <TableCell className="text-[10px] font-bold text-center py-2">{isService ? t.qty : '-'}</TableCell>
-                                                <TableCell className="text-[10px] font-bold py-2">{t.name}</TableCell>
+                                                <TableCell className="text-[10px] font-bold py-2 max-w-[120px] truncate">{t.name}</TableCell>
                                                 <TableCell className="text-[10px] font-medium text-slate-400 text-center py-2">{!isService ? formatTime(t.minutes + t.seconds/60) : 'Servicio'}</TableCell>
                                                 <TableCell className="text-[10px] font-black text-right py-2">${formatUSD(itemCost)}</TableCell>
                                             </TableRow>
@@ -457,11 +457,11 @@ const MetroCuadradoCalculator = ({ rates, onSendToProduction }: { rates: any, on
                     <AnimatePresence mode="popLayout">
                         {paginatedHistory.map(h => (
                             <motion.div layout variants={historyItemVariants} exit="exit" key={h.id} className="bg-white dark:bg-slate-900/40 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-800 flex justify-between items-center shadow-sm group">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 text-emerald-500 flex items-center justify-center">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 text-emerald-500 flex items-center justify-center shrink-0">
                                         <Printer size={16} />
                                     </div>
-                                    <div><p className="font-black text-xs text-slate-800 dark:text-white leading-tight uppercase">{h.name}</p><p className="text-[8px] font-bold text-slate-400 mt-0.5 uppercase tracking-tighter">{h.date} • {h.totalM2?.toFixed(2)} m²</p></div>
+                                    <div className="min-w-0"><p className="font-black text-xs text-slate-800 dark:text-white leading-tight uppercase truncate">{h.name}</p><p className="text-[8px] font-bold text-slate-400 mt-0.5 uppercase tracking-tighter">{h.date} • {h.totalM2?.toFixed(2)} m²</p></div>
                                 </div>
                                 <div className="flex items-center gap-1">
                                     <span className="font-black text-emerald-600 text-sm mr-2">${formatUSD(h.totalCost)}</span>
@@ -684,11 +684,11 @@ const LaserCutsCalculator = ({ rates, onSendToProduction }: { rates: any, onSend
                     <AnimatePresence mode="popLayout">
                         {paginatedHistory.map(h => (
                             <motion.div layout variants={historyItemVariants} exit="exit" key={h.id} className="bg-white dark:bg-slate-900/40 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-800 flex justify-between items-center shadow-sm group">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-400 flex items-center justify-center">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-400 flex items-center justify-center shrink-0">
                                         <Scissors size={16}/>
                                     </div>
-                                    <div><p className="font-black text-xs text-slate-800 dark:text-white leading-tight uppercase">{h.name}</p><p className="text-[8px] font-bold text-slate-400 mt-0.5 tracking-tighter">{h.date}</p></div>
+                                    <div className="min-w-0"><p className="font-black text-xs text-slate-800 dark:text-white leading-tight uppercase truncate">{h.name}</p><p className="text-[8px] font-bold text-slate-400 mt-0.5 tracking-tighter">{h.date}</p></div>
                                 </div>
                                 <div className="flex items-center gap-1">
                                     <span className="font-black text-indigo-600 text-sm mr-2">${formatUSD(h.totalCost)}</span>
@@ -744,7 +744,7 @@ const CurrencyConverterCalculator = ({ rates }: { rates: any }) => {
 
     return (
         <div className="space-y-8">
-            <div className="flex flex-row justify-between items-center gap-4">
+            <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4">
                 <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl w-full sm:w-auto">
                     {['USD', 'EUR', 'USDT'].map((curr) => (
                         <motion.button key={curr} {...tapAnimation} onClick={() => setSelectedCurrency(curr as any)} className={cn("flex-1 px-6 py-2 rounded-lg text-[9px] font-black uppercase transition-all", selectedCurrency === curr ? "bg-white dark:bg-slate-800 text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600")}>{curr}</motion.button>

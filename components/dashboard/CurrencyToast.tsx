@@ -18,7 +18,7 @@ export function CurrencyToast({ show, message, onClose }: CurrencyToastProps) {
           initial={{ opacity: 0, y: 20, scale: 0.9 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }}
-          className="fixed bottom-10 right-10 z-[100]"
+          className="fixed bottom-4 right-4 sm:bottom-10 sm:right-10 z-[100]"
         >
           <div className="bg-white/90 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200 dark:border-slate-800 p-4 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] flex items-center gap-4 min-w-[280px]">
             <div className="w-10 h-10 bg-emerald-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/20 shrink-0">

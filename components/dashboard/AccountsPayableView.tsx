@@ -175,7 +175,7 @@ export function AccountsPayableView({ bcvRate, initialData = [] }: Props) {
 
             {/* TABLA DE OPERACIONES */}
             <Card className="rounded-[3rem] border-none shadow-2xl bg-white dark:bg-slate-900 overflow-hidden">
-                <div className="p-8 border-b border-slate-50 dark:border-slate-800 flex flex-col md:flex-row justify-between gap-4">
+                <div className="p-4 sm:p-8 border-b border-slate-50 dark:border-slate-800 flex flex-col md:flex-row justify-between gap-4">
                     <div className="relative w-full md:w-96">
                         <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <Input 

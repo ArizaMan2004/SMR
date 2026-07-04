@@ -1405,8 +1405,8 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                     </div>
                                 ))}
 
-                                <div className="grid grid-cols-5 gap-2">
-                                    <div className="col-span-2">
+                                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                                    <div className="col-span-2 sm:col-span-2">
                                         <Input placeholder="Nombre variante" value={prodVarianteInput.nombre}
                                             onChange={e => setProdVarianteInput(p => ({ ...p, nombre: e.target.value }))}
                                             className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-bold" />

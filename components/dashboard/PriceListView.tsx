@@ -114,14 +114,14 @@ export function PriceListView({ prices = [], categories = [], eurRate = 0 }: Pri
 
             {/* MODAL PRODUCTO */}
             <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-                <DialogContent className="rounded-[2.5rem] border-none max-w-md p-8">
+                <DialogContent className="w-[95vw] rounded-[2.5rem] border-none max-w-md p-6 sm:p-8">
                     <DialogHeader><DialogTitle className="uppercase italic font-black text-xl tracking-tighter">Gestionar Producto</DialogTitle></DialogHeader>
                     <div className="space-y-6 py-4">
                         <div className="space-y-2">
                             <Label className="text-[10px] uppercase font-black opacity-40 ml-1">Nombre</Label>
                             <Input value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} className="rounded-2xl h-12 font-bold" />
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label className="text-[10px] uppercase font-black opacity-40 ml-1">Categoría</Label>
                                 <select value={formData.categoriaId} onChange={e => setFormData({...formData, categoriaId: e.target.value})} className="w-full h-12 rounded-2xl border border-black/5 bg-white dark:bg-black/20 px-4 text-sm font-bold">
@@ -134,7 +134,7 @@ export function PriceListView({ prices = [], categories = [], eurRate = 0 }: Pri
                                 <Input value={formData.unidad} onChange={e => setFormData({...formData, unidad: e.target.value})} className="rounded-2xl h-12 font-bold" />
                             </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-2 p-4 bg-emerald-500/5 rounded-[1.8rem] border border-emerald-500/10 text-emerald-600">
                                 <Label className="text-[10px] uppercase font-black">Precio Público</Label>
                                 <Input type="number" value={formData.precioPublico} onChange={e => setFormData({...formData, precioPublico: Number(e.target.value)})} className="bg-transparent border-none text-xl font-black p-0 h-auto focus-visible:ring-0" />
@@ -151,7 +151,7 @@ export function PriceListView({ prices = [], categories = [], eurRate = 0 }: Pri
 
             {/* MODAL CATEGORÍAS */}
             <Dialog open={isCatModalOpen} onOpenChange={setIsCatModalOpen}>
-                <DialogContent className="rounded-[2.5rem] max-w-sm">
+                <DialogContent className="w-[95vw] rounded-[2.5rem] max-w-sm">
                     <DialogHeader><DialogTitle className="uppercase italic font-black">Categorías</DialogTitle></DialogHeader>
                     <div className="space-y-6 py-4">
                         <div className="flex gap-2">

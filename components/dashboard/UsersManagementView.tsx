@@ -155,7 +155,7 @@ export function UsersManagementView() {
             </div>
 
             <Tabs defaultValue="usuarios" className="w-full">
-                <TabsList className="bg-slate-100 dark:bg-white/5 p-1.5 rounded-2xl mb-6 flex w-fit gap-2">
+                <TabsList className="bg-slate-100 dark:bg-white/5 p-1.5 rounded-2xl mb-6 flex flex-wrap w-fit gap-2">
                     <TabsTrigger value="usuarios" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                         <Users className="w-4 h-4 mr-2 inline-block"/> Empleados Registrados
                     </TabsTrigger>
@@ -172,10 +172,10 @@ export function UsersManagementView() {
                         <Table>
                             <TableHeader className="bg-slate-50 dark:bg-white/5">
                                 <TableRow className="border-0">
-                                    <TableHead className="py-6 px-8 text-[10px] font-black uppercase text-slate-400">Usuario</TableHead>
-                                    <TableHead className="py-6 text-[10px] font-black uppercase text-slate-400">Rol Asignado</TableHead>
-                                    <TableHead className="py-6 text-[10px] font-black uppercase text-slate-400 text-center">Estado de Acceso</TableHead>
-                                    <TableHead className="py-6 pr-8 text-[10px] font-black uppercase text-slate-400 text-right">Acciones</TableHead>
+                                    <TableHead className="py-4 sm:py-6 px-3 sm:px-8 text-[10px] font-black uppercase text-slate-400">Usuario</TableHead>
+                                    <TableHead className="py-4 sm:py-6 text-[10px] font-black uppercase text-slate-400">Rol Asignado</TableHead>
+                                    <TableHead className="py-4 sm:py-6 text-[10px] font-black uppercase text-slate-400 text-center">Estado de Acceso</TableHead>
+                                    <TableHead className="py-4 sm:py-6 pr-3 sm:pr-8 text-[10px] font-black uppercase text-slate-400 text-right">Acciones</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -189,7 +189,7 @@ export function UsersManagementView() {
                                     
                                     return (
                                         <TableRow key={u.id} className="border-b border-slate-50 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/5">
-                                            <TableCell className="py-5 px-8">
+                                            <TableCell className="py-5 px-3 sm:px-8">
                                                 <div className="flex items-center gap-4">
                                                     <div className="w-10 h-10 rounded-xl bg-slate-200 dark:bg-slate-800 flex items-center justify-center font-black text-slate-500 uppercase">
                                                         {u.nombre?.charAt(0) || 'U'}
@@ -205,7 +205,7 @@ export function UsersManagementView() {
                                             </TableCell>
                                             <TableCell className="py-5">
                                                 <Select value={u.rol || 'EMPLEADO'} onValueChange={(val) => handleUpdateRole(u.id, val)}>
-                                                    <SelectTrigger className={`w-[180px] h-9 border-none rounded-xl text-xs font-black uppercase tracking-wider ${roleConfig.color} shadow-sm`}>
+                                                    <SelectTrigger className={`w-[140px] sm:w-[180px] h-9 border-none rounded-xl text-xs font-black uppercase tracking-wider ${roleConfig.color} shadow-sm`}>
                                                         <SelectValue />
                                                     </SelectTrigger>
                                                     <SelectContent className="rounded-2xl">
@@ -220,7 +220,7 @@ export function UsersManagementView() {
                                                     {u.isActive ? "Acceso Permitido" : "En Espera / Bloqueado"}
                                                 </Badge>
                                             </TableCell>
-                                            <TableCell className="py-5 pr-8 text-right">
+                                            <TableCell className="py-5 pr-3 sm:pr-8 text-right">
                                                 <div className="flex justify-end gap-1.5">
                                                     {/* BOTÓN EDITAR PERFIL */}
                                                     <Button 

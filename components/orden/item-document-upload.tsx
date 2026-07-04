@@ -166,14 +166,14 @@ export default function ItemDocumentUpload({
                                     Ver
                                 </a>
                             </div>
-                            <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="h-6 w-6 text-red-500 hover:text-red-700"
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-9 w-9 text-red-500 hover:text-red-700"
                                 onClick={() => handleRemoveDocument(url)}
                                 disabled={isUploading}
                             >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="w-5 h-5" />
                             </Button>
                         </div>
                     ))}
