@@ -8,7 +8,7 @@ const SELLO_STORAGE_KEY = "pdfSelloBase64"; // Clave para el sello
 
 /**
  * Obtiene el logo en Base64 desde localStorage o, si no existe,
- * lo carga desde /smr-logo.png y lo guarda automáticamente.
+ * lo carga desde /smr-logo-light.png y lo guarda automáticamente.
  */
 export async function getLogoBase64(): Promise<string | undefined> {
   if (typeof window === "undefined") return undefined;
@@ -18,9 +18,10 @@ export async function getLogoBase64(): Promise<string | undefined> {
   if (stored) return stored;
 
   // 2️⃣ Si no existe, lo cargamos desde el archivo público
+  // (versión "light" a color: es la que se ve bien sobre el fondo blanco de un PDF)
   try {
-    const response = await fetch("/smr-logo.png");
-    if (!response.ok) throw new Error("No se pudo cargar /smr-logo.png");
+    const response = await fetch("/smr-logo-light.png");
+    if (!response.ok) throw new Error("No se pudo cargar /smr-logo-light.png");
 
     const blob = await response.blob();
 

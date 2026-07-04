@@ -1,7 +1,7 @@
 {
-  "name": "Siskoven - Gestión de Inventario",
-  "short_name": "Siskoven",
-  "description": "Sistema de gestión de inventario y ventas para tu negocio.",
+  "name": "SMR Lase Print - Impresión Digital y Corte Láser",
+  "short_name": "SMR Lase Print",
+  "description": "Sistema de gestión para SMR Lase Print: inventario, órdenes, empleados y pagos.",
   "start_url": "/", 
   "display": "standalone",
   "orientation": "portrait",
