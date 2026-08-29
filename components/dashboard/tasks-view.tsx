@@ -27,6 +27,8 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { esAdmin } from '@/lib/roles'
+import { claveFechaLocal } from '@/lib/utils/fechas'
 
 const springConfig = { type: "spring", stiffness: 300, damping: 30 };
 
@@ -60,7 +62,7 @@ interface ServiceOrder {
 }
 
 const emptyOrder: ServiceOrder = {
-    cliente: "", telefono: "", responsable: "", fechaInicio: new Date().toISOString().split('T')[0], fechaEntrega: "",
+    cliente: "", telefono: "", responsable: "", fechaInicio: claveFechaLocal(), fechaEntrega: "",
     descripcion: "", materiales: [], notaMaterial: "", medidas: { alto: "", ancho: "" }, adicionales: [],
     observaciones: "", areaActual: "DISENO", estado: "PENDIENTE", creadoEn: new Date().toISOString()
 }
@@ -149,7 +151,7 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
         } catch (error) { toast.error("Error al eliminar"); }
     }
 
-    const isAdmin = userData?.rol === 'ADMIN';
+    const isAdmin = esAdmin(userData?.rol);
 
     // ✨ ASIGNACIÓN DE VISTAS POR ROL
     const visibleAreas = useMemo(() => {

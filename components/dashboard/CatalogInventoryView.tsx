@@ -49,6 +49,7 @@ import {
     type ItemVentaCatalogo,
     type TipoCliente,
 } from '@/lib/services/catalog-service'
+import { puedeGestionarInventario } from '@/lib/roles'
 
 // ============================================================
 // TIPOS LOCALES
@@ -114,7 +115,7 @@ const CAT_DEFAULT: CatalogoCategoria = { nombre: '', color: 'blue', descripcion:
 // COMPONENTE PRINCIPAL
 // ============================================================
 export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaBase64, selloBase64 }: CatalogInventoryViewProps) {
-    const isAdmin = ['ADMIN', 'PRODUCCION'].includes(currentUser?.rol)
+    const isAdmin = puedeGestionarInventario(currentUser?.rol)
 
     // Datos
     const [categorias, setCategorias] = useState<CatalogoCategoria[]>([])

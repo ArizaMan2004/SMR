@@ -52,7 +52,10 @@ export function BackgroundRemoverView() {
             // CONFIGURACIÓN CORREGIDA: MODO CDN (INTERNET)
             // Al no poner 'publicPath', la librería descarga los modelos faltantes automáticamente.
             const config: Config = {
-                model: 'medium',
+                // '@imgly/background-removal' v1.7 renombró los modelos: ya no
+                // existen 'small'/'medium', ahora son isnet / isnet_fp16 /
+                // isnet_quint8. 'isnet_fp16' es el equivalente equilibrado.
+                model: 'isnet_fp16',
                 output: { format: 'image/png', quality: 1.0 },
                 progress: (key: string, current: number, total: number) => {
                     if (total > 0) setProgress(Math.round((current / total) * 100))

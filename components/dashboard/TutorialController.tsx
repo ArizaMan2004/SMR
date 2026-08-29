@@ -7,6 +7,7 @@ import { driver } from "driver.js"
 import "driver.js/dist/driver.css"
 import { X, Play, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { usePermisos } from '@/lib/contexts/permisos-context'
 
 // ============================================================
 // DATOS DEL SISTEMA — cada sección explicada
@@ -56,7 +57,8 @@ const FEATURES = [
         tip: 'Los clientes registrados aquí aparecen automáticamente en el wizard de órdenes y en el catálogo.'
     },
     {
-        id: 'budget',
+        // No existe ninguna vista llamada 'budget': la de Presupuestos es 'calculator'.
+        id: 'calculator',
         icon: '📄',
         color: 'amber',
         title: 'Presupuestos',
@@ -123,10 +125,13 @@ const FEATURES = [
             'El rol determina qué vistas del sistema puede ver cada empleado',
             'Los empleados inactivos no pueden iniciar sesión aunque tengan cuenta',
         ],
-        tip: 'Los roles ADMIN y PRODUCCION tienen acceso completo; los demás solo ven su área de trabajo.'
+        tip: 'En Accesos y Roles decides exactamente qué vistas ve cada rango, e incluso puedes darle o quitarle permisos sueltos a una persona concreta.'
     },
     {
-        id: 'calculator',
+        // La Calculadora de Costos es la vista "old_calculator". Antes este id
+        // era 'calculator', que es la de Presupuestos: el botón "ir a la sección"
+        // llevaba a la pantalla equivocada.
+        id: 'old_calculator',
         icon: '🧮',
         color: 'orange',
         title: 'Calculadora',
@@ -245,6 +250,7 @@ interface HelpModalProps {
 }
 
 export function HelpModal({ open, onClose, activeView, onNavigate }: HelpModalProps) {
+    const { puedeVer } = usePermisos();
     const [selectedId, setSelectedId] = useState<string | null>(null)
     const selected = FEATURES.find(f => f.id === selectedId)
 
@@ -374,7 +380,11 @@ export function HelpModal({ open, onClose, activeView, onNavigate }: HelpModalPr
                                                         )}
 
                                                         <div className="flex flex-col gap-2 pt-2">
-                                                            {onNavigate && selected.id !== activeView && (
+                                                            {/* Solo se ofrece el atajo si el destino es una vista real Y esta
+                                                                persona tiene acceso. Antes aparecía siempre: en "Tasas de
+                                                                Cambio" no llevaba a ningún lado (no es una vista), y a quien
+                                                                no tenía permiso lo mandaba a una pantalla que no podía abrir. */}
+                                                            {onNavigate && selected.id !== activeView && puedeVer(selected.id) && (
                                                                 <button
                                                                     onClick={() => { onNavigate(selected.id); onClose() }}
                                                                     className={cn('w-full py-3 rounded-2xl font-black text-[10px] uppercase tracking-wider text-white transition-colors', c.badge, 'hover:opacity-90')}

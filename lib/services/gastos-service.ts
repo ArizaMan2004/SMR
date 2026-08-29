@@ -250,46 +250,7 @@ export const subscribeToPagos = (callback: (pagos: PagoEmpleado[]) => void) => {
   });
 };
 
-// ==========================================
-// 5. NOTIFICACIONES (GLOBAL)
-// ==========================================
 
-export const createNotification = async (notification: any) => {
-  try {
-    await addDoc(collection(db, "notificaciones"), {
-      ...notification,
-      timestamp: Timestamp.now(),
-      isRead: false
-    });
-  } catch (error) {
-    console.error("Error en createNotification:", error);
-  }
-};
-
-export const subscribeToNotifications = (callback: (notis: any[]) => void) => {
-  const q = query(
-    collection(db, "notificaciones"),
-    orderBy("timestamp", "desc"),
-    limit(50) // <--- OPTIMIZACIÓN: Las notificaciones crecen rápido, limitamos a 50
-  );
-  return onSnapshot(q, (snapshot) => {
-    const notis = snapshot.docs.map(mapSnapshot);
-    callback(notis);
-  });
-};
-
-export const updateNotificationStatus = async (id: string, isRead: boolean) => {
-  try {
-    await updateDoc(doc(db, "notificaciones", id), { isRead });
-  } catch (error) {
-    console.error("Error en updateNotificationStatus:", error);
-  }
-};
-
-export const deleteNotification = async (id: string) => {
-  try {
-    await deleteDoc(doc(db, "notificaciones", id));
-  } catch (error) {
-    console.error("Error en deleteNotification:", error);
-  }
-};
+// Las notificaciones se gestionan en @/lib/services/notificaciones-service.ts.
+// Aqui vivian tres funciones que escribian un esquema incompatible en la misma
+// coleccion "notificaciones", y por eso cada pantalla veia solo la mitad.

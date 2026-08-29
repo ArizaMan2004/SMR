@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogTitle, DialogHeader, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCurrency } from "@/lib/utils/order-utils";
 import { cn } from "@/lib/utils";
-import { collection, getDocs, query, orderBy, limit, doc, getDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, limit, where, Timestamp, doc, getDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { toast } from "sonner";
 import { format, isValid } from 'date-fns';
@@ -36,39 +36,156 @@ const PAYMENT_OPTIONS = [
     { value: "Efectivo Bs", label: "Caja Chica (Bs)" }
 ];
 
+/**
+ * Caché a nivel de módulo para el escaneo de órdenes.
+ *
+ * Sobrevive a montar y desmontar la vista, así que entrar a Auditoría, irse a
+ * otra sección y volver ya no vuelve a cobrar el escaneo completo. Antes cada
+ * visita costaba miles de lecturas y con el plan gratuito de Firebase (50.000
+ * al día) bastaban unas diez visitas para agotar la cuota del día entero: a
+ * partir de ahí Firestore empieza a fallar y la vista se ve "bugueada".
+ */
+let cacheOrdenes: { datos: any[]; cargadoEn: number } | null = null;
+
+/** Tope del escaneo de órdenes. Solo se usan las que tengan pagos registrados. */
+const TOPE_ORDENES = 3000;
+
+/** "hace 3 min" — para que se vea de cuando son los datos en cache. */
+const antiguedad = (ms: number): string => {
+    const seg = Math.floor((Date.now() - ms) / 1000);
+    if (seg < 60) return 'recién cargado';
+    if (seg < 3600) return 'hace ' + Math.floor(seg / 60) + ' min';
+    return 'hace ' + Math.floor(seg / 3600) + ' h';
+};
+
 export function PaymentAuditView(_props: PaymentAuditViewProps) {
 
-    // ── Self-fetch (sin límite de 150 órdenes del dashboard)
-    const [selfOrdenes, setSelfOrdenes] = useState<any[]>([]);
+    // ── UI state (declarado antes: la carga de datos depende del mes elegido)
+    const [mainTab, setMainTab] = useState("ingresos");
+    const [isEditMode, setIsEditMode] = useState(false);
+    const [selectedMonth, setSelectedMonth] = useState<string>(new Date().getMonth().toString());
+    const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
+
+    // ── Datos
+    const [selfOrdenes, setSelfOrdenes] = useState<any[]>(() => cacheOrdenes?.datos ?? []);
     const [selfGastos, setSelfGastos] = useState<any[]>([]);
     const [selfPagos, setSelfPagos] = useState<any[]>([]);
-    const [isFetching, setIsFetching] = useState(true);
+    const [isFetching, setIsFetching] = useState(!cacheOrdenes);
+    const [lecturas, setLecturas] = useState(0);
+    const [cargadoEn, setCargadoEn] = useState<number | null>(cacheOrdenes?.cargadoEn ?? null);
 
-    const loadAll = async () => {
-        setIsFetching(true);
+    /** Primer y último instante del mes seleccionado, en hora local. */
+    const rangoDelMes = () => {
+        const y = parseInt(selectedYear);
+        const m = parseInt(selectedMonth);
+        return {
+            desde: new Date(y, m, 1, 0, 0, 0, 0),
+            hasta: new Date(y, m + 1, 0, 23, 59, 59, 999),
+        };
+    };
+
+    /**
+     * Gastos y nómina del mes elegido, filtrados EN EL SERVIDOR.
+     *
+     * Antes se descargaban los últimos 1.000 gastos y 500 pagos completos para
+     * después descartar en el navegador todo lo que no fuera del mes. Ahora solo
+     * viaja lo del mes: de ~1.500 lecturas a unas pocas decenas.
+     */
+    const cargarMovimientosDelMes = async () => {
+        const { desde, hasta } = rangoDelMes();
         try {
-            const [snapOrd, snapGas, snapPag] = await Promise.all([
-                getDocs(query(collection(db, "ordenes"), orderBy("fecha", "desc"), limit(3000))),
-                getDocs(query(collection(db, "gastos_insumos"), orderBy("fecha", "desc"), limit(1000))),
-                getDocs(query(collection(db, "pagos"), orderBy("fecha", "desc"), limit(500))),
+            // `gastos_insumos.fecha` siempre se guarda como Timestamp.
+            const qGastos = query(
+                collection(db, "gastos_insumos"),
+                where("fecha", ">=", Timestamp.fromDate(desde)),
+                where("fecha", "<=", Timestamp.fromDate(hasta))
+            );
+
+            // En `pagos` conviven dos formatos de fecha según qué pantalla creó el
+            // registro: Timestamp (los antiguos) y texto ISO (los de nómina).
+            // Firestore ordena por tipo, así que un solo rango dejaría fuera la
+            // mitad. Se consultan los dos y se fusionan por id.
+            const qPagosTs = query(
+                collection(db, "pagos"),
+                where("fecha", ">=", Timestamp.fromDate(desde)),
+                where("fecha", "<=", Timestamp.fromDate(hasta))
+            );
+            const qPagosTexto = query(
+                collection(db, "pagos"),
+                where("fecha", ">=", desde.toISOString()),
+                where("fecha", "<=", hasta.toISOString())
+            );
+
+            const [sg, sp1, sp2] = await Promise.all([
+                getDocs(qGastos), getDocs(qPagosTs), getDocs(qPagosTexto),
             ]);
-            setSelfOrdenes(snapOrd.docs.map(d => ({ id: d.id, ...d.data() })));
-            setSelfGastos(snapGas.docs.map(d => ({ id: d.id, ...d.data() })));
-            setSelfPagos(snapPag.docs.map(d => ({ id: d.id, ...d.data() })));
-        } catch {
-            toast.error("Error al cargar datos de auditoría");
+
+            const pagos = new Map<string, any>();
+            [...sp1.docs, ...sp2.docs].forEach(d => pagos.set(d.id, { id: d.id, ...d.data() }));
+
+            setSelfGastos(sg.docs.map(d => ({ id: d.id, ...d.data() })));
+            setSelfPagos(Array.from(pagos.values()));
+            setLecturas(n => n + sg.size + sp1.size + sp2.size);
+        } catch (e) {
+            console.error("Error cargando movimientos del mes:", e);
+            toast.error("No se pudieron cargar los gastos y la nómina del mes");
+        }
+    };
+
+    /**
+     * Escaneo de órdenes. Es la parte cara y no se puede filtrar por mes en el
+     * servidor: los abonos viven dentro del array `registroPagos` de cada orden,
+     * y Firestore no sabe consultar por dentro de un array de objetos. Por eso
+     * se hace una vez y se guarda en caché.
+     */
+    const cargarOrdenes = async (forzar = false) => {
+        if (!forzar && cacheOrdenes) {
+            setSelfOrdenes(cacheOrdenes.datos);
+            setCargadoEn(cacheOrdenes.cargadoEn);
+            return;
+        }
+        try {
+            const snap = await getDocs(
+                query(collection(db, "ordenes"), orderBy("fecha", "desc"), limit(TOPE_ORDENES))
+            );
+            const datos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            cacheOrdenes = { datos, cargadoEn: Date.now() };
+            setSelfOrdenes(datos);
+            setCargadoEn(cacheOrdenes.cargadoEn);
+            setLecturas(n => n + snap.size);
+        } catch (e) {
+            console.error("Error escaneando órdenes:", e);
+            toast.error("No se pudieron cargar las órdenes");
+        }
+    };
+
+    const loadAll = async (forzar = true) => {
+        setIsFetching(true);
+        setLecturas(0);
+        try {
+            await Promise.all([cargarOrdenes(forzar), cargarMovimientosDelMes()]);
         } finally {
             setIsFetching(false);
         }
     };
 
-    useEffect(() => { loadAll(); }, []);
+    // Al montar: usa la caché de órdenes si existe y pide solo el mes actual.
+    useEffect(() => {
+        (async () => {
+            setIsFetching(true);
+            await Promise.all([cargarOrdenes(false), cargarMovimientosDelMes()]);
+            setIsFetching(false);
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-    // ── UI state
-    const [mainTab, setMainTab] = useState("ingresos");
-    const [isEditMode, setIsEditMode] = useState(false);
-    const [selectedMonth, setSelectedMonth] = useState<string>(new Date().getMonth().toString());
-    const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
+    // Al cambiar de mes solo se recargan gastos y nómina: las órdenes ya están.
+    const primerRender = React.useRef(true);
+    useEffect(() => {
+        if (primerRender.current) { primerRender.current = false; return; }
+        cargarMovimientosDelMes();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedMonth, selectedYear]);
     const [searchTerm, setSearchTerm] = useState("");
     const [previewImage, setPreviewImage] = useState<string | null>(null);
     const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -377,11 +494,13 @@ export function PaymentAuditView(_props: PaymentAuditViewProps) {
                                 {mainTab === 'ingresos' ? "Auditoría de Ingresos" : "Auditoría de Egresos"}
                             </h1>
                             <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-                                {isFetching ? "Cargando datos sin límite..." : `${selfOrdenes.length} órdenes cargadas`}
+                                {isFetching
+                                    ? "Consultando..."
+                                    : `${selfOrdenes.length} órdenes · ${lecturas} lecturas${cargadoEn ? ` · ${antiguedad(cargadoEn)}` : ''}`}
                             </p>
                         </div>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={loadAll} disabled={isFetching} className="shrink-0 rounded-xl text-slate-400 hover:text-blue-600" title="Recargar datos">
+                    <Button variant="ghost" size="icon" onClick={() => loadAll(true)} disabled={isFetching} className="shrink-0 rounded-xl text-slate-400 hover:text-blue-600" title="Recargar datos">
                         <RefreshCw size={16} className={isFetching ? "animate-spin" : ""} />
                     </Button>
                 </div>
@@ -414,7 +533,7 @@ export function PaymentAuditView(_props: PaymentAuditViewProps) {
             {isFetching && (
                 <div className="flex flex-col items-center justify-center py-16 gap-3 text-slate-400">
                     <Loader2 size={32} className="animate-spin text-blue-500" />
-                    <p className="text-[11px] font-black uppercase tracking-widest">Cargando todas las órdenes sin límite...</p>
+                    <p className="text-[11px] font-black uppercase tracking-widest">Consultando movimientos del mes...</p>
                 </div>
             )}
 

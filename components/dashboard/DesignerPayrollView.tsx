@@ -32,13 +32,15 @@ import { type Designer } from "@/lib/services/designers-service"
 // AÑADIDO: cargarHistorialMasivo
 import { createOrden, actualizarOrden, buscarOrdenesHistoricas, cargarHistorialMasivo } from "@/lib/services/ordenes-service"
 import { addDesigner, deleteDesigner } from "@/lib/services/designers-service"
-import { getLastOrderNumber } from "@/lib/firebase/ordenes"
+import { getNextOrderNumber } from "@/lib/firebase/ordenes"
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
 import { cn } from "@/lib/utils"
 
 // Componentes adicionales
 import { TeamManagement } from "./TeamManagement"
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
+import { normalizarEstadoPago } from '@/lib/utils/estados'
+import { claveFechaLocal } from '@/lib/utils/fechas'
 
 // --- CONSTANTES ---
 const PAYMENT_METHODS = [
@@ -64,10 +66,11 @@ interface DesignerPayrollProps {
     ordenes: OrdenServicio[]
     designers: Designer[]
     bcvRate: number 
-    eurRate?: number 
+    eurRate?: number
+    usdtRate?: number
 }
 
-export function DesignerPayrollView({ ordenes: ordenesLocales, designers, bcvRate, eurRate = 0 }: DesignerPayrollProps) {
+export function DesignerPayrollView({ ordenes: ordenesLocales, designers, bcvRate, eurRate = 0, usdtRate = 0 }: DesignerPayrollProps) {
     const [searchTerm, setSearchTerm] = useState("")
     const [activeTab, setActiveTab] = useState("pendientes")
     const [expandedDesigner, setExpandedDesigner] = useState<string | null>(null)
@@ -187,7 +190,13 @@ export function DesignerPayrollView({ ordenes: ordenesLocales, designers, bcvRat
 
             const newTotalUSD = currentItems.reduce((acc, item) => acc + ((item.precioUnitario || 0) * (item.cantidad || 1)), 0);
             const montoPagado = parentOrder.montoPagadoUSD || 0;
-            const newStatus = (montoPagado >= newTotalUSD - 0.01) ? "PAGADO" : (parentOrder.estadoPago === "PAGADO" ? "PENDIENTE" : parentOrder.estadoPago);
+            // Se normaliza antes de comparar: si la orden venía guardada como
+            // "Pagado", esta comparación fallaba y la orden seguía marcada como
+            // cobrada aunque su total acabara de subir.
+            const estadoPrevio = normalizarEstadoPago(parentOrder.estadoPago);
+            const newStatus = (montoPagado >= newTotalUSD - 0.01)
+                ? "PAGADO"
+                : (estadoPrevio === "PAGADO" ? "PENDIENTE" : estadoPrevio);
 
             await actualizarOrden(task.orderId, { items: currentItems, totalUSD: newTotalUSD, estadoPago: newStatus as any });
             toast.success("Estado de facturación actualizado");
@@ -458,7 +467,7 @@ export function DesignerPayrollView({ ordenes: ordenesLocales, designers, bcvRat
             <AssignmentModal isOpen={isAssignModalOpen} onClose={() => setIsAssignModalOpen(false)} designers={designers} loading={isProcessing} onConfirm={async (data: any) => {
                 setIsProcessing(true);
                 try {
-                    const lastNum = await getLastOrderNumber();
+                    const nextNum = await getNextOrderNumber();
                     const precioReal = parseFloat(data.precioDiseno || "0");
                     const precioCliente = data.facturarDiseno ? precioReal : 0;
                     const items: ItemOrden[] = [{ nombre: `Diseño: ${data.detalles}`, tipoServicio: "DISENO", cantidad: 1, unidad: "und", precioUnitario: precioCliente, empleadoAsignado: designers.find(d => d.id === data.designerId)?.name || "Sin Asignar", designPaymentStatus: 'PENDIENTE', costoInterno: precioReal } as any];
@@ -466,13 +475,16 @@ export function DesignerPayrollView({ ordenes: ordenesLocales, designers, bcvRat
                         const materialPrice = (parseFloat(data.ancho || "0") * parseFloat(data.alto || "0") * parseFloat(data.precioM2 || "10")) / 10000;
                         items.push({ nombre: `Producción: ${data.material} (${data.ancho}x${data.alto}cm)`, tipoServicio: "IMPRESION", cantidad: 1, unidad: "und", precioUnitario: materialPrice, materialDeImpresion: data.material } as any);
                     }
-                    const totalUSD = items.reduce((s, i) => s + i.precioUnitario, 0);
-                    await createOrden({ ordenNumero: String(lastNum + 1), fecha: new Date().toISOString(), cliente: { nombreRazonSocial: data.cliente, rifCedula: "V-EXPRESS", telefono: "N/A", correo: "N/A", domicilioFiscal: "N/A", personaContacto: "N/A" }, items, serviciosSolicitados: { impresionDigital: false, impresionGranFormato: data.incluirMaterial, corteLaser: false, laminacion: false, avisoCorporeo: false, rotulacion: false, instalacion: false, senaletica: false }, descripcionDetallada: data.detalles || "Express", totalUSD, montoPagadoUSD: 0, estadoPago: totalUSD === 0 ? EstadoPago.PAGADO : EstadoPago.PENDIENTE, estado: EstadoOrden.PENDIENTE, designerId: data.designerId });
+                    // Se multiplica por cantidad igual que en el resto del sistema.
+                    // Hoy siempre es 1, pero si algún día se permite pedir varias
+                    // unidades, este total dejaría de cuadrar sin avisar.
+                    const totalUSD = items.reduce((s, i) => s + (i.precioUnitario || 0) * (i.cantidad || 1), 0);
+                    await createOrden({ ordenNumero: String(nextNum), fecha: new Date().toISOString(), fechaEntrega: claveFechaLocal(new Date(Date.now() + 86400000 * 2)), cliente: { nombreRazonSocial: data.cliente, rifCedula: "V-EXPRESS", telefono: "N/A", correo: "N/A", domicilioFiscal: "N/A", personaContacto: "N/A" }, items, serviciosSolicitados: { impresionDigital: false, impresionGranFormato: data.incluirMaterial, corteLaser: false, laminacion: false, avisoCorporeo: false, rotulacion: false, instalacion: false, senaletica: false }, descripcionDetallada: data.detalles || "Express", totalUSD, montoPagadoUSD: 0, estadoPago: totalUSD === 0 ? 'PAGADO' : 'PENDIENTE', registroPagos: [], totalBS: 0, estado: EstadoOrden.PENDIENTE, designerId: data.designerId });
                     setIsAssignModalOpen(false); toast.success("Tarea express creada exitosamente");
                 } catch (e) { toast.error("Error al crear la tarea"); } 
                 finally { setIsProcessing(false); }
             }} />
-            <OrderDetailModal open={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} orden={selectedOrder} bcvRate={bcvRate} />
+            <OrderDetailModal open={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} orden={selectedOrder} rates={{ usd: bcvRate, eur: eurRate, usdt: usdtRate }} />
             <ImagePreviewModal imageUrl={previewImageUrl} onClose={() => setPreviewImageUrl(null)} onDownload={() => previewImageUrl && handleDownloadImage(previewImageUrl)} />
         </motion.div>
         </TooltipProvider>

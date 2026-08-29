@@ -7,13 +7,16 @@ import {
     ChevronDown, Megaphone, TrendingUp, TrendingDown, 
     AlertTriangle, Clock, Palette, Users, CheckCircle,
     Package, ChevronRight, Landmark, Receipt,
-    Eye, DollarSign
+    Eye, DollarSign, CalendarClock, CircleDot
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 
 // IMPORTAMOS LA NUEVA FUNCIÓN OPTIMIZADA (Ajusta la ruta si es necesario)
 import { subscribeToDeudasActivas } from "@/lib/services/ordenes-service";
+import { claveMesLocal } from '@/lib/utils/fechas'
+import { esAnulada, tieneDeuda } from '@/lib/utils/estados'
+import { asistenciaDe, resumenBloques } from '@/lib/types/horarios'
 
 export type NewsAction = 
     | { type: 'NAVIGATE', payload: string }
@@ -56,6 +59,8 @@ interface NewsBarProps {
     ordenes?: any[]; // Esta se sigue usando para los Diseños
     designers?: any[];
     gastos?: any[];
+    /** Horario estandar del equipo, para el modulo "Equipo de Hoy". */
+    horarios?: any[];
     onAction?: (action: NewsAction) => void; 
 }
 
@@ -75,6 +80,7 @@ export function NewsBar({
     empleados = [], 
     ordenes = [], 
     designers = [],
+    horarios = [],
     gastos = [],
     onAction
 }: NewsBarProps) {
@@ -129,7 +135,7 @@ export function NewsBar({
         // 2. DEUDAS CRÍTICAS (Ahora lee del query optimizado 'deudasHistoricas')
         const alertasDeuda: AlertItem[] = [];
         deudasHistoricas.forEach(o => {
-            if (o.estadoPago === 'ANULADO') return;
+            if (esAnulada(o)) return;
             const deuda = (Number(o.totalUSD) || 0) - (Number(o.montoPagadoUSD) || 0);
             
             if (deuda > 0.01) {
@@ -191,7 +197,7 @@ export function NewsBar({
 
         // 4. EMPLEADOS
         const alertasEmpleado: AlertItem[] = [];
-        const mesActual = hoy.toISOString().slice(0, 7);
+        const mesActual = claveMesLocal(hoy);
         empleados.forEach(emp => {
             const esSemanal = emp.frecuenciaPago === 'Semanal';
             let cobrado = false;
@@ -288,13 +294,41 @@ export function NewsBar({
             result.push({ id: 'insumos', title: 'Inventario y Compras', summary: `${alertasInsumo.length} adquisiciones recientes`, icon: Package, color: 'text-indigo-600', bgColor: 'bg-indigo-50 dark:bg-indigo-500/10', alerts: alertasInsumo });
         }
 
+        // --- QUIÉN VIENE HOY ---
+        // Sale del horario estándar del equipo: quién trabaja hoy y en qué tramos.
+        const asistencia = asistenciaDe(horarios);
+        if (asistencia.length > 0) {
+            const dentro = asistencia.filter(a => a.presenteAhora).length;
+            result.push({
+                id: 'asistencia',
+                title: 'Equipo de Hoy',
+                summary: dentro > 0
+                    ? `${asistencia.length} en turno · ${dentro} en el taller ahora`
+                    : `${asistencia.length} en turno hoy`,
+                icon: CalendarClock,
+                color: 'text-teal-600',
+                bgColor: 'bg-teal-50 dark:bg-teal-500/10',
+                alerts: asistencia.map(a => ({
+                    id: `asis-${a.empleadoId}`,
+                    title: a.empleadoNombre,
+                    subtitle: a.presenteAhora ? 'En el taller ahora' : 'Entra hoy',
+                    description: resumenBloques(a.bloques),
+                    icon: a.presenteAhora ? CircleDot : Clock,
+                    color: a.presenteAhora
+                        ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+                        : 'text-teal-500 bg-teal-50 dark:bg-teal-500/10',
+                    action: { type: 'NAVIGATE', payload: 'horarios' } as NewsAction,
+                })),
+            });
+        }
+
         return result.sort((a, b) => {
             if (a.id === 'deudas') return -1;
             if (b.id === 'deudas') return 1;
             return b.alerts.length - a.alerts.length;
         });
 
-    }, [rates, prevRates, gastosFijos, empleados, ordenes, gastos, deudasHistoricas]);
+    }, [rates, prevRates, gastosFijos, empleados, ordenes, gastos, deudasHistoricas, horarios]);
 
     const marqueeText = modulos.length > 0 
         ? modulos.map(m => `🔔 ${m.title}: ${m.summary}`).join("   •   ")

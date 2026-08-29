@@ -46,6 +46,7 @@ import { toast } from 'sonner'
 // FIREBASE
 import { db } from "@/lib/firebase"
 import { collection, doc, updateDoc, arrayUnion, writeBatch, onSnapshot, getDocs, query, where, getDoc } from "firebase/firestore"
+import { normalizarEstadoPago, esAnulada, esAbonada } from '@/lib/utils/estados'
 
 // --- Caché local del análisis de deudas (evita re-leer Firestore en cada recarga) ---
 const DEUDAS_CACHE_KEY = "smr_deudas_globales_v1";
@@ -393,10 +394,15 @@ export function ClientsAndPaymentsView({
 
         const procesarLista = (lista: any[]) => {
             lista.forEach(o => {
-                if (o.estadoPago === 'PENDIENTE' || o.estadoPago === 'ABONADO') {
+                // Comparación tolerante a cómo esté escrito el estado. Antes se
+                // comparaba solo contra MAYÚSCULAS, así que una orden guardada
+                // como "Pendiente" (las que crea Pago Diseños) no entraba en
+                // ninguna de las dos ramas y desaparecía del estado de cuenta.
+                const estado = normalizarEstadoPago(o.estadoPago);
+                if (estado === 'PENDIENTE' || estado === 'ABONADO') {
                     mapUnpaid.set(o.id, o);
                     mapPaid.delete(o.id); // Aseguramos que no esté en ambas
-                } else if (o.estadoPago === 'PAGADO') {
+                } else if (estado === 'PAGADO') {
                     mapPaid.set(o.id, o);
                     mapUnpaid.delete(o.id); // Desaparece instantáneamente de morosos
                 }
@@ -423,7 +429,7 @@ export function ClientsAndPaymentsView({
 
         // 3. PROCESAR MOROSAS
         todasUnpaid.forEach((orden: any) => {
-            if (orden.estado === 'ANULADO' || orden.estadoPago === 'ANULADO') return;
+            if (orden.estado === 'ANULADO' || esAnulada(orden)) return;
 
             const total = Number(orden.totalUSD) || 0;
             const pagado = Number(orden.montoPagadoUSD) || 0;
@@ -890,7 +896,7 @@ export function ClientsAndPaymentsView({
                                                             {formatCurrency(Number(orden.totalUSD) - (Number(orden.montoPagadoUSD) || 0))}
                                                         </TableCell>
                                                         <TableCell className="text-center">
-                                                            <Badge className={cn("rounded-full px-4 py-1 text-[9px] font-black uppercase tracking-widest border-0", orden.estadoPago === EstadoPago.ABONADO ? "bg-amber-100 text-amber-600" : "bg-rose-100 text-rose-600")}>{orden.estadoPago}</Badge>
+                                                            <Badge className={cn("rounded-full px-4 py-1 text-[9px] font-black uppercase tracking-widest border-0", esAbonada(orden) ? "bg-amber-100 text-amber-600" : "bg-rose-100 text-rose-600")}>{normalizarEstadoPago(orden.estadoPago)}</Badge>
                                                         </TableCell>
                                                         <TableCell className="text-right">
                                                             <Button 

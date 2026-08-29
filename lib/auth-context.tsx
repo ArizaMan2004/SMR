@@ -13,9 +13,15 @@ export interface UserData {
   nombre: string
   apellido: string
   // ✨ NUEVO ROL: PRODUCCION EN LUGAR DE INSTALADOR
-  rol: 'ADMIN' | 'VENDEDOR' | 'CAJERO' | 'DISENADOR' | 'IMPRESOR' | 'OPERADOR_LASER' | 'PRODUCCION' | 'EMPLEADO'
+  // Texto libre: además de los rangos de fábrica, el admin puede crear los suyos
+  // desde Accesos y Roles. Las vistas de cada rango viven en Firestore.
+  rol: string
   isActive: boolean
   registroCodigo?: string
+  /** Vistas concedidas a esta persona por encima de lo que da su rango. */
+  vistasExtra?: string[]
+  /** Vistas retiradas a esta persona aunque su rango las incluya. */
+  vistasBloqueadas?: string[]
 }
 
 interface AuthContextType {

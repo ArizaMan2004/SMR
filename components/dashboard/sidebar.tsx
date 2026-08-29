@@ -9,7 +9,7 @@ import { LogOut, X, ChevronDown } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth-context"
-import { NotificationBell } from "@/components/dashboard/NotificationBell"
+import { usePermisos } from "@/lib/contexts/permisos-context"
 
 // Interfaz adaptada para soportar protección por roles
 export interface NavItem {
@@ -45,7 +45,7 @@ export default function Sidebar({
     const [openMenus, setOpenMenus] = useState<string[]>([]);
 
     const { userData } = useAuth();
-    const userRole = userData?.rol || 'EMPLEADO';
+    const { puedeVer, rolActual } = usePermisos();
 
     const toggleMenu = (id: string) => {
         setOpenMenus(prev =>
@@ -61,25 +61,26 @@ export default function Sidebar({
         }
     }, [setActiveView, setIsMobileOpen]);
 
-    // --- FILTRO DE SEGURIDAD POR ROL ---
-    const visibleNavItems = navItems.filter(item => {
-        if (item.roles && !item.roles.includes(userRole)) return false;
-        return true;
-    }).map(item => {
-        if (item.children) {
-            return {
-                ...item,
-                children: item.children.filter(child => !child.roles || child.roles.includes(userRole))
+    // --- FILTRO DE SEGURIDAD POR PERMISOS ---
+    // Se pregunta por cada vista al mismo sitio que usa el dashboard para
+    // renderizar. Si aquí sale, allá abre: no hay forma de que se contradigan.
+    const visibleNavItems = navItems
+        .map(item => {
+            // Los grupos (Administración, Herramientas...) no son vistas: se
+            // quedan si les sobrevive al menos un hijo visible.
+            if (item.children) {
+                return { ...item, children: item.children.filter(child => puedeVer(child.id)) };
             }
-        }
-        return item;
-    });
+            return item;
+        })
+        .filter(item => (item.children ? item.children.length > 0 : puedeVer(item.id)));
 
     const userInitials = userData && userData.nombre && userData.apellido
         ? `${userData.nombre.charAt(0)}${userData.apellido.charAt(0)}`.toUpperCase()
         : "U";
     const userName = userData ? `${userData.nombre} ${userData.apellido}` : "Cargando...";
-    const userRoleLabel = userData ? userData.rol : "...";
+    // Nombre legible del rango ("Jefe de Producción"), no el identificador crudo.
+    const userRoleLabel = rolActual?.label ?? userData?.rol ?? "...";
 
     return (
         <>
@@ -208,11 +209,9 @@ export default function Sidebar({
 
                 <div className="p-4 mt-auto border-t border-slate-100 dark:border-slate-800/60 space-y-3 shrink-0">
 
-                    {/* CAMPANA DE NOTIFICACIONES */}
-                    <div className="flex items-center gap-2 px-1">
-                      <NotificationBell onNavigate={(view) => { if (onNavigate) onNavigate(view); setIsMobileOpen(false); }} />
-                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Notificaciones</span>
-                    </div>
+                    {/* La campana vivía aquí, al fondo del menú: el desplegable se
+                        abría pegado al borde inferior y no se veían las notificaciones.
+                        Ahora está solo en la cabecera, que es donde se espera. */}
 
                     {/* PERFIL DINÁMICO CLICKEABLE */}
                     <div

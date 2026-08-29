@@ -10,6 +10,8 @@ import {
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatBs } from "@/lib/services/bcv-service";
+import { claveMesLocal, mesDeValor, tiempoDe } from "@/lib/utils/fechas";
+import { sueldoPendienteDe, comisionesPendientesDe } from "@/lib/utils/nomina";
 
 const TIPO_TAREA_LABEL: Record<string, string> = {
     SERVICIO: 'Servicio',
@@ -28,7 +30,7 @@ export function EmployeeFinancesView({ empleados, pagos, tareas = [], currentUse
         if (!myProfile) return [];
         return pagos
             .filter((p: any) => p.usuarioId === currentUserId || p.empleadoId === myProfile.id)
-            .sort((a: any, b: any) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+            .sort((a: any, b: any) => tiempoDe(b.fecha) - tiempoDe(a.fecha));
     }, [pagos, currentUserId, myProfile]);
 
     const myTareas = useMemo(() => {
@@ -55,9 +57,11 @@ export function EmployeeFinancesView({ empleados, pagos, tareas = [], currentUse
     , [tareasAprobadas]);
 
     const totalPagadoEsteMes = useMemo(() => {
-        const mesActual = new Date().toISOString().slice(0, 7);
+        const mesActual = claveMesLocal();
+        // Mismo criterio que usa el admin en Gestión de Personal, para que el
+        // empleado y el jefe no vean cifras distintas del mismo mes.
         return myPayments
-            .filter((p: any) => (p.mesRelativo === mesActual) || (p.fecha && p.fecha.startsWith(mesActual)))
+            .filter((p: any) => (p.mesRelativo || mesDeValor(p.fecha)) === mesActual)
             .reduce((sum: number, p: any) => sum + (Number(p.totalUSD) || 0), 0);
     }, [myPayments]);
 
@@ -73,19 +77,12 @@ export function EmployeeFinancesView({ empleados, pagos, tareas = [], currentUse
         );
     }
 
-    const mesActualStr = new Date().toISOString().slice(0, 7);
     const esSemanal = myProfile.frecuenciaPago === 'Semanal';
-    const comisionesManuales = myProfile.comisiones?.reduce((a: any, c: any) => a + c.monto, 0) || 0;
 
-    let sueldoPendiente = myProfile.montoSueldo;
-    if (esSemanal) {
-        if (myProfile.ultimoPagoIso) {
-            const diffDays = Math.floor((new Date().getTime() - new Date(myProfile.ultimoPagoIso).getTime()) / 86400000);
-            if (diffDays < 6) sueldoPendiente = 0;
-        }
-    } else {
-        if (myProfile.ultimoPagoMes === mesActualStr) sueldoPendiente = 0;
-    }
+    // Exactamente el mismo cálculo que ve el admin en Gestión de Personal:
+    // antes cada vista lo hacía por su cuenta y podían no coincidir.
+    const comisionesManuales = comisionesPendientesDe(myProfile);
+    const sueldoPendiente = sueldoPendienteDe(myProfile);
 
     const totalPendienteUSD = sueldoPendiente + comisionesManuales + taskComPendiente;
 

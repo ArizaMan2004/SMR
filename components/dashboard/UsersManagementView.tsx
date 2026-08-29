@@ -14,23 +14,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { 
-    Users, Ban, CheckCircle2, Trash2, Loader2, 
-    Key, Plus, Copy, Check, ShieldCheck, Ticket, Pencil
+import {
+    Users, Ban, CheckCircle2, Trash2, Loader2,
+    Key, Plus, Copy, Check, ShieldCheck, Ticket, Pencil, UserCog, SlidersHorizontal
 } from 'lucide-react'
 import { toast } from 'sonner'
 
-const ROLES = [
-    { id: 'ADMIN', label: 'Administrador Principal', color: 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400' },
-    { id: 'VENDEDOR', label: 'Ventas / Atención', color: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400' },
-    { id: 'DISENADOR', label: 'Diseño Gráfico', color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-400' },
-    { id: 'IMPRESOR', label: 'Operador Impresión', color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-400' },
-    { id: 'OPERADOR_LASER', label: 'Operador Corte/Láser', color: 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400' },
-    { id: 'PRODUCCION', label: 'Jefe de Producción (Armado)', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' },
-    { id: 'EMPLEADO', label: 'Empleado Base (Espera)', color: 'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-300' }
-]
+import { cn } from '@/lib/utils'
+import { usePermisos } from '@/lib/contexts/permisos-context'
+import { ROL_POR_DEFECTO, COLOR_ROL_POR_DEFECTO } from '@/lib/roles'
+import { RolesPermissionsPanel } from '@/components/dashboard/RolesPermissionsPanel'
+import { UserPermissionsDialog } from '@/components/dashboard/UserPermissionsDialog'
+
+// Antes los rangos estaban escritos a mano justo aquí, y por eso faltaba CAJERO:
+// existía en el sistema pero no se podía asignar. Ahora salen del contexto de
+// permisos, así que los rangos que crees aparecen solos en este desplegable.
 
 export function UsersManagementView() {
+    const { roles } = usePermisos()
     const [usuarios, setUsuarios] = useState<any[]>([])
     const [codigos, setCodigos] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
@@ -39,6 +40,7 @@ export function UsersManagementView() {
 
     // --- ESTADOS PARA EDICIÓN DE PERFIL ---
     const [editingUser, setEditingUser] = useState<any | null>(null)
+    const [permisosUser, setPermisosUser] = useState<any | null>(null)
     const [editForm, setEditForm] = useState({ nombre: '', apellido: '' })
 
     // Cargar Usuarios y Códigos en tiempo real
@@ -159,17 +161,32 @@ export function UsersManagementView() {
                     <TabsTrigger value="usuarios" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                         <Users className="w-4 h-4 mr-2 inline-block"/> Empleados Registrados
                     </TabsTrigger>
+                    <TabsTrigger value="permisos" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
+                        <SlidersHorizontal className="w-4 h-4 mr-2 inline-block"/> Rangos y Permisos
+                    </TabsTrigger>
                     <TabsTrigger value="codigos" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                         <Key className="w-4 h-4 mr-2 inline-block"/> Códigos de Invitación
                     </TabsTrigger>
                 </TabsList>
 
                 {/* ==========================================
+                    PESTAÑA: QUÉ VE CADA RANGO
+                ========================================== */}
+                <TabsContent value="permisos" className="mt-0">
+                    <RolesPermissionsPanel usuarios={usuarios} />
+                </TabsContent>
+
+                {/* ==========================================
                     PESTAÑA 1: GESTIÓN DE USUARIOS
                 ========================================== */}
                 <TabsContent value="usuarios" className="mt-0">
+                    {/* La tarjeta necesita overflow-hidden por las esquinas redondeadas,
+                        pero eso RECORTABA la tabla en móvil: con 4 columnas y un
+                        selector de 180px no cabe en 375px, y la columna de acciones
+                        quedaba inalcanzable. El contenedor interno la deja desplazar. */}
                     <Card className="rounded-[2.5rem] border-0 shadow-xl bg-white dark:bg-[#1c1c1e] overflow-hidden">
-                        <Table>
+                      <div className="overflow-x-auto custom-scrollbar">
+                        <Table className="min-w-[640px]">
                             <TableHeader className="bg-slate-50 dark:bg-white/5">
                                 <TableRow className="border-0">
                                     <TableHead className="py-4 sm:py-6 px-3 sm:px-8 text-[10px] font-black uppercase text-slate-400">Usuario</TableHead>
@@ -185,8 +202,12 @@ export function UsersManagementView() {
                                     </TableRow>
                                 )}
                                 {usuarios.map(u => {
-                                    const roleConfig = ROLES.find(r => r.id === u.rol) || ROLES[4];
-                                    
+                                    // Si el rango del usuario ya no existe (lo borraron), no reventamos:
+                                    // se muestra en gris con su identificador crudo.
+                                    const roleConfig = roles.find(r => r.id === u.rol)
+                                        ?? { id: u.rol || ROL_POR_DEFECTO, label: u.rol || 'Sin rango', color: COLOR_ROL_POR_DEFECTO };
+                                    const tieneExcepciones = (u.vistasExtra?.length || 0) + (u.vistasBloqueadas?.length || 0) > 0;
+
                                     return (
                                         <TableRow key={u.id} className="border-b border-slate-50 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/5">
                                             <TableCell className="py-5 px-3 sm:px-8">
@@ -209,11 +230,16 @@ export function UsersManagementView() {
                                                         <SelectValue />
                                                     </SelectTrigger>
                                                     <SelectContent className="rounded-2xl">
-                                                        {ROLES.map(r => (
+                                                        {roles.map(r => (
                                                             <SelectItem key={r.id} value={r.id} className="text-xs font-bold uppercase">{r.label}</SelectItem>
                                                         ))}
                                                     </SelectContent>
                                                 </Select>
+                                                {tieneExcepciones && (
+                                                    <Badge className="mt-1.5 rounded-full px-2 py-0 text-[8px] font-black uppercase border-0 bg-amber-100 text-amber-700">
+                                                        Permisos a medida
+                                                    </Badge>
+                                                )}
                                             </TableCell>
                                             <TableCell className="py-5 text-center">
                                                 <Badge className={`rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-widest border-0 ${u.isActive ? "bg-emerald-100 text-emerald-600" : "bg-red-100 text-red-600 animate-pulse"}`}>
@@ -234,6 +260,20 @@ export function UsersManagementView() {
                                                         title="Editar Datos"
                                                     >
                                                         <Pencil className="w-4 h-4" />
+                                                    </Button>
+
+                                                    {/* PERMISOS INDIVIDUALES DE ESTA PERSONA */}
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        onClick={() => setPermisosUser(u)}
+                                                        className={cn(
+                                                            "h-9 w-9 rounded-xl transition-colors hover:bg-amber-50 hover:text-amber-600",
+                                                            tieneExcepciones ? "text-amber-500" : "text-slate-400"
+                                                        )}
+                                                        title="Permisos de esta persona"
+                                                    >
+                                                        <UserCog className="w-4 h-4" />
                                                     </Button>
 
                                                     <Button 
@@ -260,6 +300,7 @@ export function UsersManagementView() {
                                 })}
                             </TableBody>
                         </Table>
+                      </div>
                     </Card>
                 </TabsContent>
 
@@ -389,6 +430,9 @@ export function UsersManagementView() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* PERMISOS A MEDIDA DE UNA PERSONA CONCRETA */}
+            <UserPermissionsDialog usuario={permisosUser} onClose={() => setPermisosUser(null)} />
 
         </div>
     )

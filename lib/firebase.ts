@@ -47,3 +47,32 @@ function createDb(): Firestore {
 }
 
 export const db = createDb()
+
+/**
+ * Enganche de INSPECCIÓN, solo en desarrollo.
+ *
+ * Expone la instancia de Firestore en `window.__smr` para poder revisar desde
+ * la consola cómo están escritos los datos de verdad (tipos de fecha, nombres
+ * de campo, mayúsculas de los estados...) sin tener que adivinarlo leyendo el
+ * código. Nunca se activa en producción: `process.env.NODE_ENV` es "production"
+ * en el build y el bloque entero desaparece.
+ */
+if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+  // Se cargan bajo demanda para no engordar el bundle de desarrollo.
+  ;(window as any).__smr = {
+    db,
+    app,
+    /** Lee N documentos de una colección y los devuelve en crudo. */
+    async leer(coleccion: string, n = 5) {
+      const { collection, getDocs, query, limit } = await import('firebase/firestore')
+      const snap = await getDocs(query(collection(db, coleccion), limit(n)))
+      return snap.docs.map(d => ({ __id: d.id, ...d.data() }))
+    },
+    /** Igual, pero SOLO desde la caché local: no consume cuota de Firestore. */
+    async leerCache(coleccion: string) {
+      const { collection, getDocsFromCache } = await import('firebase/firestore')
+      const snap = await getDocsFromCache(collection(db, coleccion))
+      return snap.docs.map(d => ({ __id: d.id, ...d.data() }))
+    },
+  }
+}

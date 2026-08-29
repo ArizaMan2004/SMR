@@ -16,12 +16,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { db } from "@/lib/firebase"; 
-import { 
-  collection, addDoc, updateDoc, 
-  deleteDoc, doc, serverTimestamp, onSnapshot
+import {
+  collection, addDoc, updateDoc,
+  deleteDoc, doc, serverTimestamp, onSnapshot, writeBatch
 } from "firebase/firestore";
+import { toast } from "sonner";
 import { formatBs } from "@/lib/services/bcv-service";
 import { cn } from "@/lib/utils";
+import { claveMesLocal, mesDeValor, tiempoDe } from "@/lib/utils/fechas";
+import { calcularDeuda, sueldoPendienteDe, comisionesPendientesDe } from "@/lib/utils/nomina";
 
 // --- CONSTANTES ---
 const PAYMENT_METHODS = [
@@ -108,7 +111,7 @@ export function EmpleadosView({ empleados, pagos, rates, tareas = [] }: Empleado
   const [editTarget, setEditTarget] = useState<any>(null);
   const [usuariosApp, setUsuariosApp] = useState<any[]>([]);
   const [filtroHistorial, setFiltroHistorial] = useState("todos");
-  const [selectedMonthHist, setSelectedMonthHist] = useState<string>(new Date().toISOString().slice(0, 7));
+  const [selectedMonthHist, setSelectedMonthHist] = useState<string>(claveMesLocal());
   
   // Estados para Pagos
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
@@ -202,46 +205,51 @@ export function EmpleadosView({ empleados, pagos, rates, tareas = [] }: Empleado
   };
 
   const confirmPayment = async () => {
-    if (!selectedEmployee || !rates?.usd) return;
-    
-    setIsProcessingPayment(true);
-    const emp = selectedEmployee;
-    const mesActual = new Date().toISOString().slice(0, 7);
-    const hoyIso = new Date().toISOString();
-    const esSemanal = emp.frecuenciaPago === 'Semanal';
-    
-    let sueldo = emp.montoSueldo;
-    if (esSemanal) {
-        if (emp.ultimoPagoIso) {
-            const diffDays = Math.floor((new Date().getTime() - new Date(emp.ultimoPagoIso).getTime()) / 86400000);
-            if (diffDays < 6) sueldo = 0; 
-        }
-    } else {
-        if (emp.ultimoPagoMes === mesActual) sueldo = 0; 
+    if (!selectedEmployee) return;
+
+    // Antes esto salía en silencio y el botón parecía roto: el usuario hacía
+    // clic y no pasaba absolutamente nada, sin ninguna explicación.
+    if (!rates?.usd) {
+        toast.error("No hay tasa BCV cargada. Espera a que actualice para poder registrar el monto en bolívares.");
+        return;
     }
 
-    const tCom = emp.comisiones?.reduce((a: number, c: any) => a + c.monto, 0) || 0;
+    // Guarda contra el doble clic: sin esto se registraban dos pagos idénticos.
+    if (isProcessingPayment) return;
 
-    const tareasAprobadas = tareas.filter(t =>
-        t.empleadoDbId === emp.id && t.estado === 'APROBADA' && t.estadoPago === 'PENDIENTE'
-    );
-    const taskCom = tareasAprobadas.reduce((s: number, t: any) => s + (t.montoComision || 0), 0);
+    setIsProcessingPayment(true);
+    const emp = selectedEmployee;
+    const mesActual = claveMesLocal();
+    const hoyIso = new Date().toISOString();
+    // Se congela la lista de comisiones que se va a pagar. Al terminar se borran
+    // SOLO estas por id: si mientras tanto alguien le carga otra comisión, antes
+    // se perdía sin pagarse porque el cierre hacía `comisiones: []` a ciegas.
+    const comisionesAPagar = [...(emp.comisiones || [])];
+    const idsComisionesPagadas = new Set(comisionesAPagar.map((c: any) => c.id));
 
-    const totalUSD = sueldo + tCom + taskCom;
+    const deuda = calcularDeuda(emp, tareas);
+    const sueldo = deuda.sueldo;
+    const tareasAprobadas = deuda.tareasPorPagar;
+    const totalUSD = deuda.total;
 
     if (totalUSD <= 0) {
-        alert("Este empleado no tiene montos pendientes para transferir en este periodo.");
+        toast.error("Este empleado no tiene montos pendientes para transferir en este periodo.");
         setIsProcessingPayment(false);
         return;
     }
 
     try {
-      await addDoc(collection(db, "pagos"), {
+      // Todo el pago se confirma de una sola vez. Antes eran tres operaciones
+      // sueltas: si fallaba la segunda o la tercera, quedaba registrado el pago
+      // pero las tareas seguían "por pagar" y se volvían a pagar después.
+      const batch = writeBatch(db);
+
+      batch.set(doc(collection(db, "pagos")), {
         empleadoId: emp.id,
         nombre: emp.nombre,
         conceptos: [
           ...(sueldo > 0 ? [{ tipo: 'Sueldo', monto: sueldo, motivo: paymentConfig.intervalo }] : []),
-          ...(emp.comisiones?.map((c: any) => ({ tipo: 'Comisión', monto: c.monto, motivo: c.desc })) || []),
+          ...comisionesAPagar.map((c: any) => ({ tipo: 'Comisión', monto: c.monto, motivo: c.desc })),
           ...tareasAprobadas.map((t: any) => ({ tipo: 'Bono Tarea', monto: t.montoComision, motivo: t.nombreTarea || t.tipoTarea || 'Tarea completada' })),
         ],
         totalUSD,
@@ -255,20 +263,25 @@ export function EmpleadosView({ empleados, pagos, rates, tareas = [] }: Empleado
         usuarioId: emp.usuarioId || null
       });
 
-      await Promise.all(tareasAprobadas.map((t: any) =>
-        updateDoc(doc(db, "empleado_tareas", t.id), { estadoPago: 'PAGADO', fechaPago: hoyIso, pagadoPor: 'ADMIN' })
-      ));
-
-      await updateDoc(doc(db, "empleados", emp.id), {
-        ...(sueldo > 0 ? { ultimoPagoMes: mesActual, ultimoPagoIso: hoyIso } : {}),
-        comisiones: []
+      tareasAprobadas.forEach((t: any) => {
+        batch.update(doc(db, "empleado_tareas", t.id), {
+            estadoPago: 'PAGADO', fechaPago: hoyIso, pagadoPor: 'ADMIN'
+        });
       });
 
+      batch.update(doc(db, "empleados", emp.id), {
+        ...(sueldo > 0 ? { ultimoPagoMes: mesActual, ultimoPagoIso: hoyIso } : {}),
+        comisiones: (emp.comisiones || []).filter((c: any) => !idsComisionesPagadas.has(c.id))
+      });
+
+      await batch.commit();
+
+      toast.success(`Pago de $${totalUSD.toFixed(2)} registrado a ${emp.nombre}`);
       setPaymentModalOpen(false);
       setSelectedEmployee(null);
     } catch (error) {
       console.error("Error en el pago:", error);
-      alert("No se pudo procesar el pago. Verifica tu conexión.");
+      toast.error("No se pudo procesar el pago. No se registró nada: verifica tu conexión e inténtalo de nuevo.");
     } finally {
       setIsProcessingPayment(false);
     }
@@ -332,42 +345,37 @@ export function EmpleadosView({ empleados, pagos, rates, tareas = [] }: Empleado
       }
   };
 
+  // El mes de un pago: el que quedó grabado, y si es un registro viejo que no lo
+  // tiene, se deduce de su fecha. Antes cada sitio lo resolvía a su manera y por
+  // eso el resumen y el historial no daban lo mismo.
+  const mesDelPago = (p: any): string => p.mesRelativo || mesDeValor(p.fecha);
+
   const stats = useMemo(() => {
-    const mesActual = new Date().toISOString().slice(0, 7);
+    const mesActual = claveMesLocal();
     let pend = 0;
     empleados.forEach(e => {
-      const com = e.comisiones?.reduce((a: any, c: any) => a + c.monto, 0) || 0;
-      const taskCom = tareas
-        .filter(t => t.empleadoDbId === e.id && t.estado === 'APROBADA' && t.estadoPago === 'PENDIENTE')
-        .reduce((s: number, t: any) => s + (t.montoComision || 0), 0);
-      let sueldo = e.montoSueldo;
-      if (e.frecuenciaPago === 'Semanal') {
-          if (e.ultimoPagoIso) {
-              const diffDays = Math.floor((new Date().getTime() - new Date(e.ultimoPagoIso).getTime()) / 86400000);
-              if (diffDays < 6) sueldo = 0;
-          }
-      } else {
-          if (e.ultimoPagoMes === mesActual) sueldo = 0;
-      }
-      pend += sueldo + com + taskCom;
+      pend += calcularDeuda(e, tareas).total;
     });
-    const pagado = pagos.filter(p => p.mesRelativo === mesActual).reduce((a, p) => a + p.totalUSD, 0);
+    // Mismo criterio de mes que el historial: antes esto exigía `mesRelativo` y
+    // dejaba fuera los pagos antiguos, así que "pagado este mes" salía por debajo.
+    const pagado = pagos
+      .filter(p => mesDelPago(p) === mesActual)
+      .reduce((a, p) => a + (Number(p.totalUSD) || 0), 0);
     return { pend, pagado };
   }, [empleados, pagos, tareas]);
 
   const availableMonths = useMemo(() => {
-      const months = new Set(pagos.map(p => p.mesRelativo || (p.fecha ? p.fecha.slice(0,7) : '')).filter(Boolean));
-      months.add(new Date().toISOString().slice(0, 7)); 
+      const months = new Set(pagos.map(mesDelPago).filter(Boolean));
+      months.add(claveMesLocal());
       return Array.from(months).sort().reverse();
   }, [pagos]);
 
   const pagosFiltrados = useMemo(() => {
       return pagos.filter(p => {
-          const mesDelPago = p.mesRelativo || (p.fecha ? p.fecha.slice(0,7) : '');
           const matchEmp = filtroHistorial === 'todos' || p.empleadoId === filtroHistorial;
-          const matchMonth = selectedMonthHist === 'todos' || mesDelPago === selectedMonthHist;
+          const matchMonth = selectedMonthHist === 'todos' || mesDelPago(p) === selectedMonthHist;
           return matchEmp && matchMonth;
-      }).sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+      }).sort((a, b) => tiempoDe(b.fecha) - tiempoDe(a.fecha));
   }, [pagos, filtroHistorial, selectedMonthHist]);
 
   // ✨ AQUÍ RESTAURAMOS LA VARIABLE FALTANTE ✨
@@ -591,25 +599,14 @@ export function EmpleadosView({ empleados, pagos, rates, tareas = [] }: Empleado
             </DialogHeader>
 
             {selectedEmployee && (() => {
-                const mesActual = new Date().toISOString().slice(0, 7);
-                const comisiones = selectedEmployee.comisiones?.reduce((a:number,c:any)=>a+c.monto,0) || 0;
-                let sBase = selectedEmployee.montoSueldo;
-
-                if (selectedEmployee.frecuenciaPago === 'Semanal') {
-                    if (selectedEmployee.ultimoPagoIso) {
-                        const diffDays = Math.floor((new Date().getTime() - new Date(selectedEmployee.ultimoPagoIso).getTime()) / 86400000);
-                        if (diffDays < 6) sBase = 0;
-                    }
-                } else {
-                    if (selectedEmployee.ultimoPagoMes === mesActual) sBase = 0;
-                }
-
-                const tareasModal = tareas.filter(t =>
-                    t.empleadoDbId === selectedEmployee.id && t.estado === 'APROBADA' && t.estadoPago === 'PENDIENTE'
-                );
-                const taskCom = tareasModal.reduce((s:number, t:any) => s + (t.montoComision || 0), 0);
-
-                const total = sBase + comisiones + taskCom;
+                // Mismo cálculo que usa confirmPayment: el modal no puede mostrar
+                // un monto y registrarse otro distinto.
+                const deuda = calcularDeuda(selectedEmployee, tareas);
+                const comisiones = deuda.comisiones;
+                const sBase = deuda.sueldo;
+                const tareasModal = deuda.tareasPorPagar;
+                const taskCom = deuda.bonos;
+                const total = deuda.total;
 
                 return (
                     <div className="space-y-6">
@@ -908,25 +905,16 @@ export function EmpleadosView({ empleados, pagos, rates, tareas = [] }: Empleado
 // --- SUB-COMPONENTES VISUALES ---
 
 function EmpleadoCard({ emp, rates, onPagar, onEdit, onDelete, onAddCom, onTarifas, tareasEmp = [] }: any) {
-  const mesActual = new Date().toISOString().slice(0, 7);
   const esSemanal = emp.frecuenciaPago === 'Semanal';
   const dias = calcularDiasRestantes(emp);
 
-  const tCom = emp.comisiones?.reduce((a:any, c:any) => a + c.monto, 0) || 0;
+  // Un único cálculo compartido con el modal de pago y con lo que ve el empleado.
+  const sPend = sueldoPendienteDe(emp);
+  const tCom = comisionesPendientesDe(emp);
 
   const tareasAprobadas = tareasEmp.filter((t:any) => t.estado === 'APROBADA' && t.estadoPago === 'PENDIENTE');
   const tareasPendientes = tareasEmp.filter((t:any) => t.estado === 'PENDIENTE');
-  const taskCom = tareasAprobadas.reduce((s:number, t:any) => s + (t.montoComision || 0), 0);
-
-  let sPend = emp.montoSueldo;
-  if (esSemanal) {
-      if (emp.ultimoPagoIso) {
-          const diff = Math.floor((new Date().getTime() - new Date(emp.ultimoPagoIso).getTime()) / 86400000);
-          if (diff < 6) sPend = 0;
-      }
-  } else {
-      if (emp.ultimoPagoMes === mesActual) sPend = 0;
-  }
+  const taskCom = tareasAprobadas.reduce((s:number, t:any) => s + (Number(t.montoComision) || 0), 0);
 
   const total = tCom + sPend + taskCom;
 
@@ -939,8 +927,12 @@ function EmpleadoCard({ emp, rates, onPagar, onEdit, onDelete, onAddCom, onTarif
     <motion.div layout className="bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] sm:rounded-[3.5rem] p-4 sm:p-6 md:p-10 shadow-sm border border-black/5 dark:border-white/5 group hover:shadow-2xl hover:shadow-black/5 transition-all duration-500">
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-5 sm:gap-8">
 
-        {/* INFO USUARIO */}
-        <div className="flex items-center gap-3 sm:gap-5 w-full lg:w-auto">
+        {/* INFO USUARIO
+            `min-w-0` es imprescindible: sin él, un elemento flex se niega a
+            encogerse por debajo del ancho de su contenido (el nombre en
+            text-3xl más las etiquetas), y empujaba el balance y el botón
+            "Liquidar" fuera de la tarjeta. */}
+        <div className="flex items-center gap-3 sm:gap-5 w-full lg:w-auto min-w-0">
           <div className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 bg-gradient-to-br from-slate-800 to-slate-900 dark:from-blue-600 dark:to-blue-800 text-white rounded-[2rem] sm:rounded-[2.5rem] flex items-center justify-center font-black text-2xl sm:text-3xl italic shrink-0 shadow-xl group-hover:scale-105 transition-transform">
               {emp.nombre.charAt(0)}
           </div>
@@ -1000,7 +992,7 @@ function EmpleadoCard({ emp, rates, onPagar, onEdit, onDelete, onAddCom, onTarif
         <Button
             onClick={onPagar}
             disabled={total === 0}
-            className={`h-14 sm:h-20 w-full lg:w-auto px-8 sm:px-10 rounded-[2rem] sm:rounded-[2.5rem] font-black text-base sm:text-xl shadow-2xl uppercase italic transition-all active:scale-95 ${total > 0 ? 'bg-slate-900 dark:bg-blue-600 text-white hover:scale-105' : 'bg-slate-100 dark:bg-white/5 text-slate-300 dark:text-slate-600 shadow-none'}`}
+            className={`h-14 sm:h-20 w-full lg:w-auto shrink-0 px-6 sm:px-10 rounded-[2rem] sm:rounded-[2.5rem] font-black text-base sm:text-xl shadow-2xl uppercase italic transition-all active:scale-95 ${total > 0 ? 'bg-slate-900 dark:bg-blue-600 text-white hover:scale-105' : 'bg-slate-100 dark:bg-white/5 text-slate-300 dark:text-slate-600 shadow-none'}`}
         >
             {total > 0 ? "Liquidar" : "Al Día"}
         </Button>

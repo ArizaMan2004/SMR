@@ -24,6 +24,7 @@ import { formatCurrency } from "@/lib/utils/order-utils"
 // --- IMPORTACIONES DE FIREBASE ---
 import { collection, addDoc, getDocs, doc, setDoc, getDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
+import { claveFechaLocal } from '@/lib/utils/fechas'
 
 interface WalletsViewProps {
     rates: { usd: number, eur: number, usdt: number }
@@ -74,7 +75,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
     })
     
     const [manualForm, setManualForm] = useState({ 
-        mode: 'SIMPLE', tipo: 'INGRESO', billetera: 'cash_usd', monto: '', montoReal: '', descripcion: '', fecha: new Date().toISOString().split('T')[0] 
+        mode: 'SIMPLE', tipo: 'INGRESO', billetera: 'cash_usd', monto: '', montoReal: '', descripcion: '', fecha: claveFechaLocal() 
     })
 
     const [unlockedWallets, setUnlockedWallets] = useState<Record<string, boolean>>({})
@@ -371,7 +372,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
         try {
             await addDoc(collection(db, "movimientos_caja"), ajuste);
             setIsManualModalOpen(false);
-            setManualForm({ mode: 'SIMPLE', tipo: 'INGRESO', billetera: 'cash_usd', monto: '', montoReal: '', descripcion: '', fecha: new Date().toISOString().split('T')[0] });
+            setManualForm({ mode: 'SIMPLE', tipo: 'INGRESO', billetera: 'cash_usd', monto: '', montoReal: '', descripcion: '', fecha: claveFechaLocal() });
             await fetchFullHistory();
         } catch (error) { alert("Error al guardar el movimiento"); }
     }

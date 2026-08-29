@@ -809,7 +809,7 @@ const CalculatorView = ({ onSendToProduction }: { onSendToProduction?: (calc: an
                 });
             } catch (error) {
                 console.error("Error al cargar las tasas:", error);
-                setRates(prev => ({ ...prev, loading: false }));
+                setRates((prev: any) => ({ ...prev, loading: false }));
             }
         };
 
@@ -817,17 +817,19 @@ const CalculatorView = ({ onSendToProduction }: { onSendToProduction?: (calc: an
     }, []);
 
     return (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-4 lg:p-8 max-w-4xl mx-auto space-y-8 pb-20">
-            <header className="flex flex-row justify-between items-center px-4">
-                <motion.div initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="flex items-center gap-3">
-                    <div className="p-3 bg-blue-600 rounded-2xl text-white shadow-lg shadow-blue-500/20"><CalcIcon size={24}/></div>
-                    <div>
-                        <h1 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tighter italic leading-none">Calculadora</h1>
-                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1.5">SMR v2.5</p>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-2 sm:p-4 lg:p-8 max-w-4xl mx-auto space-y-5 sm:space-y-8 pb-20">
+            {/* En móvil el padding lateral se comía 32px de los 375 disponibles. */}
+            <header className="flex flex-row justify-between items-center gap-3 px-2 sm:px-4">
+                <motion.div initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                    <div className="p-2.5 sm:p-3 bg-blue-600 rounded-2xl text-white shadow-lg shadow-blue-500/20 shrink-0"><CalcIcon className="w-5 h-5 sm:w-6 sm:h-6"/></div>
+                    <div className="min-w-0">
+                        <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tighter italic leading-none truncate">Calculadora</h1>
+                        {/* Estaba a 8px: ilegible en un teléfono. */}
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1.5">Costos SMR</p>
                     </div>
                 </motion.div>
-                <motion.div initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="flex gap-2">
-                    <Badge className="rounded-xl bg-white dark:bg-slate-900 text-blue-600 border border-slate-100 dark:border-slate-800 px-4 py-3 font-black italic text-sm shadow-sm">
+                <motion.div initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="flex gap-2 shrink-0">
+                    <Badge className="rounded-xl bg-white dark:bg-slate-900 text-blue-600 border border-slate-100 dark:border-slate-800 px-3 sm:px-4 py-2.5 sm:py-3 font-black italic text-xs sm:text-sm shadow-sm whitespace-nowrap">
                         <span className="opacity-40 text-[10px] mr-1">$</span> {rates.usd?.toFixed(2)}
                     </Badge>
                 </motion.div>
@@ -835,25 +837,29 @@ const CalculatorView = ({ onSendToProduction }: { onSendToProduction?: (calc: an
 
             <Card className="rounded-[2.5rem] border-none shadow-2xl shadow-slate-200/50 bg-white dark:bg-slate-950 overflow-hidden">
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                    <div className="px-6 pt-6">
-                        <TabsList className="grid w-full grid-cols-3 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-[1.8rem] h-14 gap-2">
+                    <div className="px-3 sm:px-6 pt-4 sm:pt-6">
+                        <TabsList className="grid w-full grid-cols-3 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-[1.5rem] sm:rounded-[1.8rem] h-14 gap-1.5 sm:gap-2">
                             {[
                                 { id: 'currency', label: 'Divisas', icon: DollarSign },
-                                { id: 'area', label: 'Área M2', icon: Ruler },
+                                { id: 'area', label: 'Área M²', icon: Ruler },
                                 { id: 'laser', label: 'Láser', icon: Timer },
                             ].map((tab) => (
-                                <TabsTrigger 
-                                    key={tab.id} value={tab.id} 
-                                    className="rounded-2xl font-black uppercase text-[10px] data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:shadow-lg data-[state=active]:text-blue-600 gap-2 transition-all duration-300"
+                                <TabsTrigger
+                                    key={tab.id} value={tab.id}
+                                    className="rounded-2xl font-black uppercase text-[9px] sm:text-[10px] data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:shadow-lg data-[state=active]:text-blue-600 flex-col sm:flex-row gap-0.5 sm:gap-2 transition-all duration-300 leading-none"
                                 >
-                                    <tab.icon size={16} className={cn(activeTab === tab.id ? "scale-110" : "opacity-40")} />
-                                    <span className="hidden sm:inline">{tab.label}</span>
+                                    <tab.icon size={15} className={cn("shrink-0", activeTab === tab.id ? "scale-110" : "opacity-40")} />
+                                    {/* La etiqueta estaba oculta en móvil (`hidden sm:inline`) y solo
+                                        quedaban tres iconos sin nombre: era imposible saber en qué
+                                        pestaña estabas. En 375px cada pestaña mide ~110px, espacio
+                                        de sobra para el texto debajo del icono. */}
+                                    <span>{tab.label}</span>
                                 </TabsTrigger>
                             ))}
                         </TabsList>
                     </div>
 
-                    <div className="min-h-[500px] p-6 md:p-8">
+                    <div className="min-h-[500px] p-3 sm:p-6 md:p-8">
                         <AnimatePresence mode="wait">
                             <motion.div 
                                 key={activeTab} 

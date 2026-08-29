@@ -1,7 +1,67 @@
 // @/lib/firebase/ordenes.ts
 
 import { db } from './firebase-config'; // Asegúrate de que esta ruta sea correcta
-import { collection, query, orderBy, limit, getDocs } from "firebase/firestore";
+import { collection, query, orderBy, limit, getDocs, doc, getDoc, runTransaction } from "firebase/firestore";
+
+/** Documento contador. Un solo sitio manda sobre el próximo número de orden. */
+const REF_CONTADOR = () => doc(db, "contadores", "ordenes");
+
+/**
+ * Reserva el siguiente número de orden de forma ATÓMICA.
+ *
+ * Sustituye al método anterior, que miraba las 10 órdenes con `updatedAt` más
+ * reciente y se quedaba con el mayor. El problema: `updatedAt` cambia cada vez
+ * que se EDITA o se COBRA una orden, así que esas 10 solían ser órdenes viejas
+ * recién pagadas, no las de numeración más alta. El resultado en la base son
+ * 70 números repetidos que afectan a 195 órdenes — la #100 existe 30 veces.
+ *
+ * Una transacción de Firestore garantiza que dos personas creando órdenes a la
+ * vez nunca reciban el mismo número. Además cuesta 1 lectura en vez de 10.
+ *
+ * La primera vez siembra el contador con el número más alto que ya exista.
+ */
+export async function getNextOrderNumber(): Promise<number> {
+    /**
+     * Valor de arranque del contador. Se calcula UNA sola vez, la primera vez
+     * que se usa, y solo si el documento del contador aún no existe.
+     *
+     * Se ordena por `fecha` (fecha de CREACIÓN, texto ISO que sí ordena bien)
+     * y NO por `ordenNumero`: ese campo se guarda como texto, así que Firestore
+     * pondría "999" por delante de "1800" y la semilla saldría demasiado baja.
+     * Tampoco se usa `updatedAt`, que es justo el error del método antiguo:
+     * cambia al cobrar una orden vieja.
+     */
+    const semilla = async (): Promise<number> => {
+        const snap = await getDocs(query(collection(db, "ordenes"), orderBy("fecha", "desc"), limit(100)));
+        const nums = snap.docs.map(d => parseInt(String(d.data().ordenNumero), 10)).filter(n => !isNaN(n));
+        return nums.length ? Math.max(...nums) : 0;
+    };
+
+    try {
+        const ref = REF_CONTADOR();
+
+        // La semilla se calcula FUERA de la transacción: una transacción puede
+        // reintentarse varias veces, y no conviene repetir dentro una consulta
+        // de 100 documentos en cada reintento.
+        // Se comprueba ESTE documento, no si la colección tiene algo dentro:
+        // con otro contador cualquiera presente, el de órdenes habría arrancado
+        // en 1 y chocado con las órdenes que ya existen.
+        const previo = await getDoc(ref);
+        const base = previo.exists() ? 0 : await semilla();
+
+        return await runTransaction(db, async (tx) => {
+            const snap = await tx.get(ref);
+            const actual = snap.exists() ? Number(snap.data()?.ultimo) || 0 : base;
+            const siguiente = actual + 1;
+            tx.set(ref, { ultimo: siguiente, actualizadoEn: new Date().toISOString() }, { merge: true });
+            return siguiente;
+        });
+    } catch (error) {
+        console.error("Error reservando número de orden:", error);
+        // Último recurso: el método antiguo, para no bloquear la creación de la orden.
+        return (await getLastOrderNumber()) + 1;
+    }
+}
 
 /**
  * Obtiene el número de orden más alto REAL, corrigiendo el error de ordenamiento alfabético.

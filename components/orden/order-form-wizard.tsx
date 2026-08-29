@@ -28,6 +28,7 @@ import { getNextSafeOrderNumber } from "@/lib/services/ordenes-service"
 import { getFrequentClients, saveClient, deleteClient } from "@/lib/firebase/clientes" 
 import { subscribeToColors, saveNewColor } from "@/lib/firebase/configuracion" 
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
+import { claveFechaLocal } from '@/lib/utils/fechas'
 
 const PREFIJOS_RIF = ["V", "E", "P", "R", "J", "G"] as const;
 const PREFIJOS_TELEFONO = ["0412", "0422", "0414", "0424", "0416", "0426"] as const;
@@ -43,7 +44,7 @@ const INITIAL_FORM_DATA = {
     ordenNumero: '',
     nombreOrden: '',
     fecha: new Date().toISOString(),
-    fechaEntrega: new Date().toISOString().split('T')[0],
+    fechaEntrega: claveFechaLocal(),
     isMaster: false,
     cliente: {
         nombreRazonSocial: "", tipoCliente: "REGULAR", rifCedula: "", telefono: "",

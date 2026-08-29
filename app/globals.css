@@ -264,3 +264,26 @@
 .driver-popover-close-btn { 
   display: none !important; 
 }
+/* ==========================================================
+   LEGIBILIDAD EN MÓVIL
+   ==========================================================
+   El diseño usa mucho texto diminuto (7-8px) para las etiquetas en
+   mayúsculas. En un monitor se lee; en un teléfono no. Hay 154 sitios
+   con ese tamaño repartidos por toda la app, así que en vez de tocarlos
+   uno a uno —con el riesgo de romper maquetación— se impone un mínimo
+   legible SOLO en pantallas pequeñas. En escritorio el diseño original
+   se queda exactamente igual.
+
+   Si alguna etiqueta concreta necesita ser más pequeña en móvil,
+   dale una clase propia en vez de bajar este mínimo.
+   ========================================================== */
+@media (max-width: 640px) {
+  .text-\[7px\]  { font-size: 10px !important; line-height: 1.3 !important; }
+  .text-\[8px\]  { font-size: 10px !important; line-height: 1.3 !important; }
+  .text-\[9px\]  { font-size: 10px !important; line-height: 1.35 !important; }
+
+  /* El interletrado ancho de las mayúsculas desperdicia el poco ancho
+     que hay y provoca cortes feos de palabra en pantallas estrechas. */
+  .tracking-\[0\.3em\] { letter-spacing: 0.15em !important; }
+  .tracking-\[0\.2em\] { letter-spacing: 0.1em !important; }
+}

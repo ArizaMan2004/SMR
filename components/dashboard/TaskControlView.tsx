@@ -28,6 +28,7 @@ import {
     RefreshCw, AlertTriangle
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { puedeSupervisarTareas } from '@/lib/roles'
 
 // ============================================================
 // TIPOS
@@ -113,7 +114,7 @@ const FORM_DEFAULTS = {
 // COMPONENTE PRINCIPAL
 // ============================================================
 export function TaskControlView({ currentUser, empleadosDb, rates }: TaskControlViewProps) {
-    const isAdmin = ['ADMIN', 'PRODUCCION'].includes(currentUser?.rol)
+    const isAdmin = puedeSupervisarTareas(currentUser?.rol)
 
     // Estado principal
     const [tareas, setTareas] = useState<TareaEmpleado[]>([])

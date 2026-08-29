@@ -12,7 +12,7 @@ import {
     deleteBudgetFromFirestore 
 } from "@/lib/firebase/firestore-budget-service";
 import { createOrden } from "@/lib/services/ordenes-service";
-import { getLastOrderNumber } from "@/lib/firebase/ordenes";
+import { getNextOrderNumber } from "@/lib/firebase/ordenes";
 
 // NUEVOS IMPORT PARA CLIENTES
 import { subscribeToClients } from "@/lib/services/clientes-service";
@@ -52,6 +52,27 @@ import { cn } from "@/lib/utils";
 // --- CONSTANTES ---
 const BACKUP_KEY = 'smr_budget_autosave'
 
+// Estados iniciales a nivel de módulo: son la única fuente de verdad para "empezar de cero",
+// así el botón de Nuevo Presupuesto y los reinicios automáticos limpian exactamente lo mismo.
+const initialBudgetState = {
+    id: null as string | null,
+    clienteNombre: '',
+    isMaster: false,
+    items: [] as any[],
+    dateCreated: null as string | null
+};
+
+const initialNewItemState = {
+    id: null as number | null,
+    subCliente: '',
+    descripcion: '',
+    cantidad: 1,
+    precioUnitarioUSD: 0,
+    unidad: 'und' as 'und' | 'm2',
+    medidaXCm: 0,
+    medidaYCm: 0,
+};
+
 // Sugerencias genéricas de respaldo: solo se muestran si no hay ninguna coincidencia real en el inventario
 const SMR_CATALOG_FALLBACK = [
     "Impresión de Alta Resolución en Vinil Adhesivo",
@@ -86,25 +107,8 @@ export default function BudgetEntryView({
     }), [rates, currentBcvRate]);
 
     // --- ESTADO INICIAL ---
-    const initialBudgetState = { 
-        id: null as string | null, 
-        clienteNombre: '', 
-        isMaster: false, 
-        items: [] as any[],
-        dateCreated: null as string | null 
-    };
-
     const [budgetData, setBudgetData] = useState(initialBudgetState);
-    const [newItem, setNewItem] = useState({
-        id: null as number | null,
-        subCliente: '',
-        descripcion: '',
-        cantidad: 1,
-        precioUnitarioUSD: 0,
-        unidad: 'und' as 'und' | 'm2',
-        medidaXCm: 0,
-        medidaYCm: 0,
-    });
+    const [newItem, setNewItem] = useState(initialNewItemState);
 
     const [history, setHistory] = useState<any[]>([]);
     const [clientsList, setClientsList] = useState<any[]>([]); // ESTADO PARA LOS CLIENTES DE LA BD
@@ -457,6 +461,29 @@ export default function BudgetEntryView({
         setErrors({});
     };
 
+    // --- NUEVO PRESUPUESTO ---
+    // Deja la vista como recién cargada sin recargar la página: limpia el documento, el concepto
+    // que se esté escribiendo, la selección de catálogo, los errores y el respaldo local.
+    const handleNewBudget = ({ skipConfirm = false }: { skipConfirm?: boolean } = {}) => {
+        // Solo avisamos si hay trabajo que todavía no está en la base de datos.
+        const hasUnsavedWork = !budgetData.id && (budgetData.items.length > 0 || budgetData.clienteNombre.trim() !== '');
+        if (hasUnsavedWork && !skipConfirm) {
+            if (!window.confirm("Este presupuesto no se ha guardado. ¿Empezar uno nuevo y descartarlo?")) return;
+        }
+
+        setBudgetData(initialBudgetState);
+        setNewItem(initialNewItemState);
+        setSelectedCatalogProduct(null);
+        setSelectedVarianteId(null);
+        setShowSuggestions(false);
+        setShowClientSuggestions(false);
+        setRecoveredDraft(null);
+        setErrors({});
+        localStorage.removeItem(BACKUP_KEY);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        toast.success("Listo para un nuevo presupuesto");
+    };
+
     // --- LÓGICA DE GUARDADO ---
     const handleSaveDraft = async () => {
         const newErrors: any = {};
@@ -487,7 +514,13 @@ export default function BudgetEntryView({
             if (id) payload.id = id;
 
             const resultId = await saveBudgetToFirestore(payload);
-            toast.success(id ? "Cambios actualizados" : "Borrador guardado");
+            // Atajo directo: recién guardado, el siguiente paso casi siempre es empezar otro presupuesto.
+            toast.success(id ? "Cambios actualizados" : "Borrador guardado", {
+                action: {
+                    label: "Nuevo",
+                    onClick: () => handleNewBudget({ skipConfirm: true })
+                }
+            });
             localStorage.removeItem(BACKUP_KEY)
 
             if (!id) {
@@ -499,7 +532,8 @@ export default function BudgetEntryView({
                             b.clienteNombre === budgetData.clienteNombre && 
                             b.dateCreated === newDateCreated
                         );
-                        if (match) newDocId = match.id;
+                        // `?? null`: el id del estado es `string | null`, nunca undefined.
+                        if (match) newDocId = match.id ?? null;
                     }
                 }
                 setBudgetData(prev => ({
@@ -528,8 +562,8 @@ export default function BudgetEntryView({
 
         setIsLoading(true);
         try {
-            const lastNumber = await getLastOrderNumber();
-            const nextNumber = lastNumber + 1;
+            // Reserva atómica: el método anterior repetía números.
+            const nextNumber = await getNextOrderNumber();
             
             const orderPayload = {
                 ordenNumero: nextNumber,
@@ -541,7 +575,8 @@ export default function BudgetEntryView({
                     rifCedula: "EXPRESS",
                     telefono: "N/A",
                     domicilioFiscal: "N/A",
-                    correo: ""
+                    correo: "",
+                    personaContacto: "N/A"
                 },
                 items: data.items.map((item: any) => ({
                     subCliente: data.isMaster ? (item.subCliente || '') : '',
@@ -555,9 +590,25 @@ export default function BudgetEntryView({
                     subtotal: item.totalUSD
                 })),
                 totalUSD: data.totalUSD || totalUSD,
+                totalBS: (data.totalUSD || totalUSD) * safeRates.usd,
                 montoPagadoUSD: 0,
+                // Sin estadoPago la orden nacía "sin estado": no aparecía como
+                // deuda en Clientes & Cobranza ni contaba en las estadísticas.
+                estadoPago: 'PENDIENTE',
+                registroPagos: [],
+                serviciosSolicitados: {
+                    impresionDigital: false,
+                    impresionGranFormato: data.items.some((i: any) => i.unidad === 'm2'),
+                    corteLaser: false,
+                    laminacion: false,
+                    avisoCorporeo: false,
+                    rotulacion: false,
+                    instalacion: false,
+                    senaletica: false,
+                },
+                descripcionDetallada: `Convertida desde presupuesto de ${data.clienteNombre}`,
                 estado: 'PENDIENTE',
-                userId: "" 
+                userId: ""
             };
 
             await createOrden(orderPayload);
@@ -670,10 +721,20 @@ export default function BudgetEntryView({
                         </p>
                     </div>
                 </div>
-                <div className="flex flex-wrap justify-start sm:justify-center gap-2">
-                    <AssetPill active={!!pdfLogoBase64} label="Logo" onUpload={handleLogoUpload} onClear={handleClearLogo} />
-                    <AssetPill active={!!firmaBase64} label="Firma" onUpload={handleFirmaUpload} onClear={handleClearFirma} />
-                    <AssetPill active={!!selloBase64} label="Sello" onUpload={handleSelloUpload} onClear={handleClearSello} />
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+                    <div className="flex flex-wrap justify-start sm:justify-center gap-2">
+                        <AssetPill active={!!pdfLogoBase64} label="Logo" onUpload={handleLogoUpload} onClear={handleClearLogo} />
+                        <AssetPill active={!!firmaBase64} label="Firma" onUpload={handleFirmaUpload} onClear={handleClearFirma} />
+                        <AssetPill active={!!selloBase64} label="Sello" onUpload={handleSelloUpload} onClear={handleClearSello} />
+                    </div>
+
+                    <Button
+                        onClick={() => handleNewBudget()}
+                        title="Limpiar todo y empezar un presupuesto desde cero"
+                        className="h-11 shrink-0 rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-black uppercase text-[10px] tracking-widest gap-2 px-5 shadow-lg active:scale-95 transition-all"
+                    >
+                        <Plus className="w-4 h-4" /> Nuevo Presupuesto
+                    </Button>
                 </div>
             </header>
 
@@ -753,7 +814,7 @@ export default function BudgetEntryView({
                                     </Button>
                                     
                                     {(budgetData.id || budgetData.items.length > 0) && (
-                                        <Button variant="ghost" size="icon" onClick={() => { setBudgetData(initialBudgetState); setErrors({}); localStorage.removeItem(BACKUP_KEY); }} className="text-red-400 hover:bg-red-50 h-10 w-10 shrink-0">
+                                        <Button variant="ghost" size="icon" title="Empezar de cero" onClick={() => handleNewBudget()} className="text-red-400 hover:bg-red-50 h-10 w-10 shrink-0">
                                             <RotateCcw className="w-4 h-4"/>
                                         </Button>
                                     )}
@@ -998,6 +1059,7 @@ export default function BudgetEntryView({
 
                             {/* TABLA DE ITEMS */}
                             <div className="rounded-[2rem] border border-slate-100 dark:border-slate-800 overflow-hidden">
+                              <div className="overflow-x-auto custom-scrollbar">
                                 <Table>
                                     <TableHeader className="bg-slate-50 dark:bg-slate-800/30">
                                         <TableRow className="border-none">
@@ -1072,6 +1134,7 @@ export default function BudgetEntryView({
                                         ))}
                                     </TableBody>
                                 </Table>
+                              </div>
                             </div>
 
                             {/* BOTONES DE ACCIÓN */}

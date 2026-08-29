@@ -19,7 +19,8 @@ import { toast } from "sonner"
 import Sidebar from "@/components/dashboard/sidebar"
 import { OrdersTable } from "@/components/orden/orders-table"
 import { ClientsAndPaymentsView } from "@/components/dashboard/ClientsAndPaymentsView"
-import { NotificationCenter, type Notification } from "@/components/dashboard/NotificationCenter"
+import { NotificationCenter } from "@/components/dashboard/NotificationCenter"
+import { NotificationBell } from "@/components/dashboard/NotificationBell"
 import { OrderFormWizardV2 } from "@/components/orden/order-form-wizard"
 import { DesignerPayrollView } from "@/components/dashboard/DesignerPayrollView" 
 import TasksView from "@/components/dashboard/tasks-view"
@@ -45,10 +46,10 @@ import { InsumosView } from "@/components/dashboard/InsumosView"
 
 import { EmpleadosView } from "@/components/dashboard/empleados-view"
 import { EstadisticasDashboard } from "@/components/dashboard/estadisticas-dashboard"
-import { NotificationCenterExpenses, type NotificationGasto } from "@/components/dashboard/notification-center-expenses"
 import { UsersManagementView } from "@/components/dashboard/UsersManagementView" 
 import { ProfileSettingsView } from "@/components/dashboard/ProfileSettingsView"
 import { EmployeeFinancesView } from "@/components/dashboard/EmployeeFinancesView"
+import { HorariosView } from "@/components/dashboard/HorariosView"
 
 // Controlador del Tutorial
 import { HelpModal } from "@/components/dashboard/TutorialController"
@@ -57,7 +58,8 @@ import { HelpModal } from "@/components/dashboard/TutorialController"
 import {
     Plus, CheckCircle, Calculator, LayoutDashboard, FileSpreadsheet, Clock,
     Building2, Bell, CheckCircle2, ChevronLeft, Menu, DollarSign, Euro, Coins,
-    Wallet, Search, HelpCircle, AlertCircle, Loader2, ShieldCheck, Layers, ShoppingCart
+    Wallet, Search, HelpCircle, AlertCircle, Loader2, ShieldCheck, Layers, ShoppingCart,
+    CalendarClock
 } from "lucide-react"
 
 // Servicios
@@ -70,8 +72,8 @@ import {
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
 import { 
     subscribeToPagos, subscribeToGastos, subscribeToGastosFijos, 
-    subscribeToEmpleados, subscribeToNotifications, deleteGastoInsumo, 
-    createNotification, deleteNotification, updateNotificationStatus, createGasto 
+    subscribeToEmpleados, deleteGastoInsumo, 
+    createGasto
 } from "@/lib/services/gastos-service"
 import { subscribeToClients } from "@/lib/services/clientes-service"
 import { subscribeToVentasCatalogo } from "@/lib/services/catalog-service"
@@ -85,13 +87,19 @@ import {
 import { cn } from "@/lib/utils"
 import type { GastoFijo, Empleado, PagoEmpleado } from "@/lib/types/gastos"
 import { NotificationProvider } from "@/lib/contexts/notification-context"
-import { notifyNuevaOrden } from "@/lib/services/notification-service"
+import { usePermisos } from "@/lib/contexts/permisos-context"
+import { puedeSupervisarTareas } from "@/lib/roles"
+import { crearNotificacion, notificarNuevaOrden } from "@/lib/services/notificaciones-service"
+import { estaSaldada, estaAbonada, aCentimos } from '@/lib/utils/estados'
+import { subscribeToHorarios } from '@/lib/services/horarios-service'
+import { ResumenDelDia } from '@/components/dashboard/ResumenDelDia'
 
 const springConfig = { type: "spring", stiffness: 300, damping: 30 } as const;
 type ActiveView = string; 
 
 export default function Dashboard() {
     const { user, userData, logout } = useAuth()
+    const { puedeVer, vistaInicial } = usePermisos()
     const currentUserId = user?.uid
 
     // --- 1. ESTADOS DE UI ---
@@ -122,17 +130,14 @@ export default function Dashboard() {
         }
     }, [isSidebarOpen])
     
-    // Redirige a empleados de producción al taller al cargar por primera vez.
-    // Solo depende de userData: no necesitamos correr esto en cada cambio de vista.
+    // Si la vista abierta no le corresponde a esta persona, la mandamos a la
+    // primera que sí. Cubre el arranque (la gente de taller no debe aterrizar en
+    // Facturación) y también el caso de que el admin le retire un permiso
+    // mientras tiene la app abierta.
     useEffect(() => {
-        if (userData) {
-            const productionRoles = ['DISENADOR', 'IMPRESOR', 'OPERADOR_LASER', 'PRODUCCION', 'EMPLEADO'];
-            if (productionRoles.includes(userData.rol) && activeView === "orders") {
-                setActiveView("tasks_taller");
-            }
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [userData]);
+        if (!userData) return;
+        if (!puedeVer(activeView)) setActiveView(vistaInicial);
+    }, [userData, activeView, puedeVer, vistaInicial]);
     
     const [searchTerm, setSearchTerm] = useState("") 
     const [isSearchingDeep, setIsSearchingDeep] = useState(false)
@@ -152,9 +157,6 @@ export default function Dashboard() {
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
     const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<OrdenServicio | null>(null)
 
-    const [isNotiOpen, setIsNotiOpen] = useState(false)
-    const [isExpenseNotiOpen, setIsExpenseNotiOpen] = useState(false)
-    const [hasUnseenNotifications, setHasUnseenNotifications] = useState(false)
     const [showRateToast, setShowRateToast] = useState(false)
     const [rateToastMessage, setRateToastMessage] = useState("")
     const [isHelpOpen, setIsHelpOpen] = useState(false)
@@ -165,8 +167,6 @@ export default function Dashboard() {
     const [parallelRate, setParallelRate] = useState<number>(0)
     const [assets, setAssets] = useState({ logo: "", firma: "", sello: "" })
     
-    const [systemEvents, setSystemEvents] = useState<Notification[]>([])
-    const [expenseEvents, setExpenseEvents] = useState<NotificationGasto[]>([])
     
     const [ordenes, setOrdenes] = useState<OrdenServicio[]>([]) 
     const [totalHistoricoOrdenes, setTotalHistoricoOrdenes] = useState<number>(0) 
@@ -178,6 +178,7 @@ export default function Dashboard() {
     const [empleados, setEmpleados] = useState<Empleado[]>([])
     const [pagos, setPagos] = useState<PagoEmpleado[]>([]) 
     const [clientes, setClientes] = useState<any[]>([])
+    const [horarios, setHorarios] = useState<any[]>([])
     const [movimientosCaja, setMovimientosCaja] = useState<any[]>([])
     const [ventasCatalogo, setVentasCatalogo] = useState<any[]>([])
     const [tareasControl, setTareasControl] = useState<any[]>([]) 
@@ -201,59 +202,58 @@ export default function Dashboard() {
         return Array.from(uniqueClients.values()).slice(0, 5);
     }, [clientes, searchTerm]);
 
-    // --- 3. NAV ITEMS (CON ROLES INTEGRADADOS Y LIMPIEZA) ---
+    // --- 3. NAV ITEMS ---
+    // Aquí ya NO se decide quién ve qué: eso lo resuelve el contexto de permisos
+    // (lib/roles.ts + lo que el admin configure). Esto es solo la estructura y el
+    // orden del menú. Cada vista aparece UNA sola vez; los grupos se ocultan
+    // solos cuando la persona no tiene acceso a ninguno de sus hijos.
     const navItems = useMemo(() => [
         {
             id: 'orders',
             label: 'Facturación y Cierre',
             icon: <LayoutDashboard className="w-4 h-4" />,
-            roles: ['ADMIN', 'VENDEDOR', 'CAJERO']
         },
         {
             id: 'tasks_taller',
             label: 'Taller de Producción',
             icon: <CheckCircle className="w-4 h-4" />,
-            roles: ['ADMIN', 'VENDEDOR', 'DISENADOR', 'IMPRESOR', 'OPERADOR_LASER', 'PRODUCCION', 'EMPLEADO']
         },
         {
             id: 'task_control',
             label: 'Control de Tareas (Bonos)',
             icon: <Layers className="w-4 h-4" />,
-            roles: ['ADMIN', 'VENDEDOR', 'DISENADOR', 'IMPRESOR', 'OPERADOR_LASER', 'PRODUCCION', 'EMPLEADO']
         },
         {
             id: 'my_finances',
             label: 'Mis Finanzas',
             icon: <Wallet className="w-4 h-4" />,
-            roles: ['ADMIN', 'VENDEDOR', 'DISENADOR', 'IMPRESOR', 'OPERADOR_LASER', 'PRODUCCION', 'EMPLEADO']
         },
-        // --- GRUPO CAJERO: ventas y atención al cliente ---
         {
-            id: 'cajero_group',
+            id: 'horarios',
+            label: 'Horarios del Personal',
+            icon: <CalendarClock className="w-4 h-4" />,
+        },
+        {
+            id: 'ventas_group',
             label: 'Ventas & Clientes',
             icon: <ShoppingCart className="w-4 h-4" />,
-            roles: ['CAJERO'],
             children: [
                 { id: 'catalogo_ventas', label: 'Catálogo & Ventas' },
                 { id: 'clients', label: 'Clientes & Cobranza' },
-                { id: 'calculator', label: 'Presupuestos (PDF)' },
+                { id: 'calculator', label: 'Presupuestos / Cotizaciones' },
             ]
         },
-        // --- GRUPO ADMIN ---
         {
             id: 'admin_group',
             label: 'Administración SMR',
             icon: <Building2 className="w-4 h-4" />,
-            roles: ['ADMIN'],
             children: [
                 { id: 'wallets', label: 'Billeteras & Caja' },
                 { id: 'payment_audit', label: 'Auditoría de Pagos' },
                 { id: 'financial_stats', label: 'Balance y Estadísticas' },
-                { id: 'clients', label: 'Cobranza' },
                 { id: 'design_production', label: 'Pago Diseños' },
                 { id: 'fixed_expenses', label: 'Gastos Fijos' },
                 { id: 'insumos_mgmt', label: 'Insumos y Materiales' },
-                { id: 'catalogo_ventas', label: 'Catálogo & Ventas' },
                 { id: 'employees_mgmt', label: 'Gestión de Personal' },
             ]
         },
@@ -261,15 +261,13 @@ export default function Dashboard() {
             id: 'users_auth',
             label: 'Accesos y Roles',
             icon: <ShieldCheck className="w-4 h-4" />,
-            roles: ['ADMIN']
         },
         {
             id: 'tools_group',
             label: 'Herramientas',
             icon: <Calculator className="w-4 h-4" />,
             children: [
-                { id: 'calculator', label: 'Presupuestos (PDF)', roles: ['ADMIN', 'VENDEDOR'] },
-                { id: 'old_calculator', label: 'Calculadora de Producción' },
+                { id: 'old_calculator', label: 'Calculadora de Costos' },
                 { id: 'ai_background', label: 'IA Quita Fondos' },
                 { id: 'ai_upscale', label: 'IA Upscale (HD)' },
                 { id: 'format_converter', label: 'Convertidor Formatos' },
@@ -290,13 +288,19 @@ export default function Dashboard() {
 
     const handleNewsAction = useCallback((action: NewsAction) => {
         if (action.type === 'NAVIGATE') {
+            // Las alertas de nómina y gastos apuntan a vistas de administración.
+            // Sin esto, un vendedor o cajero hacía clic y salía rebotado de vuelta.
+            if (!puedeVer(action.payload)) {
+                toast.error("No tienes acceso a esa sección. Pídeselo al administrador.");
+                return;
+            }
             setActiveView(action.payload);
         } else if (action.type === 'OPEN_ORDER') {
             handleOpenPaymentModal(action.payload);
         } else if (action.type === 'VIEW_ORDER_DETAILS') {
             handleOpenOrderDetails(action.payload);
         }
-    }, [handleOpenPaymentModal, handleOpenOrderDetails]);
+    }, [handleOpenPaymentModal, handleOpenOrderDetails, puedeVer]);
 
     const handleSendCalcToOrder = (calc: any, type: 'area' | 'laser') => {
         const mappedItems = type === 'area' 
@@ -356,17 +360,6 @@ export default function Dashboard() {
         if (type === 'sello') await setSelloBase64("");
         setAssets(prev => ({ ...prev, [type]: "" }));
     };
-
-    const handleDeleteNotification = useCallback(async (id: string) => {
-        await deleteNotification(id);
-    }, []);
-
-    const handleToggleRead = useCallback(async (id: string) => {
-        const noti = systemEvents.find(n => n.id === id);
-        if (noti) {
-            await updateNotificationStatus(id, !noti.isRead);
-        }
-    }, [systemEvents]);
 
     const handleUpdateRate = useCallback(async (label: string) => {
         if (!currentUserId) return;
@@ -435,7 +428,10 @@ export default function Dashboard() {
                 const data = snap.data() as any;
                 const montoPagadoAnterior = Number(data.montoPagadoUSD) || 0;
                 const totalUSD = Number(data.totalUSD) || 0;
-                const nuevoMonto = montoPagadoAnterior + monto + descuentoAplicado;
+                // Se redondea a céntimos al guardar: sin esto, cada abono arrastra
+                // el resto de la coma flotante y acaban apareciendo montos como
+                // 13.999999999999982 para un total de 14.
+                const nuevoMonto = aCentimos(montoPagadoAnterior + monto + descuentoAplicado);
                 const saldo = totalUSD - nuevoMonto;
                 const nuevoEstado = saldo <= 0.01 ? "PAGADO" : "ABONADO";
 
@@ -483,7 +479,7 @@ export default function Dashboard() {
 
             let descNoti = `Ingreso de $${monto} (${metodo || "Caja"}) - Orden #${resultado.ordenNumero}`;
             if (descuentoAplicado > 0) descNoti += ` + Ajuste de $${descuentoAplicado.toFixed(2)}`;
-            await createNotification({ title: "Pago Registrado", description: descNoti, type: 'success', category: 'system' });
+            await crearNotificacion({ titulo: 'Pago Registrado', cuerpo: descNoti, tipo: 'success', categoria: 'pago', link: 'orders' });
 
             toast.success("Pago registrado correctamente");
             setIsPaymentModalOpen(false);
@@ -514,7 +510,7 @@ export default function Dashboard() {
     const handleCreateOrden = async (payload: any) => {
         const id = await createOrden(payload);
         try {
-            await notifyNuevaOrden({
+            await notificarNuevaOrden({
                 ordenNumero: payload.ordenNumero ?? '?',
                 cliente: payload.cliente,
                 items: payload.items ?? [],
@@ -605,16 +601,14 @@ export default function Dashboard() {
             if (stats) setRealBillingStats(stats);
         });
 
-        const unsubNotis = subscribeToNotifications((data) => {
-            setSystemEvents(data.filter(n => n.category !== 'expense'));
-            setExpenseEvents(data.filter(n => n.category === 'expense') as any);
-        });
-
-        return () => unsubNotis();
+        // Las notificaciones ya no se cargan aqui: viven en NotificationProvider,
+        // que es la unica suscripcion para toda la app.
     }, []);
 
     useEffect(() => {
-        const viewsRequiringOrders = ["orders", "financial_stats", "wallets", "payment_audit", "design_production", "clients", "notifications_full", "tasks_taller"];
+        // "payment_audit" NO va aqui: esa vista consulta Firestore por su cuenta.
+        // Suscribirla ademas gastaba ~250 lecturas por visita que se tiraban a la basura.
+        const viewsRequiringOrders = ["orders", "financial_stats", "wallets", "design_production", "clients", "notifications_full"];
         const requiresOrders = viewsRequiringOrders.includes(activeView);
 
         let unsubOrdenes = () => {};
@@ -635,7 +629,7 @@ export default function Dashboard() {
     }, [activeView]);
 
     useEffect(() => {
-        const viewsRequiringGastos = ["orders", "fixed_expenses", "insumos_mgmt", "financial_stats", "wallets", "payment_audit"];
+        const viewsRequiringGastos = ["orders", "fixed_expenses", "insumos_mgmt", "financial_stats", "wallets"];
         let unsubGastos = () => {};
         let unsubGastosFijos = () => {};
 
@@ -654,8 +648,9 @@ export default function Dashboard() {
         let unsubMovimientosCaja = () => {};
         let unsubTareas = () => {};
 
-        // Ahora my_finances y task_control necesitan empleados y pagos
-        if (["orders", "employees_mgmt", "financial_stats", "wallets", "payment_audit", "my_finances", "task_control"].includes(activeView)) {
+        // Ahora my_finances y task_control necesitan empleados y pagos.
+        // "horarios" también: sin la lista de empleados la agenda sale vacía.
+        if (["orders", "employees_mgmt", "financial_stats", "wallets", "my_finances", "task_control", "horarios"].includes(activeView)) {
             unsubEmpleados = subscribeToEmpleados((data) => setEmpleados(data));
             unsubPagos = subscribeToPagos((data) => setPagos(data));
         }
@@ -664,6 +659,12 @@ export default function Dashboard() {
             unsubTareas = onSnapshot(collection(db, "empleado_tareas"), (snap) => {
                 setTareasControl(snap.docs.map(d => ({ id: d.id, ...d.data() })));
             });
+        }
+
+        // Coleccion diminuta (un documento por empleado): alimenta "Equipo de Hoy".
+        let unsubHorarios = () => {};
+        if (activeView === "orders") {
+            unsubHorarios = subscribeToHorarios(setHorarios);
         }
 
         if (["orders", "design_production"].includes(activeView)) {
@@ -676,7 +677,7 @@ export default function Dashboard() {
             });
         }
 
-        return () => { unsubEmpleados(); unsubPagos(); unsubDesigners(); unsubMovimientosCaja(); unsubTareas(); };
+        return () => { unsubEmpleados(); unsubPagos(); unsubDesigners(); unsubMovimientosCaja(); unsubTareas(); unsubHorarios(); };
     }, [activeView]);
 
     useEffect(() => {
@@ -686,40 +687,7 @@ export default function Dashboard() {
     }, [activeView]);
 
 
-    // --- 6. LÓGICA DE NOTIFICACIONES Y FILTROS ---
-    const allNotifications = useMemo(() => {
-        let all: Notification[] = [...systemEvents];
-        ordenes.forEach(o => {
-            const clienteFinal = o.cliente?.nombreRazonSocial || "Cliente S/N";
-            const nOrdenStr = o.ordenNumero ? String(o.ordenNumero) : "S/N";
-            if (o.fecha) {
-                const date = typeof o.fecha === 'string' ? new Date(o.fecha) : (o.fecha as any).toDate?.();
-                if (date && !isNaN(date.getTime())) {
-                    all.push({
-                        id: `orden-${o.id}`, title: "Orden Registrada",
-                        description: `Orden #${nOrdenStr} — ${clienteFinal}`,
-                        type: 'info', icon: <FileSpreadsheet />, timestamp: date, isRead: true
-                    });
-                }
-            }
-            const pagosReg = (o as any).registroPagos || [];
-            pagosReg.forEach((p: any, idx: number) => {
-                const rawFecha = p.fechaRegistro || p.fecha || p.fechaPago;
-                if (rawFecha) {
-                    const date = typeof rawFecha === 'string' ? new Date(rawFecha) : (rawFecha as any).toDate?.();
-                    if (date && !isNaN(date.getTime())) {
-                        all.push({
-                            id: `pago-${o.id}-${idx}`, title: "Abono Procesado",
-                            description: `Recibido: $${p.montoUSD} — #${nOrdenStr} (${clienteFinal})`,
-                            type: 'success', icon: <CheckCircle2 />, timestamp: date, isRead: true
-                        });
-                    }
-                }
-            });
-        });
-        return all.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-    }, [ordenes, systemEvents]);
-
+    // --- 6. FILTROS ---
     const filteredOrdenes = useMemo(() => {
         const term = searchTerm.toLowerCase();
         return ordenes.filter((o) => {
@@ -739,9 +707,11 @@ export default function Dashboard() {
 
     const billingStats = useMemo(() => {
         const total = ordenes.length;
+        // Con tolerancia de un céntimo: comparar con `>=` exacto dejaba 47 órdenes
+        // ya cobradas fuera del contador de "Pagadas" por restos de coma flotante.
         const sinPagar = ordenes.filter(o => !o.montoPagadoUSD || o.montoPagadoUSD === 0).length;
-        const abonadas = ordenes.filter(o => (o.montoPagadoUSD || 0) > 0 && (o.montoPagadoUSD || 0) < (o.totalUSD || 0)).length;
-        const pagadas = ordenes.filter(o => (o.montoPagadoUSD || 0) >= (o.totalUSD || 0) && (o.totalUSD || 0) > 0).length;
+        const abonadas = ordenes.filter(o => estaAbonada(o)).length;
+        const pagadas = ordenes.filter(o => estaSaldada(o)).length;
         
         return { total, sinPagar, abonadas, pagadas };
     }, [ordenes]);
@@ -781,8 +751,6 @@ export default function Dashboard() {
 
         return result;
     }, [ordenes, cardModalState.type, cardSortBy]);
-
-    const isRoleAdminOrSales = userData?.rol === 'ADMIN' || userData?.rol === 'VENDEDOR';
 
     return (
       <NotificationProvider>
@@ -826,42 +794,44 @@ export default function Dashboard() {
                     <HelpCircle className="h-5 w-5" />
                 </Button>
 
-                <Button variant="ghost" size="icon" className="rounded-2xl bg-orange-500/10 h-10 w-10 text-orange-600" onClick={() => setIsExpenseNotiOpen(true)}>
-                    <Clock className="h-5 w-5" />
-                </Button>
-
+                {/* Una sola campana para todo, la misma del menú lateral: lee del
+                    contexto unificado y su contador ya no puede descuadrarse. */}
                 <div id="notification-bell" className="relative">
-                    <Button variant="ghost" size="icon" className="rounded-2xl bg-black/5 dark:bg-white/10 h-10 w-10 relative" onClick={() => { setIsNotiOpen(true); setHasUnseenNotifications(false); }}>
-                        <Bell className="h-5 w-5" />
-                        {(hasUnseenNotifications || allNotifications.some(n => !n.isRead)) && <motion.span layoutId="notification-dot" className="absolute top-2.5 right-2.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white dark:border-black" />}
-                    </Button>
+                    <NotificationBell onNavigate={(vista) => { if (puedeVer(vista)) setActiveView(vista); }} />
                 </div>
             </div>
           </header>
 
-          <NotificationCenter 
-              isOpen={isNotiOpen} onClose={() => setIsNotiOpen(false)} 
-              activeNotifications={allNotifications} onMarkAllRead={() => setHasUnseenNotifications(false)} 
-              onDeleteNotification={handleDeleteNotification} onToggleRead={handleToggleRead} 
-              onMaximize={() => { setIsNotiOpen(false); setActiveView("notifications_full"); }} 
-          />
-
-          <NotificationCenterExpenses 
-              isOpen={isExpenseNotiOpen} onClose={() => setIsExpenseNotiOpen(false)} 
-              activeNotifications={expenseEvents} onMarkAllRead={() => {}} 
-              onDeleteNotification={(id) => deleteNotification(id)} 
-              onToggleRead={(id) => {
-                  const n = expenseEvents.find(x => x.id === id);
-                  if(n) updateNotificationStatus(id, !n.isRead);
-              }} 
-          />
+          {/* Los dos paneles deslizantes que había aquí (uno para "sistema" y otro
+              para "gastos") leían campos distintos de la misma colección y cada uno
+              enseñaba solo la mitad de los avisos. Ahora hay una sola bandeja: la
+              campana del menú lateral para la vista rápida, y el Centro de
+              Notificaciones para el historial completo con filtros. */}
 
           <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 custom-scrollbar overflow-x-hidden">
             <AnimatePresence mode="wait">
               <motion.div key={activeView} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={springConfig} className="h-full">
                 
-                {/* VISTA SOLO PARA ADMIN Y VENTAS */}
-                {activeView === "orders" && isRoleAdminOrSales && (
+                {/* Antes, una vista sin permiso simplemente no renderizaba nada y el
+                    usuario se quedaba mirando una pantalla en blanco sin saber por qué. */}
+                {!puedeVer(activeView) && (
+                    <div className="flex flex-col items-center justify-center h-full text-center gap-4 py-20">
+                        <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-white/5 flex items-center justify-center">
+                            <ShieldCheck className="w-8 h-8 text-slate-400" />
+                        </div>
+                        <div>
+                            <p className="font-black uppercase tracking-widest text-sm text-slate-700 dark:text-slate-200">
+                                Sin acceso a esta sección
+                            </p>
+                            <p className="text-xs font-bold text-slate-400 mt-1 max-w-sm">
+                                Tu rango no tiene habilitada esta vista. Si la necesitas, pídele
+                                al administrador que te la active en Accesos y Roles.
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {activeView === "orders" && puedeVer("orders") && (
                     <motion.div layout className="max-w-7xl mx-auto space-y-6 md:space-y-8">
                         
                         <NewsBar 
@@ -870,8 +840,18 @@ export default function Dashboard() {
                             empleados={empleados} 
                             ordenes={ordenes} 
                             designers={designers}
+                            horarios={horarios}
                             gastos={gastos}
                             onAction={handleNewsAction}
+                        />
+
+                        {/* Resumen del día: responde a "qué pasa HOY". Se añade
+                            encima de las tarjetas de siempre, sin sustituirlas. */}
+                        <ResumenDelDia
+                            ordenes={ordenes}
+                            horarios={horarios}
+                            onNavigate={(vista) => { if (puedeVer(vista)) setActiveView(vista) }}
+                            onVerOrden={handleOpenOrderDetails}
                         />
 
                         <motion.div layout id="stats-grid" className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 w-full">
@@ -956,8 +936,8 @@ export default function Dashboard() {
                                         const o = ordenes.find(x => x.id === ordenId);
                                         if (o) {
                                             try {
-                                                const { notifyEstadoProduccion } = await import('@/lib/services/notification-service');
-                                                await notifyEstadoProduccion({ ordenNumero: o.ordenNumero, cliente: o.cliente, estadoProduccion: (changes as any).estadoProduccion, id: ordenId });
+                                                const { notificarEstadoProduccion } = await import('@/lib/services/notificaciones-service');
+                                                await notificarEstadoProduccion({ ordenNumero: o.ordenNumero, cliente: o.cliente, estadoProduccion: (changes as any).estadoProduccion, id: ordenId });
                                             } catch { /* no-op */ }
                                         }
                                     }
@@ -974,12 +954,12 @@ export default function Dashboard() {
                 )}
 
                 {/* VISTA DE CONFIGURACIÓN DE PERFIL */}
-                {activeView === "profile_settings" && (
+                {activeView === "profile_settings" && puedeVer("profile_settings") && (
                     <ProfileSettingsView />
                 )}
 
                 {/* VISTA DE FINANZAS PERSONALES DEL EMPLEADO */}
-                {activeView === "my_finances" && (
+                {activeView === "my_finances" && puedeVer("my_finances") && (
                     <EmployeeFinancesView
                         empleados={empleados}
                         pagos={pagos}
@@ -990,7 +970,7 @@ export default function Dashboard() {
                 )}
 
                 {/* VISTA DE CONTROL DE TAREAS Y BONOS */}
-                {activeView === "task_control" && (
+                {activeView === "task_control" && puedeVer("task_control") && (
                     <TaskControlView
                         currentUser={userData}
                         empleadosDb={empleados}
@@ -999,30 +979,30 @@ export default function Dashboard() {
                 )}
 
                 {/* VISTA DEL TALLER DE PRODUCCIÓN (El componente en sí filtra las áreas) */}
-                {activeView === "tasks_taller" && (
-                    <TasksView ordenes={ordenes} currentUserId={currentUserId || ""} />
+                {activeView === "tasks_taller" && puedeVer("tasks_taller") && (
+                    <TasksView />
                 )}
 
                 {/* VISTAS ADMINISTRATIVAS */}
-                {activeView === "users_auth" && <UsersManagementView />}
+                {activeView === "users_auth" && puedeVer("users_auth") && <UsersManagementView />}
 
                 
-                {activeView === "fixed_expenses" && (
+                {activeView === "fixed_expenses" && puedeVer("fixed_expenses") && (
                     <GastosFijosView 
                         gastos={gastosFijos} 
                         rates={{ usd: currentBcvRate, eur: eurRate }} 
                         onNotification={(t, d) => { 
                             setRateToastMessage(d); setShowRateToast(true); setTimeout(() => setShowRateToast(false), 4000);
-                            createNotification({ title: t, description: d, type: 'warning', category: 'expense' });
+                            crearNotificacion({ titulo: t, cuerpo: d, tipo: 'warning', categoria: 'gasto', link: 'fixed_expenses' });
                         }} 
                     />
                 )}
                 
-                {activeView === "insumos_mgmt" && <InsumosView gastos={gastos} currentBcvRate={currentBcvRate} currentUserId={currentUserId || ""} onCreateGasto={createGasto} onDeleteGasto={deleteGastoInsumo} />}
+                {activeView === "insumos_mgmt" && puedeVer("insumos_mgmt") && <InsumosView gastos={gastos} currentBcvRate={currentBcvRate} currentUserId={currentUserId || ""} onCreateGasto={createGasto} onDeleteGasto={deleteGastoInsumo} />}
 
-                {activeView === "financial_stats" && <EstadisticasDashboard gastosInsumos={gastos as any} gastosFijos={gastosFijos} empleados={empleados} pagosEmpleados={pagos} cobranzas={ordenes.map(o => ({id: o.id, montoUSD: (o as any).totalUSD || 0, montoBs: (o as any).totalBs || 0, estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente', fecha: o.fecha })) as any} ordenes={ordenes} clientes={clientes} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} ventasCatalogo={ventasCatalogo} />}
+                {activeView === "financial_stats" && puedeVer("financial_stats") && <EstadisticasDashboard gastosInsumos={gastos as any} gastosFijos={gastosFijos} empleados={empleados} pagosEmpleados={pagos} cobranzas={ordenes.map(o => ({id: o.id, montoUSD: (o as any).totalUSD || 0, montoBs: (o as any).totalBs || 0, estado: o.estadoPago === 'PAGADO' ? 'pagado' : 'pendiente', fecha: o.fecha })) as any} ordenes={ordenes} clientes={clientes} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} ventasCatalogo={ventasCatalogo} />}
 
-                {activeView === "catalogo_ventas" && (
+                {activeView === "catalogo_ventas" && puedeVer("catalogo_ventas") && (
                     <CatalogInventoryView
                         currentUser={userData}
                         rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
@@ -1031,14 +1011,23 @@ export default function Dashboard() {
                         selloBase64={assets.sello}
                     />
                 )}
-                {activeView === "employees_mgmt" && <EmpleadosView empleados={empleados} pagos={pagos} tareas={tareasControl} rates={{ usd: currentBcvRate, eur: eurRate }} />}
-                {activeView === "wallets" && <WalletsView ordenes={ordenes} gastos={gastos} gastosFijos={gastosFijos} pagosEmpleados={pagos} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} movimientosManuales={movimientosCaja} />}
-                {activeView === "payment_audit" && <PaymentAuditView ordenes={ordenes} gastos={[...gastos, ...gastosFijos]} pagosEmpleados={pagos} />}
-                {activeView === "design_production" && <DesignerPayrollView designers={designers} ordenes={ordenes} bcvRate={currentBcvRate} />}
-                {activeView === "clients" && <ClientsAndPaymentsView ordenes={ordenes} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} onRegisterPayment={handleOpenPaymentModal} pdfLogoBase64={assets.logo} firmaBase64={assets.firma} selloBase64={assets.sello} />}
+                {/* Consultar el horario lo puede hacer cualquiera con la vista;
+                    modificarlo, solo quien supervisa. */}
+                {activeView === "horarios" && puedeVer("horarios") && (
+                    <HorariosView
+                        empleados={empleados}
+                        puedeEditar={puedeSupervisarTareas(userData?.rol)}
+                    />
+                )}
+
+                {activeView === "employees_mgmt" && puedeVer("employees_mgmt") && <EmpleadosView empleados={empleados} pagos={pagos} tareas={tareasControl} rates={{ usd: currentBcvRate, eur: eurRate }} />}
+                {activeView === "wallets" && puedeVer("wallets") && <WalletsView ordenes={ordenes} gastos={gastos} gastosFijos={gastosFijos} pagosEmpleados={pagos} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} movimientosManuales={movimientosCaja} />}
+                {activeView === "payment_audit" && puedeVer("payment_audit") && <PaymentAuditView />}
+                {activeView === "design_production" && puedeVer("design_production") && <DesignerPayrollView designers={designers} ordenes={ordenes} bcvRate={currentBcvRate} eurRate={eurRate} usdtRate={parallelRate} />}
+                {activeView === "clients" && puedeVer("clients") && <ClientsAndPaymentsView ordenes={ordenes} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} onRegisterPayment={handleOpenPaymentModal} pdfLogoBase64={assets.logo} firmaBase64={assets.firma} selloBase64={assets.sello} />}
 
                 {/* VISTA DE PRESUPUESTOS (Solo Admin y Ventas) */}
-                {activeView === "calculator" && isRoleAdminOrSales && (
+                {activeView === "calculator" && puedeVer("calculator") && (
                     <BudgetEntryView 
                         currentUserId={currentUserId}
                         rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
@@ -1051,35 +1040,15 @@ export default function Dashboard() {
                 )}
                 
                 {/* HERRAMIENTAS LIBRES */}
-                {activeView === "old_calculator" && <CalculatorView onSendToProduction={handleSendCalcToOrder} />}
-                {activeView === "ai_background" && <BackgroundRemoverView />}
-                {activeView === "ai_upscale" && <UpscaleView />}
-                {activeView === "format_converter" && <FormatConverterView />}
+                {activeView === "old_calculator" && puedeVer("old_calculator") && <CalculatorView onSendToProduction={handleSendCalcToOrder} />}
+                {activeView === "ai_background" && puedeVer("ai_background") && <BackgroundRemoverView />}
+                {activeView === "ai_upscale" && puedeVer("ai_upscale") && <UpscaleView />}
+                {activeView === "format_converter" && puedeVer("format_converter") && <FormatConverterView />}
 
-                {activeView === "notifications_full" && (
-                    <div className="max-w-4xl mx-auto space-y-6">
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-8">
-                            <div>
-                                <h2 className="text-3xl font-extrabold tracking-tight">Centro de Actividades</h2>
-                                <p className="text-muted-foreground">Historial completo de eventos y notificaciones del sistema</p>
-                            </div>
-                            <Button variant="outline" onClick={() => setActiveView("orders")} className="rounded-2xl gap-2">
-                                <ChevronLeft className="w-4 h-4" /> Volver al Panel
-                            </Button>
-                        </div>
-                        <div className="flex flex-col gap-4">
-                            {allNotifications.length > 0 ? (
-                                allNotifications.map((noti) => (
-                                    <ActivityRow key={noti.id} n={noti} />
-                                ))
-                            ) : (
-                                <div className="text-center py-20 bg-white/50 dark:bg-white/5 rounded-[2.5rem] border border-dashed border-black/10">
-                                    <Bell className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                                    <p className="text-muted-foreground font-medium">No hay notificaciones para mostrar</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                {/* Centro de Notificaciones unificado: mismos datos que la campana,
+                    con búsqueda y filtros por categoría, prioridad y estado de lectura. */}
+                {activeView === "notifications_full" && puedeVer("notifications_full") && (
+                    <NotificationCenter onNavigate={(vista) => { if (puedeVer(vista)) setActiveView(vista); }} />
                 )}
 
               </motion.div>
@@ -1270,31 +1239,5 @@ function StatCard({ label, value, icon, subtext, color, className, onClick }: an
                 </div>
             </CardContent>
         </Card>
-    )
-}
-
-function ActivityRow({ n }: { n: Notification }) {
-    const colors: any = { 
-        success: "bg-emerald-500 shadow-emerald-500/20", 
-        info: "bg-blue-500 shadow-blue-500/20", 
-        warning: "bg-orange-500 shadow-orange-500/20", 
-        urgent: "bg-red-500 shadow-red-500/20", 
-        neutral: "bg-slate-500" 
-    };
-    const displayDate = n.timestamp instanceof Date ? n.timestamp : (n.timestamp as any)?.toDate ? (n.timestamp as any).toDate() : new Date();
-    
-    return (
-        <div className="group flex items-center gap-4 sm:gap-6 p-4 sm:p-6 bg-white dark:bg-[#1c1c1e] rounded-[1.8rem] sm:rounded-[2.5rem] border border-black/5 shadow-sm hover:shadow-xl transition-all w-full min-w-0">
-            <div className={cn("w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center text-white shadow-lg shrink-0", colors[n.type] || colors.neutral)}>
-                {n.icon && React.isValidElement(n.icon) ? React.cloneElement(n.icon as React.ReactElement, { className: "w-4 h-4 sm:w-5 sm:h-5 text-white" }) : <Bell className="w-4 h-4" />}
-            </div>
-            <div className="flex-1 min-w-0 overflow-hidden">
-                <div className="flex justify-between items-center mb-1 gap-2">
-                    <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-widest opacity-40 truncate">{n.title}</span>
-                    <time className="text-[9px] sm:text-[10px] font-bold opacity-30 shrink-0">{displayDate.toLocaleDateString('es-VE')}</time>
-                </div>
-                <h4 className="text-xs sm:text-sm font-bold truncate text-slate-900 dark:text-white">{n.description}</h4>
-            </div>
-        </div>
     )
 }

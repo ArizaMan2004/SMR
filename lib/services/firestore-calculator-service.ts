@@ -14,6 +14,9 @@ export interface AreaCalculation {
     mediciones: any[]; // Array de tus mediciones
     totalCost: number;
     totalM2: number;
+    /** Area de produccion del calculo (impresion / laser), la usa el wizard
+     *  al convertirlo en orden. Se guardaba pero el tipo no la declaraba. */
+    serviceType?: string;
 }
 
 // Tipo para Láser
@@ -25,6 +28,7 @@ export interface LaserCalculation {
     tiempos: any[]; // Array de tus tiempos
     totalMinutes: number;
     totalCost: number;
+    serviceType?: string;
 }
 
 // --- FUNCIONES PARA CÁLCULO DE ÁREA (m2) ---

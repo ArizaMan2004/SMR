@@ -24,6 +24,7 @@ import {
     Clock, CircleCheck, Loader2, Link2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { esCorteLaser } from '@/lib/utils/estados';
 
 type EstadoProduccion = 'PENDIENTE' | 'EN_PRODUCCION' | 'TERMINADA';
 
@@ -74,7 +75,10 @@ const getItemSubtotal = (item: ItemOrden) => {
   }
 };
 
-export function OrderDetailModal({ open, onClose, orden, rates, onUpdate, allOrdenes = [] }: OrderDetailModalProps) {
+// `rates` con valor por defecto: si alguien monta el modal sin pasarlo, antes
+// reventaba con "Cannot read properties of undefined" y se caía la aplicación
+// entera en vez de simplemente mostrar 0.
+export function OrderDetailModal({ open, onClose, orden, rates = { usd: 0, eur: 0, usdt: 0 }, onUpdate, allOrdenes = [] }: OrderDetailModalProps) {
   const [selectedCurrency, setSelectedCurrency] = useState<'USD' | 'EUR' | 'USDT'>('USD');
   const [updatingProd, setUpdatingProd] = useState(false);
   const [showLinkPicker, setShowLinkPicker] = useState(false);
@@ -435,7 +439,9 @@ function ItemRow({ item, isMaster }: { item: ItemOrden, isMaster?: boolean }) {
     
     const itemExtra = item as any;
     const isImpresion = item.tipoServicio === 'IMPRESION';
-    const isCorte = item.tipoServicio === 'CORTE';
+    // Acepta las dos formas que conviven en la base de datos: el wizard guarda
+    // 'CORTE' y la conversion desde la Calculadora guarda 'CORTE_LASER'.
+    const isCorte = esCorteLaser(item.tipoServicio);
 
     const detallesList = isImpresion && itemExtra.materialDetalleCorte 
         ? itemExtra.materialDetalleCorte.split(" | ") 

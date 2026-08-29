@@ -26,3 +26,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# Configuracion local de Claude Code (rutas absolutas de cada maquina)
+.claude/

@@ -13,6 +13,9 @@ import {
   limit,
   getDocs,
   getCountFromServer,
+  getAggregateFromServer,
+  sum,
+  count,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { OrdenServicio, EstadoOrden, EstadoPago, PaymentLog } from "@/lib/types/orden";
@@ -272,6 +275,82 @@ export async function getOrdenesStatsFromServer() {
     };
   } catch (error) {
     console.error("❌ Error al obtener estadísticas reales:", error);
+    return null;
+  }
+}
+
+/**
+ * Deuda REAL de todo el historial, calculada en el servidor.
+ *
+ * El panel mostraba "Por cobrar" sumando solo las órdenes cargadas en memoria
+ * (150), así que la cifra siempre salía corta. Descargar las 1.800 para sumarlas
+ * costaría 1.800 lecturas cada vez.
+ *
+ * Firestore sabe sumar sin enviar los documentos: `getAggregateFromServer` con
+ * `sum()` devuelve el total ya calculado y se factura como UNA lectura por cada
+ * 1.000 documentos recorridos. Con 1.800 órdenes son 2 lecturas por consulta en
+ * vez de 1.800: unas 4 en total contando la de anuladas.
+ *
+ * Se suma la colección entera sin filtrar por estado a propósito: hay órdenes
+ * con el estado en minúsculas ("Pagado") y otras sin estado, y un `where`
+ * las dejaría fuera. Las pagadas no distorsionan porque aportan cero
+ * (su total y su abonado coinciden); solo hay que descontar las anuladas.
+ */
+export async function getDeudaTotalFromServer(): Promise<{
+  deudaUSD: number;
+  facturadoUSD: number;
+  cobradoUSD: number;
+  /** Cuántas órdenes tienen saldo pendiente de verdad. */
+  ordenesConDeuda: number;
+  ordenes: number;
+} | null> {
+  try {
+    const colRef = collection(db, "ordenes");
+
+    // Solo se traen las que pueden deber algo: pendientes y abonadas. De 1.802
+    // órdenes son unas 217, así que se leen esas y no el historial entero.
+    // Se incluyen las dos grafías porque en la base conviven "PENDIENTE" y
+    // "Pendiente" según qué pantalla creó el registro.
+    const qDeudoras = query(
+      colRef,
+      where("estadoPago", "in", ["PENDIENTE", "ABONADO", "Pendiente", "Abonado"])
+    );
+
+    const [snap, aConteo] = await Promise.all([
+      getDocs(qDeudoras),
+      getCountFromServer(colRef),
+    ]);
+
+    // Se suman SOLO los saldos positivos, uno a uno.
+    //
+    // Restar sumas globales (Σfacturado − Σcobrado) daba una cifra falsa: hay
+    // clientes que pagaron de más, y esos $1.843 de sobrepago cancelaban la
+    // deuda de otros clientes distintos. Lo que se debe no se compensa entre
+    // personas: si uno pagó de más, el otro sigue debiendo igual.
+    let deuda = 0;
+    let facturado = 0;
+    let cobrado = 0;
+    let conDeuda = 0;
+
+    snap.docs.forEach(d => {
+      const o = d.data() as any;
+      const t = Number(o.totalUSD) || 0;
+      const p = Number(o.montoPagadoUSD) || 0;
+      facturado += t;
+      cobrado += p;
+      const saldo = t - p;
+      if (saldo > 0.01) { deuda += saldo; conDeuda++; }
+    });
+
+    return {
+      deudaUSD: deuda,
+      facturadoUSD: facturado,
+      cobradoUSD: cobrado,
+      ordenesConDeuda: conDeuda,
+      ordenes: aConteo.data().count || 0,
+    };
+  } catch (error) {
+    console.error("Error calculando la deuda total en el servidor:", error);
     return null;
   }
 }

@@ -10,13 +10,14 @@ import {
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { claveFechaLocal } from '@/lib/utils/fechas'
 
 export function GastosFijosForm({ onSubmit, isLoading, rates, initialData }: any) {
   const [formData, setFormData] = useState({
     nombre: "",
     monto: "",
     categoria: "Servicios",
-    proximoPago: new Date().toISOString().split('T')[0],
+    proximoPago: claveFechaLocal(),
     moneda: "USD" 
   });
 
@@ -27,7 +28,7 @@ export function GastosFijosForm({ onSubmit, isLoading, rates, initialData }: any
       let dateValue = "";
       if (initialData.proximoPago) {
         const d = initialData.proximoPago?.toDate ? initialData.proximoPago.toDate() : new Date(initialData.proximoPago);
-        dateValue = d.toISOString().split('T')[0];
+        dateValue = claveFechaLocal(d);
       }
 
       setFormData({
