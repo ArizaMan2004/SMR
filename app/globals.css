@@ -293,3 +293,31 @@
   .tracking-\[0\.3em\] { letter-spacing: 0.15em !important; }
   .tracking-\[0\.2em\] { letter-spacing: 0.1em !important; }
 }
+
+/* ==========================================================
+   DESPLEGABLES NATIVOS EN MODO OSCURO
+
+   Un <select> lo dibuja el sistema operativo, no la hoja de estilos.
+   Podemos darle color al recuadro cerrado, pero la lista que se abre al
+   pulsarlo la pinta el navegador segun `color-scheme`, y por defecto va en
+   claro: sobre el tema oscuro salia una lista blanca con texto casi
+   invisible. Es lo que se veia mal en filtros, gastos fijos, tareas y en
+   los desplegables nuevos de bancos y materiales.
+
+   Se arregla aqui y no select por select porque hay una decena repartidos
+   por la app y el que se anada manana tendria el mismo fallo.
+
+   `option` lleva color explicito porque Firefox en Linux ignora
+   color-scheme para las opciones y las deja transparentes.
+   ========================================================== */
+select { color-scheme: light; }
+
+.dark select {
+  color-scheme: dark;
+}
+
+.dark select option,
+.dark select optgroup {
+  background-color: #1c1c1e;
+  color: #f8fafc;
+}

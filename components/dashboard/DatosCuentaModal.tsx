@@ -53,18 +53,27 @@ export function DatosCuentaModal({ cuenta, open, onOpenChange }: Props) {
         }
     }
 
+    // En pago móvil el orden importa: el cliente los teclea en ese orden en
+    // la app del banco (banco, teléfono, cédula) y el número de cuenta ni
+    // aparece. En transferencia manda el número.
+    const esPagoMovil = cuenta.modo === 'pago_movil'
+
     const filas: Fila[] = [
-        banco && { etiqueta: 'Banco', valor: banco.nombre, copiar: banco.nombre },
+        banco && { etiqueta: 'Banco', valor: banco.nombre, copiar: banco.codigo },
         cuenta.titular && { etiqueta: 'Titular', valor: cuenta.titular, copiar: cuenta.titular },
         cuenta.documento && { etiqueta: 'RIF / Cédula', valor: cuenta.documento, copiar: cuenta.documento },
-        cuenta.numeroCuenta && {
+        !esPagoMovil && cuenta.numeroCuenta && {
             etiqueta: cuenta.tipoCuenta ? `Cuenta ${cuenta.tipoCuenta}` : 'Cuenta',
             valor: cuenta.numeroCuenta,
             // Se copia sin espacios ni guiones: es lo que espera el formulario
             // del banco, y es donde más se equivoca la gente al transcribir.
             copiar: cuenta.numeroCuenta.replace(/[^0-9]/g, ''),
         },
-        cuenta.telefono && { etiqueta: 'Pago Móvil', valor: cuenta.telefono, copiar: cuenta.telefono.replace(/[^0-9+]/g, '') },
+        cuenta.telefono && {
+            etiqueta: esPagoMovil ? 'Teléfono' : 'Pago Móvil',
+            valor: cuenta.telefono,
+            copiar: cuenta.telefono.replace(/[^0-9+]/g, ''),
+        },
         cuenta.correo && { etiqueta: 'Correo', valor: cuenta.correo, copiar: cuenta.correo },
         cuenta.usuario && { etiqueta: 'Usuario / Pay ID', valor: cuenta.usuario, copiar: cuenta.usuario },
     ].filter(Boolean) as Fila[]
@@ -79,6 +88,9 @@ export function DatosCuentaModal({ cuenta, open, onOpenChange }: Props) {
                         <LogoBanco codigo={cuenta.bancoCodigo} texto={cuenta.banco} size={28} />
                         <span className="min-w-0 truncate">{cuenta.nombre}</span>
                     </DialogTitle>
+                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1 text-left">
+                        {esPagoMovil ? 'Pago Móvil' : 'Transferencia'}
+                    </p>
                 </DialogHeader>
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-4">

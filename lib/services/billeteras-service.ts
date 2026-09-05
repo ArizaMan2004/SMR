@@ -55,6 +55,18 @@ export interface CuentaBilletera {
     titular?: string;
     /** RIF o cédula del titular: "J-12345678-9". */
     documento?: string;
+    /**
+     * Cómo se cobra por aquí.
+     *
+     * En Venezuela una cuenta nacional se usa de dos maneras distintas y no
+     * intercambiables: por transferencia, donde hace falta el número de 20
+     * dígitos, o por pago móvil, donde lo que se dicta es banco + teléfono +
+     * cédula y el número de cuenta no pinta nada. Guardarlo permite pedir solo
+     * lo que hace falta y enseñarle al cliente exactamente lo que va a usar.
+     *
+     * Sin definir se asume transferencia, que es como estaba hasta ahora.
+     */
+    modo?: "cuenta" | "pago_movil";
     /** Los 20 dígitos de la cuenta. */
     numeroCuenta?: string;
     /** Corriente, Ahorro… */
@@ -134,6 +146,7 @@ export const guardarBilletera = async (id: BilleteraId, datos: ConfigBilletera):
                     activa: c.activa !== false,
                     titular: (c.titular || "").trim(),
                     documento: (c.documento || "").trim(),
+                    modo: c.modo === "pago_movil" ? "pago_movil" : "cuenta",
                     numeroCuenta: (c.numeroCuenta || "").trim(),
                     tipoCuenta: (c.tipoCuenta || "").trim(),
                     telefono: (c.telefono || "").trim(),

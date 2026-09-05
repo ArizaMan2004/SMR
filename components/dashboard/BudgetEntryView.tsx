@@ -45,7 +45,7 @@ import {
     User, Calculator, TrendingUp, Sparkles, Layers, Zap, Wallet, X,
     DollarSign, CheckCircle2, Calendar, Pencil, RotateCcw, Check, 
     AlertCircle, Hourglass, Banknote, ChevronDown, Building2, Users,
-    Search, Filter, ArrowUp, ArrowDown, Ruler, Package, History
+    Search, Filter, ArrowUp, ArrowDown, Ruler, Package, History, AlertTriangle
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -108,6 +108,13 @@ const matchesQuery = (haystack: string, query: string) => {
     return words.every(w => target.includes(w));
 };
 
+import { SubItemsModal } from '@/components/dashboard/SubItemsModal'
+import {
+    m2DeSubItems, sinClasificar, itemsSinClasificar,
+    type SubItemInterno,
+} from '@/lib/services/subitems-service'
+import { guardarSubItemsDeItem } from '@/lib/firebase/firestore-budget-service'
+
 export default function BudgetEntryView({
     rates = { usd: 0, eur: 0, usdt: 0 }, 
     // Las tres imagenes llegan ya en base64 solo para armar el PDF.
@@ -136,6 +143,13 @@ export default function BudgetEntryView({
     const [selectedCatalogProduct, setSelectedCatalogProduct] = useState<CatalogoProducto | null>(null);
     const [selectedVarianteId, setSelectedVarianteId] = useState<string | null>(null);
 
+    // --- DESGLOSE INTERNO DE UN RENGLON ---
+    //
+    // Se abre desde dos sitios: desde el presupuesto que se esta escribiendo
+    // (todavia sin guardar) y desde una tarjeta del historial (ya facturado).
+    // De ahi que haga falta saber a que presupuesto pertenece el renglon.
+    const [subItemsTarget, setSubItemsTarget] = useState<{ item: any; budgetId?: string } | null>(null);
+
     const [isLoading, setIsLoading] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [recoveredDraft, setRecoveredDraft] = useState<any>(null);
@@ -150,6 +164,9 @@ export default function BudgetEntryView({
         maxMonto: '',
         minItems: '',
         date: 'ALL', // 'ALL', 'TODAY', 'WEEK', 'MONTH'
+        // Solo los presupuestos con algun renglon sin desglosar. Es la lista
+        // de trabajo pendiente para que el balance de metros cuadre.
+        soloSinClasificar: false,
         // Por defecto agrupados por cliente en orden alfabético: así los
         // presupuestos de una misma persona quedan juntos y se encuentran de un
         // vistazo, que es como se busca un presupuesto en el mostrador.
@@ -465,6 +482,36 @@ export default function BudgetEntryView({
         setErrors((prev:any) => ({ ...prev, subCliente: false, descripcion: false, cantidad: false, precio: false, medidas: false }));
     };
 
+    /**
+     * Guarda el desglose. Si el renglon es del presupuesto abierto, se queda
+     * en memoria y viaja con el resto al pulsar guardar. Si viene del
+     * historial, se escribe directo en Firestore: quien entra a clasificar un
+     * presupuesto viejo no espera tener que abrirlo y volverlo a guardar.
+     */
+    const handleGuardarSubItems = async (itemId: number, subItems: SubItemInterno[]) => {
+        const budgetId = subItemsTarget?.budgetId;
+
+        if (!budgetId) {
+            setBudgetData((p: any) => ({
+                ...p,
+                items: p.items.map((i: any) => i.id === itemId ? { ...i, subItems } : i),
+            }));
+            toast.success(subItems.length ? 'Desglose actualizado' : 'Desglose vaciado');
+            return;
+        }
+
+        try {
+            await guardarSubItemsDeItem(budgetId, itemId, subItems);
+            setHistory(prev => prev.map(b => b.id === budgetId
+                ? { ...b, items: (b.items || []).map((i: any) => i.id === itemId ? { ...i, subItems } : i) }
+                : b));
+            toast.success('Desglose guardado en el presupuesto');
+        } catch (e) {
+            console.error(e);
+            toast.error('No se pudo guardar el desglose');
+        }
+    };
+
     const handleEditItemRequest = (item: any) => {
         setNewItem({
             id: item.id,
@@ -695,6 +742,18 @@ export default function BudgetEntryView({
         if (errors[field]) setErrors((prev: any) => ({ ...prev, [field]: false }));
     };
 
+    /**
+     * Presupuestos con algun renglon sin desglosar.
+     *
+     * Es el recordatorio que pidio el taller: el presupuesto puede estar
+     * perfecto de cara al cliente y aun asi no haber dicho nunca que material
+     * se gasto, y esos metros no aparecen en ningun balance.
+     */
+    const pendientesDeClasificar = useMemo(
+        () => history.filter(b => itemsSinClasificar(b) > 0).length,
+        [history]
+    );
+
     // --- FILTRADO Y ORDENAMIENTO DE HISTORIAL ---
     const filteredHistory = useMemo(() => {
         let result = history.filter(entry => {
@@ -719,6 +778,7 @@ export default function BudgetEntryView({
             if (filters.minMonto !== '' && entry.totalUSD < Number(filters.minMonto)) return false;
             if (filters.maxMonto !== '' && entry.totalUSD > Number(filters.maxMonto)) return false;
             if (filters.minItems !== '' && (entry.items?.length || 0) < Number(filters.minItems)) return false;
+            if (filters.soloSinClasificar && itemsSinClasificar(entry) === 0) return false;
             if (filters.date !== 'ALL') {
                 const days = getDaysElapsed(entry.dateCreated);
                 if (filters.date === 'TODAY' && days > 0) return false;
@@ -760,7 +820,7 @@ export default function BudgetEntryView({
 
     // El punto rojo del botón de filtros avisa de que hay algo distinto de lo
     // normal, así que se compara contra los valores por defecto REALES.
-    const hasActiveFilters = filters.type !== 'ALL' || filters.date !== 'ALL' || filters.minMonto || filters.maxMonto || filters.minItems || filters.sortBy !== 'clienteNombre' || filters.sortOrder !== 'asc';
+    const hasActiveFilters = filters.type !== 'ALL' || filters.date !== 'ALL' || filters.minMonto || filters.maxMonto || filters.minItems || filters.soloSinClasificar || filters.sortBy !== 'clienteNombre' || filters.sortOrder !== 'asc';
 
     /** Presupuestos que aún no tienen número asignado (los creados antes). */
     const sinNumerar = useMemo(() => history.filter(h => !h.numero).length, [history]);
@@ -941,6 +1001,26 @@ export default function BudgetEntryView({
                                 <h3 className="font-black text-[10px] uppercase tracking-widest text-slate-400 ml-4 flex items-center gap-2">
                                     <Layers className="w-4 h-4 text-blue-500" /> Conceptos {newItem.id && <Badge className="bg-amber-500 ml-2">Editando</Badge>}
                                 </h3>
+
+                                {/* El recordatorio. Un renglon sin desglosar es plata
+                                    facturada cuyos metros no llegan al balance, y es
+                                    facil que se pase por alto porque el presupuesto
+                                    esta perfecto de cara al cliente. */}
+                                {itemsSinClasificar(budgetData) > 0 && (
+                                    <div className="mx-1 rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50/70 dark:bg-amber-500/5 p-3 sm:p-4 flex items-start gap-3">
+                                        <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
+                                        <p className="text-[11px] font-bold text-amber-700 dark:text-amber-500 leading-snug">
+                                            {itemsSinClasificar(budgetData) === 1
+                                                ? 'Hay 1 concepto sin desglosar.'
+                                                : `Hay ${itemsSinClasificar(budgetData)} conceptos sin desglosar.`}
+                                            {' '}Sus metros no entran en el balance ni descuentan del rollo.
+                                            Toca la etiqueta ambar de cada renglon para decir que material se uso.
+                                            <span className="block text-amber-600/70 dark:text-amber-500/60 font-medium mt-0.5">
+                                                Se puede hacer ahora o despues de facturar. No cambia nada de lo que ve el cliente.
+                                            </span>
+                                        </p>
+                                    </div>
+                                )}
                                 <div className={cn("p-4 bg-slate-50 dark:bg-slate-800/50 rounded-[2rem] border space-y-4 transition-all", (errors.descripcion || errors.cantidad || errors.subCliente) ? "border-red-200 bg-red-50/30" : "border-black/5")}>
                                     
                                     {budgetData.isMaster && (
@@ -1163,6 +1243,28 @@ export default function BudgetEntryView({
                                                                     <Ruler className="w-2.5 h-2.5" /> {item.medidaXCm}x{item.medidaYCm}cm
                                                                 </Badge>
                                                             )}
+
+                                                            {/* Que material hay detras de este renglon. En ambar
+                                                                mientras no se sepa: es plata facturada cuyos
+                                                                metros no estan entrando al balance. */}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setSubItemsTarget({ item })}
+                                                                title="Desglose interno: que material se gasto (no sale en el PDF)"
+                                                                className={cn(
+                                                                    "ml-2 inline-flex items-center gap-1 h-4 px-1.5 rounded-full border font-black text-[8px] uppercase align-middle transition-colors",
+                                                                    sinClasificar(item)
+                                                                        ? "border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100 dark:bg-amber-500/10 dark:border-amber-500/20"
+                                                                        : "border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:border-emerald-500/20"
+                                                                )}
+                                                            >
+                                                                <Layers className="w-2.5 h-2.5" />
+                                                                {sinClasificar(item)
+                                                                    ? 'Sin clasificar'
+                                                                    : (m2DeSubItems(item.subItems) > 0
+                                                                        ? `${m2DeSubItems(item.subItems).toLocaleString(undefined, { maximumFractionDigits: 2 })} m²`
+                                                                        : `${item.subItems.length} mat.`)}
+                                                            </button>
                                                         </TableCell>
                                                         <TableCell className="text-right px-3 sm:px-8 font-black text-blue-600 text-xs sm:text-sm tracking-tight">${item.totalUSD.toFixed(2)}</TableCell>
                                                         <TableCell className="pr-1 sm:pr-6">
@@ -1262,6 +1364,31 @@ export default function BudgetEntryView({
                                 <Badge className="rounded-full bg-blue-100 text-blue-600 px-3 border-none font-black">{filteredHistory.length}</Badge>
                             </div>
                         </div>
+
+                        {/* Cuantos presupuestos siguen sin decir que material
+                            gastaron. Se puede tocar para ver solo esos. */}
+                        {pendientesDeClasificar > 0 && (
+                            <div className="px-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setFilters(f => ({ ...f, soloSinClasificar: !f.soloSinClasificar }))}
+                                    className={cn(
+                                        "w-full flex items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition-colors",
+                                        filters.soloSinClasificar
+                                            ? "border-amber-300 bg-amber-100 dark:bg-amber-500/15"
+                                            : "border-amber-200 dark:border-amber-500/20 bg-amber-50/70 dark:bg-amber-500/5 hover:bg-amber-100/70"
+                                    )}
+                                >
+                                    <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500" />
+                                    <span className="flex-1 min-w-0 text-[10px] font-black uppercase tracking-wide text-amber-700 dark:text-amber-500 leading-snug">
+                                        {pendientesDeClasificar} sin desglosar
+                                        <span className="block normal-case tracking-normal font-bold text-amber-600/70 dark:text-amber-500/60">
+                                            {filters.soloSinClasificar ? 'Mostrando solo estos · toca para ver todos' : 'Sus metros no entran al balance'}
+                                        </span>
+                                    </span>
+                                </button>
+                            </div>
+                        )}
 
                         {/* BUSCADOR SIEMPRE A LA VISTA.
                             Antes vivía dentro del panel de filtros plegado, así que
@@ -1391,7 +1518,7 @@ export default function BudgetEntryView({
                                         </div>
 
                                         {hasActiveFilters && (
-                                            <Button variant="ghost" size="sm" onClick={() => setFilters({ search: '', type: 'ALL', minMonto: '', maxMonto: '', minItems: '', date: 'ALL', sortBy: 'dateCreated', sortOrder: 'desc' })} className="w-full text-[10px] uppercase font-black text-red-500 hover:bg-red-50 h-8 rounded-xl mt-2">
+                                            <Button variant="ghost" size="sm" onClick={() => setFilters({ search: '', type: 'ALL', minMonto: '', maxMonto: '', minItems: '', date: 'ALL', soloSinClasificar: false, sortBy: 'dateCreated', sortOrder: 'desc' })} className="w-full text-[10px] uppercase font-black text-red-500 hover:bg-red-50 h-8 rounded-xl mt-2">
                                                 Limpiar Filtros
                                             </Button>
                                         )}
@@ -1454,12 +1581,34 @@ export default function BudgetEntryView({
                                             {entry.items && entry.items.length > 0 && (
                                                 <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
                                                     {entry.items.slice(0, 2).map((item: any, idx: number) => (
-                                                        <div key={idx} className="flex justify-between items-center text-[10px] text-slate-500 dark:text-slate-400">
-                                                            <span className="truncate pr-3 font-medium flex items-center gap-1.5">
+                                                        <div key={idx} className="flex justify-between items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400">
+                                                            <span className="truncate pr-1 font-medium flex items-center gap-1.5 min-w-0">
                                                                 <span className="w-1 h-1 bg-slate-300 rounded-full shrink-0"></span>
-                                                                {item.descripcion}
+                                                                <span className="truncate">{item.descripcion}</span>
                                                             </span>
-                                                            <span className="font-black shrink-0 bg-slate-50 dark:bg-slate-800 px-1.5 rounded-md">x{item.cantidad}</span>
+                                                            <span className="flex items-center gap-1 shrink-0">
+                                                                {/* Clasificar despues de facturar: se guarda directo en
+                                                                    el presupuesto, sin tener que reabrirlo. */}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => { e.stopPropagation(); setSubItemsTarget({ item, budgetId: entry.id }); }}
+                                                                    title="Desglose interno: que material se gasto (no sale en el PDF)"
+                                                                    className={cn(
+                                                                        "inline-flex items-center gap-1 h-4 px-1.5 rounded-full border font-black text-[8px] uppercase transition-colors",
+                                                                        sinClasificar(item)
+                                                                            ? "border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100 dark:bg-amber-500/10 dark:border-amber-500/20"
+                                                                            : "border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:border-emerald-500/20"
+                                                                    )}
+                                                                >
+                                                                    <Layers className="w-2.5 h-2.5" />
+                                                                    {sinClasificar(item)
+                                                                        ? '?'
+                                                                        : (m2DeSubItems(item.subItems) > 0
+                                                                            ? `${m2DeSubItems(item.subItems).toLocaleString(undefined, { maximumFractionDigits: 1 })}m²`
+                                                                            : `${item.subItems.length}`)}
+                                                                </button>
+                                                                <span className="font-black bg-slate-50 dark:bg-slate-800 px-1.5 rounded-md">x{item.cantidad}</span>
+                                                            </span>
                                                         </div>
                                                     ))}
                                                     {entry.items.length > 2 && (
@@ -1514,6 +1663,16 @@ export default function BudgetEntryView({
                     </div>
                 </aside>
             </div>
+
+            {/* Desglose interno del renglon. Vale tanto para el presupuesto que
+                se esta escribiendo como para uno del historial ya facturado. */}
+            <SubItemsModal
+                open={!!subItemsTarget}
+                onOpenChange={o => !o && setSubItemsTarget(null)}
+                item={subItemsTarget?.item || null}
+                productos={catalogProductos}
+                onGuardar={handleGuardarSubItems}
+            />
         </motion.div>
     );
 }

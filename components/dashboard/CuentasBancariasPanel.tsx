@@ -58,11 +58,14 @@ const MAX_MB = 3
 // Qué se pide en cada billetera. Un Zelle no tiene número de cuenta de 20
 // dígitos y un Binance no tiene banco: enseñar esos campos vacíos solo hace
 // dudar a quien está cargando los datos.
-const CAMPOS: Record<string, { banco: boolean; cuenta: boolean; telefono: boolean; correo: boolean; usuario: boolean }> = {
-    cash_usd: { banco: false, cuenta: false, telefono: false, correo: false, usuario: false },
-    bank_bs:  { banco: true,  cuenta: true,  telefono: true,  correo: false, usuario: false },
-    zelle:    { banco: true,  cuenta: false, telefono: true,  correo: true,  usuario: false },
-    usdt:     { banco: false, cuenta: false, telefono: false, correo: true,  usuario: true },
+const CAMPOS: Record<string, { banco: boolean; cuenta: boolean; telefono: boolean; correo: boolean; usuario: boolean; modo: boolean }> = {
+    cash_usd: { banco: false, cuenta: false, telefono: false, correo: false, usuario: false, modo: false },
+    // La billetera en bolívares es la única donde la distinción importa: por
+    // transferencia se dicta el número de 20 dígitos, por pago móvil se dicta
+    // banco + teléfono + cédula y el número de cuenta no se usa.
+    bank_bs:  { banco: true,  cuenta: true,  telefono: true,  correo: false, usuario: false, modo: true },
+    zelle:    { banco: true,  cuenta: false, telefono: true,  correo: true,  usuario: false, modo: false },
+    usdt:     { banco: false, cuenta: false, telefono: false, correo: true,  usuario: true,  modo: false },
 }
 
 interface Props {
@@ -222,7 +225,9 @@ export function CuentasBancariasPanel({ config, onGuardado }: Props) {
                                                     </span>
                                                     {(c.numeroCuenta || c.telefono || c.correo || c.usuario) && (
                                                         <span className="block text-[10px] font-bold text-slate-400 truncate">
-                                                            {c.numeroCuenta || c.telefono || c.correo || c.usuario}
+                                                            {c.modo === 'pago_movil'
+                                                                ? `Pago Móvil · ${c.telefono || 'sin teléfono'}`
+                                                                : (c.numeroCuenta || c.telefono || c.correo || c.usuario)}
                                                         </span>
                                                     )}
                                                 </span>
@@ -260,6 +265,33 @@ export function CuentasBancariasPanel({ config, onGuardado }: Props) {
                                                     className="overflow-hidden"
                                                 >
                                                     <div className="px-4 pb-4 pt-1 space-y-3 border-t border-slate-100 dark:border-white/5">
+
+                                                        {CAMPOS[id].modo && (
+                                                            <div className="flex gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-black/30">
+                                                                {([
+                                                                    { valor: 'cuenta', texto: 'Transferencia' },
+                                                                    { valor: 'pago_movil', texto: 'Pago Móvil' },
+                                                                ] as const).map(op => {
+                                                                    const activo = (c.modo || 'cuenta') === op.valor
+                                                                    return (
+                                                                        <button
+                                                                            key={op.valor}
+                                                                            type="button"
+                                                                            onClick={() => editarCuenta(id, c.id, { modo: op.valor })}
+                                                                            className={cn(
+                                                                                "flex-1 h-8 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                                                                                activo
+                                                                                    ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                                                                                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                                                                            )}
+                                                                        >
+                                                                            {op.texto}
+                                                                        </button>
+                                                                    )
+                                                                })}
+                                                            </div>
+                                                        )}
+
                                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                                             {campo('Nombre interno', c.nombre, v => editarCuenta(id, c.id, { nombre: v }),
                                                                 id === 'zelle' ? 'Zelle de Samuel' : id === 'usdt' ? 'Binance principal' : 'Banesco Corriente')}
@@ -267,7 +299,7 @@ export function CuentasBancariasPanel({ config, onGuardado }: Props) {
                                                             {CAMPOS[id].banco && (
                                                             <div className="space-y-1">
                                                                 <Label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Banco</Label>
-                                                                <div className="flex items-center gap-2 h-10 px-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm">
+                                                                <div className="flex items-center gap-2 h-10 px-2.5 bg-white dark:bg-slate-800 rounded-xl shadow-sm">
                                                                     <LogoBanco codigo={c.bancoCodigo} texto={c.banco} size={20} />
                                                                     <select
                                                                         value={c.bancoCodigo || adivinarBanco(c.banco)?.codigo || ''}
@@ -275,7 +307,7 @@ export function CuentasBancariasPanel({ config, onGuardado }: Props) {
                                                                             bancoCodigo: e.target.value,
                                                                             banco: BANCOS_VE.find(x => x.codigo === e.target.value)?.nombre || '',
                                                                         })}
-                                                                        className="flex-1 min-w-0 bg-transparent text-sm font-bold outline-none cursor-pointer"
+                                                                        className="flex-1 min-w-0 bg-transparent text-sm font-bold outline-none cursor-pointer text-slate-900 dark:text-white [color-scheme:light] dark:[color-scheme:dark]"
                                                                     >
                                                                         <option value="">Banco…</option>
                                                                         {BANCOS_VE.map(x => (
@@ -292,9 +324,11 @@ export function CuentasBancariasPanel({ config, onGuardado }: Props) {
                                                                 id === 'zelle' ? 'Samuel Leal' : 'SMR Lase Print C.A.')}
                                                             {campo(id === 'zelle' ? 'Documento' : 'RIF / Cédula', c.documento, v => editarCuenta(id, c.id, { documento: v }), 'J-12345678-9')}
 
-                                                            {CAMPOS[id].cuenta && campo('Número de cuenta', c.numeroCuenta, v => editarCuenta(id, c.id, { numeroCuenta: v }), '0134 0000 00 0000000000')}
-                                                            {CAMPOS[id].cuenta && campo('Tipo de cuenta', c.tipoCuenta, v => editarCuenta(id, c.id, { tipoCuenta: v }), 'Corriente')}
-                                                            {CAMPOS[id].telefono && campo(id === 'zelle' ? 'Teléfono' : 'Teléfono (Pago Móvil)', c.telefono, v => editarCuenta(id, c.id, { telefono: v }), '0412-1234567', 'tel')}
+                                                            {CAMPOS[id].cuenta && (c.modo || 'cuenta') === 'cuenta' && campo('Número de cuenta', c.numeroCuenta, v => editarCuenta(id, c.id, { numeroCuenta: v }), '0134 0000 00 0000000000')}
+                                                            {CAMPOS[id].cuenta && (c.modo || 'cuenta') === 'cuenta' && campo('Tipo de cuenta', c.tipoCuenta, v => editarCuenta(id, c.id, { tipoCuenta: v }), 'Corriente')}
+                                                            {CAMPOS[id].telefono && campo(
+                                                                c.modo === 'pago_movil' ? 'Teléfono del Pago Móvil' : id === 'zelle' ? 'Teléfono' : 'Teléfono (Pago Móvil)',
+                                                                c.telefono, v => editarCuenta(id, c.id, { telefono: v }), '0412-1234567', 'tel')}
                                                             {CAMPOS[id].correo && campo(id === 'zelle' ? 'Correo del Zelle' : 'Correo', c.correo, v => editarCuenta(id, c.id, { correo: v }), 'pagos@empresa.com', 'email')}
                                                             {CAMPOS[id].usuario && campo('Usuario / Pay ID', c.usuario, v => editarCuenta(id, c.id, { usuario: v }), 'smrlaseprint')}
                                                         </div>

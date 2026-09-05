@@ -16,6 +16,8 @@ import {
     serverTimestamp
 } from "firebase/firestore";
 
+import type { SubItemInterno } from "@/lib/services/subitems-service";
+
 // --- INTERFACES DE DATOS ---
 export interface BudgetItem {
     id: number;
@@ -23,6 +25,18 @@ export interface BudgetItem {
     cantidad: number;
     precioUnitarioUSD: number;
     totalUSD: number;
+
+    /**
+     * Desglose INTERNO del renglon: que material salio y cuantos metros.
+     *
+     * No aparece en ningun PDF. El renglon que ve el cliente sigue siendo el
+     * texto de arriba; esto es lo que permite al balance saber que detras de
+     * "Senalizacion del local, $450" habia 12 m2 de vinil impreso.
+     *
+     * Opcional a proposito: se puede rellenar despues de facturar, y hay
+     * cientos de presupuestos viejos que nunca lo van a tener.
+     */
+    subItems?: SubItemInterno[];
 }
 
 export interface DbBudgetEntry {
@@ -180,6 +194,35 @@ export async function saveBudgetToFirestore(budgetData: DbBudgetEntry): Promise<
         console.error("Error en saveBudgetToFirestore:", e);
         throw new Error("No se pudo procesar la solicitud en la base de datos.");
     }
+}
+
+/**
+ * Guarda el desglose interno de UN renglon de un presupuesto ya guardado.
+ *
+ * Se lee el documento fresco antes de escribir en vez de mandar el
+ * presupuesto que hay en pantalla: estos desgloses se rellenan a menudo dias
+ * despues de facturar, con la lista del historial cargada hace rato, y
+ * escribir el objeto entero pisaria cualquier cambio hecho mientras tanto.
+ * Solo se toca el campo subItems del renglon indicado.
+ */
+export async function guardarSubItemsDeItem(
+    budgetId: string,
+    itemId: number,
+    subItems: SubItemInterno[]
+): Promise<void> {
+    const ref = doc(db, BUDGETS_COLLECTION, budgetId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error("El presupuesto ya no existe.");
+
+    const datos = snap.data() as DbBudgetEntry;
+    const items = (datos.items || []).map(item =>
+        item.id === itemId
+            // JSON.parse/stringify quita los undefined, que Firestore rechaza.
+            ? { ...item, subItems: JSON.parse(JSON.stringify(subItems)) }
+            : item
+    );
+
+    await setDoc(ref, { items }, { merge: true });
 }
 
 /**
