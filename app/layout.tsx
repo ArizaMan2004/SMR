@@ -6,8 +6,8 @@ import { AuthProvider } from "@/lib/auth-context"
 import { ThemeProviderWrapper } from "@/components/theme-provider"
 import "./globals.css"
 
-const _geist = Geist({ subsets: ["latin"] })
-const _geistMono = Geist_Mono({ subsets: ["latin"] })
+const geistSans = Geist({ subsets: ["latin"], variable: "--font-geist-sans", display: "swap" })
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono", display: "swap" })
 
 export const metadata: Metadata = {
   title: "SMR Lase Print - Impresión Digital y Corte Láser",
@@ -28,7 +28,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
+  // Sin maximumScale: bloquear el zoom deja tirados a quienes necesitan
+  // acercar la pantalla, y en el taller se consulta desde el teléfono.
   themeColor: "#2563eb",
 }
 
@@ -38,9 +39,9 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="es" suppressHydrationWarning>
+    <html lang="es" className={`${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
       {/* AGREGADO: suppressHydrationWarning aquí abajo 👇 */}
-      <body className={`font-sans antialiased`} suppressHydrationWarning>
+      <body className="font-sans antialiased" suppressHydrationWarning>
         <AuthProvider>
           <ThemeProviderWrapper>{children}</ThemeProviderWrapper>
         </AuthProvider>

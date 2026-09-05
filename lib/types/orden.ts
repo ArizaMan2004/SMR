@@ -93,6 +93,14 @@ export interface ItemOrden {
     impresionMaterialPropio?: 'Propio' | 'Intermediario';
 
     empleadoAsignado?: string; 
+
+    /** Minutos de corte láser que muestra el detalle de la orden. */
+    tiempoCorte?: number | string; 
+
+    /** Nota que deja el área de producción sobre esta tarea. */
+    areaNote?: string;
+    /** Marca de tarea revisada/terminada por el taller. */
+    isReviewed?: boolean; 
     
     // Precios
     precioUnitario: number; 

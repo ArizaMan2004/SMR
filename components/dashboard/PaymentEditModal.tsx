@@ -22,13 +22,18 @@ import { formatCurrency } from '@/lib/utils/order-utils'
 import { fetchBCVRateFromAPI } from "@/lib/services/bcv-service"
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
 import { type OrdenServicio } from '@/lib/types/orden'
+import {
+    subscribeToBilleteras, nombreBilletera, cuentasActivas,
+    type ConfigBilleteras,
+} from '@/lib/services/billeteras-service'
 import { cn } from '@/lib/utils'
+import { LogoBanco } from '@/components/dashboard/LogoBanco'
 
 interface PaymentEditModalProps {
     isOpen: boolean
     orden: OrdenServicio
     // ✅ Firma actualizada para aceptar descuento y la FECHA DEL PAGO
-    onSave: (abonoUSD: number, nota: string | undefined, imagenUrl: string | undefined, metodo: string, descuento?: number, fechaPago?: string) => Promise<void> | void
+    onSave: (abonoUSD: number, nota: string | undefined, imagenUrl: string | undefined, metodo: string, descuento?: number, fechaPago?: string, cuentaId?: string) => Promise<void> | void
     onClose: () => void
     currentUserId: string
     rates?: { usd: number, eur: number, usdt: number }
@@ -43,7 +48,24 @@ const formatForDateTimeInput = (date: Date) => {
 export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: PaymentEditModalProps) {
     
     // --- ESTADOS ---
-    const [wallet, setWallet] = useState('cash_usd') 
+    const [wallet, setWallet] = useState('cash_usd')
+
+    // Cuentas de banco configuradas por la empresa. Elegir una es lo que
+    // permite saber despues por cual banco entro este cobro; si todavia no hay
+    // ninguna dada de alta, este paso ni se muestra.
+    const [configBilleteras, setConfigBilleteras] = useState<ConfigBilleteras>({})
+    const [cuentaId, setCuentaId] = useState<string>('')
+    useEffect(() => subscribeToBilleteras(setConfigBilleteras), [])
+
+    const cuentasDeEstaBilletera = cuentasActivas(wallet, configBilleteras)
+
+    // Al cambiar de billetera la cuenta anterior deja de tener sentido. Si la
+    // nueva solo tiene una, se elige sola: un clic menos en caja.
+    useEffect(() => {
+        const propias = cuentasActivas(wallet, configBilleteras)
+        setCuentaId(prev => propias.some(c => c.id === prev) ? prev : (propias.length === 1 ? propias[0].id : ''))
+    }, [wallet, configBilleteras])
+
     const [currencyMode, setCurrencyMode] = useState<'USD' | 'BS'>('USD')
     const [calculationBase, setCalculationBase] = useState<'USD' | 'EUR' | 'USDT'>('USD') 
     const [headerRateType, setHeaderRateType] = useState<'USD' | 'EUR'>('USD')
@@ -187,6 +209,12 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
             if (wallet === 'usdt') metodoLegible = "Binance USDT";
             if (wallet === 'cash_usd' && currencyMode === 'BS') metodoLegible = "Efectivo Bs";
 
+            // El nombre del banco entra en la etiqueta ademas de guardarse el id:
+            // asi los historiales viejos y los reportes que solo leen el texto
+            // tambien lo muestran, sin tener que cruzar nada.
+            const cuentaElegida = cuentasDeEstaBilletera.find(c => c.id === cuentaId);
+            if (cuentaElegida) metodoLegible = metodoLegible + " - " + cuentaElegida.nombre;
+
             // Nota automática con detalle de tasa
             let finalNota = nota
             if (currencyMode === 'BS') {
@@ -202,7 +230,7 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
             const finalDateISO = paymentDate ? new Date(paymentDate).toISOString() : new Date().toISOString();
 
             // Enviamos la fecha personalizada como el 6to parámetro
-            await onSave(finalAmount, finalNota || undefined, imageUrl, metodoLegible, discountAmount, finalDateISO)
+            await onSave(finalAmount, finalNota || undefined, imageUrl, metodoLegible, discountAmount, finalDateISO, cuentaId || undefined)
             onClose()
         } catch (error) {
             console.error(error)
@@ -266,6 +294,37 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
                             <WalletOption id="usdt" label="Binance" icon={Coins} active={wallet} onClick={setWallet} color="orange" />
                         </div>
                     </div>
+
+                    {/* A que cuenta concreta entra. Solo sale si la empresa dio de
+                        alta cuentas para esta billetera. */}
+                    {cuentasDeEstaBilletera.length > 0 && (
+                        <div className="space-y-2">
+                            <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                                {nombreBilletera(wallet, configBilleteras)} · ¿A qué cuenta?
+                            </Label>
+                            <div className="flex flex-wrap gap-2">
+                                {cuentasDeEstaBilletera.map(c => (
+                                    <button
+                                        key={c.id}
+                                        type="button"
+                                        onClick={() => setCuentaId(cuentaId === c.id ? '' : c.id)}
+                                        title={[c.banco, c.referencia].filter(Boolean).join(' · ') || undefined}
+                                        className={cn(
+                                            "px-3 h-9 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border",
+                                            cuentaId === c.id
+                                                ? "bg-slate-900 text-white border-slate-900 shadow-md"
+                                                : "bg-slate-50 dark:bg-white/5 text-slate-500 border-transparent hover:border-slate-200"
+                                        )}
+                                    >
+                                        <span className="inline-flex items-center gap-1.5">
+                                            <LogoBanco codigo={c.bancoCodigo} texto={c.banco} size={14} />
+                                            {c.nombre}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     <Separator />
 

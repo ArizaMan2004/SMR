@@ -45,7 +45,9 @@ async function loadPdfDependencies() {
     ]);
 
     const pdfMake = pdfMakeImport.default || pdfMakeImport;
-    const pdfFontsModule = pdfFontsImport.default || pdfFontsImport;
+    // pdfmake publica vfs_fonts sin tipos fiables (declara `string`), asi que
+    // se inspecciona en crudo: la forma cambia entre versiones.
+    const pdfFontsModule: any = (pdfFontsImport as any).default || pdfFontsImport;
     let vfsObject = null;
 
     if (pdfFontsModule && pdfFontsModule.pdfMake && pdfFontsModule.pdfMake.vfs) vfsObject = pdfFontsModule.pdfMake.vfs;

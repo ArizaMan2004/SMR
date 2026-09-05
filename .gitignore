@@ -29,3 +29,7 @@ next-env.d.ts
 
 # Configuracion local de Claude Code (rutas absolutas de cada maquina)
 .claude/
+
+# Assets de IA: los genera el postinstall copiandolos de node_modules.
+# Estaban versionados y son ~35 MB de .wasm que se regeneran solos.
+/public/ai-assets/

@@ -19,7 +19,7 @@ const firebaseConfig = {
 }
 
 // Evita reinicializar la app en hot-reload / múltiples imports.
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
+export const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
 
 export const auth = getAuth(app)
 
@@ -76,3 +76,5 @@ if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
     },
   }
 }
+
+export default app

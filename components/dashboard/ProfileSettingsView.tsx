@@ -15,8 +15,9 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge' // <--- ¡AQUÍ ESTÁ LA CORRECCIÓN!
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from 'sonner'
-import { UserCircle, Shield, Key, Mail, User, Loader2, Save, Eye, EyeOff, AlertTriangle } from 'lucide-react'
+import { UserCircle, Shield, Key, Mail, User, Loader2, Save, Eye, EyeOff, AlertTriangle, Building2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { IdentidadEmpresaPanel } from '@/components/dashboard/IdentidadEmpresaPanel'
 
 export function ProfileSettingsView() {
     const { user, userData } = useAuth()
@@ -161,7 +162,15 @@ export function ProfileSettingsView() {
                     <TabsTrigger value="seguridad" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                         <Shield className="w-4 h-4 mr-2 inline-block"/> Seguridad y Acceso
                     </TabsTrigger>
+                    <TabsTrigger value="identidad" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
+                        <Building2 className="w-4 h-4 mr-2 inline-block"/> Identidad de Empresa
+                    </TabsTrigger>
                 </TabsList>
+
+                {/* --- PESTAÑA 3: LOGO, FIRMA Y SELLO DE LA EMPRESA --- */}
+                <TabsContent value="identidad" className="mt-0">
+                    <IdentidadEmpresaPanel />
+                </TabsContent>
 
                 {/* --- PESTAÑA 1: DATOS PERSONALES --- */}
                 <TabsContent value="perfil" className="mt-0">

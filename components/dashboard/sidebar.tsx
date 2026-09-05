@@ -157,7 +157,7 @@ export default function Sidebar({
                                         "p-1 rounded-lg transition-colors shrink-0",
                                         isActive && !hasChildren ? "bg-white/20" : "bg-slate-100 dark:bg-slate-800"
                                     )}>
-                                        {React.cloneElement(item.icon, { className: "w-4 h-4" })}
+                                        {React.cloneElement(item.icon as React.ReactElement<{ className?: string }>, { className: "w-4 h-4" })}
                                     </div>
                                     <span className="text-[11px] font-bold tracking-tight flex-1 text-left uppercase truncate">
                                         {item.label}

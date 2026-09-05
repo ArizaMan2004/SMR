@@ -26,6 +26,13 @@ import { collection, addDoc, getDocs, doc, setDoc, getDoc } from "firebase/fires
 import { db } from "@/lib/firebase"
 import { claveFechaLocal } from '@/lib/utils/fechas'
 
+import { BilleterasConfigModal } from "@/components/dashboard/BilleterasConfigModal"
+import { LogoBanco } from "@/components/dashboard/LogoBanco"
+import {
+    subscribeToBilleteras, nombreBilletera, cuentasActivas, buscarCuenta,
+    type ConfigBilleteras,
+} from "@/lib/services/billeteras-service"
+
 interface WalletsViewProps {
     rates: { usd: number, eur: number, usdt: number }
     yesterdayRate?: number
@@ -51,6 +58,16 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
     
     // --- ESTADOS ---
     const [selectedWallet, setSelectedWallet] = useState<string>('cash_usd')
+
+    // Nombres propios de las billeteras y las cuentas de banco que cuelgan de
+    // cada una. Suscrito: si alguien renombra una cuenta, se ve al momento.
+    const [configBilleteras, setConfigBilleteras] = useState<ConfigBilleteras>({})
+    const [isCuentasModalOpen, setIsCuentasModalOpen] = useState(false)
+    // Chip de filtro del historial: '' = todas las cuentas de esa billetera.
+    const [cuentaFiltro, setCuentaFiltro] = useState<string>('')
+
+    useEffect(() => subscribeToBilleteras(setConfigBilleteras), [])
+    useEffect(() => { setCuentaFiltro('') }, [selectedWallet])
     const [showTutorial, setShowTutorial] = useState(false)
     const [searchQuery, setSearchQuery] = useState("") 
     
@@ -75,11 +92,18 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
     })
     
     const [manualForm, setManualForm] = useState({ 
-        mode: 'SIMPLE', tipo: 'INGRESO', billetera: 'cash_usd', monto: '', montoReal: '', descripcion: '', fecha: claveFechaLocal() 
+        mode: 'SIMPLE', tipo: 'INGRESO', billetera: 'cash_usd', cuentaId: '', monto: '', montoReal: '', descripcion: '', fecha: claveFechaLocal() 
     })
 
     const [unlockedWallets, setUnlockedWallets] = useState<Record<string, boolean>>({})
     const [cuadreData, setCuadreData] = useState<Record<string, string>>({})
+
+    // WALLETS_CONFIG trae el icono y el color, que no se configuran. El nombre
+    // sí: se le pega encima el que haya puesto la empresa.
+    const WALLETS = useMemo(
+        () => WALLETS_CONFIG.map(w => ({ ...w, label: nombreBilletera(w.id, configBilleteras) })),
+        [configBilleteras]
+    )
 
     const [fullOrdenes, setFullOrdenes] = useState<any[]>([])
     const [fullGastos, setFullGastos] = useState<any[]>([])
@@ -183,6 +207,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                             montoUSD: 0,
                             tasaAplicada: tasaAplicada,
                             metodoPago: p.metodo || p.paymentMethod || 'Abono Global',
+                            cuentaId: p.cuentaId || '',
                             referencia: p.nota || p.referencia || '',
                             imagenUrl: img || null,
                             ordenesRelacionadas: [] // Guardamos los N° de ordenes
@@ -213,6 +238,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                         montoUSD: amount,
                         tasaAplicada: tasaAplicada,
                         metodoPago: p.metodo || p.paymentMethod || 'N/A',
+                        cuentaId: p.cuentaId || '',
                         referencia: p.nota || p.referencia || '',
                         imagenUrl: p.imagenUrl || p.comprobante || null,
                         ordenRef: String(o.ordenNumero)
@@ -246,6 +272,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                 montoUSD: amountUSD,
                 tasaAplicada: tasaAplicada,
                 metodoPago: g.metodoPago || 'N/A',
+                cuentaId: g.cuentaId || '',
                 referencia: g.referencia || g.numeroFactura || '',
                 imagenUrl: g.imagenUrl || g.reciboUrl || null
             });
@@ -271,6 +298,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                 montoUSD: Number(p.totalUSD) || 0,
                 tasaAplicada: rates.usd,
                 metodoPago: p.metodoPago || 'Efectivo USD',
+                cuentaId: p.cuentaId || '',
                 referencia: p.nota || p.notaAdicional || '',
                 imagenUrl: p.comprobante || null
             });
@@ -289,8 +317,9 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                 description: m.descripcion, date: parseDate(m.fecha), category: m.categoria || 'Ajuste',
                 montoUSD: (targetWallet === 'bank_bs' && rates.usd > 0) ? (amount / rates.usd) : amount,
                 tasaAplicada: targetWallet === 'bank_bs' ? rates.usd : 1,
-                metodoPago: 'Ajuste de Sistema',
-                referencia: 'Cuadre / Movimiento Manual',
+                metodoPago: m.metodoPago || 'Ajuste de Sistema',
+                cuentaId: m.cuentaId || '',
+                referencia: m.referencia || 'Cuadre / Movimiento Manual',
                 imagenUrl: null
             });
         });
@@ -302,6 +331,11 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
     // Filtro del buscador
     const activeMovements = useMemo(() => {
         let movs = walletBalances.movements.filter((m:any) => m.wallet === selectedWallet);
+        // Filtro por banco: 'SIN' junta lo que se registró antes de que
+        // existieran las cuentas, que es casi todo el histórico.
+        if (cuentaFiltro) {
+            movs = movs.filter((m:any) => cuentaFiltro === 'SIN' ? !m.cuentaId : m.cuentaId === cuentaFiltro);
+        }
         if (searchQuery.trim() !== "") {
             const q = searchQuery.toLowerCase();
             movs = movs.filter((m:any) => 
@@ -312,7 +346,23 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
             );
         }
         return movs;
-    }, [walletBalances.movements, selectedWallet, searchQuery]);
+    }, [walletBalances.movements, selectedWallet, searchQuery, cuentaFiltro]);
+
+    // Cuánto entró y salió por cada banco de la billetera que se está mirando.
+    // Es la pregunta de siempre: "¿esto por dónde me lo pagaron?".
+    const desgloseCuentas = useMemo(() => {
+        const propias = cuentasActivas(selectedWallet, configBilleteras);
+        const movs = walletBalances.movements.filter((m:any) => m.wallet === selectedWallet);
+
+        const neto = (id: string) => movs
+            .filter((m:any) => id === 'SIN' ? !m.cuentaId : m.cuentaId === id)
+            .reduce((t:number, m:any) => t + (m.type === 'EGRESO' ? -m.amount : m.amount), 0);
+
+        const filas = propias.map(c => ({ id: c.id, nombre: c.nombre, banco: c.banco, bancoCodigo: c.bancoCodigo, total: neto(c.id) }));
+        const sinAsignar = movs.filter((m:any) => !m.cuentaId).length;
+        if (sinAsignar > 0) filas.push({ id: 'SIN', nombre: 'Sin cuenta asignada', banco: '', bancoCodigo: '', total: neto('SIN') });
+        return filas;
+    }, [walletBalances.movements, selectedWallet, configBilleteras]);
 
     const rateAnalysis = useMemo(() => {
         const diff = rates.usd - prevRate;
@@ -344,7 +394,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
             await Promise.all([
                 addDoc(collection(db, "movimientos_caja"), {
                     billetera: 'bank_bs', tipo: 'EGRESO', monto: bs,
-                    descripcion: `Compra de divisas → ${WALLETS_CONFIG.find(w => w.id === exchangeForm.destino)?.label}`,
+                    descripcion: `Compra de divisas → ${WALLETS.find(w => w.id === exchangeForm.destino)?.label}`,
                     fecha: new Date().toISOString(), categoria: 'Cambio de Divisas', referencia: exchangeForm.referencia
                 }),
                 addDoc(collection(db, "movimientos_caja"), {
@@ -366,13 +416,14 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
         if (!manualForm.monto || parseFloat(manualForm.monto) <= 0) return alert("Ingrese un monto válido");
         const ajuste = {
             billetera: manualForm.billetera, tipo: manualForm.tipo, monto: parseFloat(manualForm.monto),
+            cuentaId: manualForm.cuentaId || '',
             descripcion: manualForm.descripcion || `Movimiento manual (${manualForm.tipo})`,
             fecha: new Date().toISOString(), categoria: 'Ajuste'
         };
         try {
             await addDoc(collection(db, "movimientos_caja"), ajuste);
             setIsManualModalOpen(false);
-            setManualForm({ mode: 'SIMPLE', tipo: 'INGRESO', billetera: 'cash_usd', monto: '', montoReal: '', descripcion: '', fecha: claveFechaLocal() });
+            setManualForm({ mode: 'SIMPLE', tipo: 'INGRESO', billetera: 'cash_usd', cuentaId: '', monto: '', montoReal: '', descripcion: '', fecha: claveFechaLocal() });
             await fetchFullHistory();
         } catch (error) { alert("Error al guardar el movimiento"); }
     }
@@ -403,7 +454,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
         } catch (error) { alert("Hubo un error al guardar el ajuste."); }
     }
 
-    const currentWalletData = WALLETS_CONFIG.find(w => w.id === selectedWallet);
+    const currentWalletData = WALLETS.find(w => w.id === selectedWallet);
 
     return (
         <div className="space-y-4 sm:space-y-6 px-1 sm:px-2 font-sans pb-24 text-slate-800 dark:text-slate-100 animate-in fade-in duration-500 relative">
@@ -447,14 +498,15 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                 </div>
 
                 <div className="flex gap-2 w-full sm:w-auto">
-                    <Button onClick={() => setIsConfigModalOpen(true)} variant="ghost" size="icon" className="rounded-xl hover:bg-slate-100 text-slate-400 shrink-0"><Settings className="w-4 h-4 sm:w-5 sm:h-5" /></Button>
+                    <Button onClick={() => setIsCuentasModalOpen(true)} variant="ghost" size="icon" title="Nombres de billeteras y cuentas de banco" className="rounded-xl hover:bg-slate-100 text-slate-400 shrink-0"><Landmark className="w-4 h-4 sm:w-5 sm:h-5" /></Button>
+                    <Button onClick={() => setIsConfigModalOpen(true)} variant="ghost" size="icon" title="Saldos iniciales" className="rounded-xl hover:bg-slate-100 text-slate-400 shrink-0"><Settings className="w-4 h-4 sm:w-5 sm:h-5" /></Button>
                     <Button onClick={() => setIsManualModalOpen(true)} variant="outline" className="rounded-xl sm:rounded-2xl border-slate-200 font-bold uppercase text-[10px] tracking-wider gap-1 sm:gap-2 flex-1 sm:flex-none h-9 sm:h-10"><Plus className="w-3 h-3 sm:w-4 sm:h-4" /> Ajuste</Button>
                     <Button onClick={() => setIsExchangeModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl sm:rounded-2xl font-black uppercase text-[10px] tracking-wider gap-1 sm:gap-2 shadow-lg flex-1 sm:flex-none h-9 sm:h-10"><RefreshCcw className="w-3 h-3 sm:w-4 sm:h-4" /> Cambiar</Button>
                 </div>
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                {WALLETS_CONFIG.map(wallet => {
+                {WALLETS.map(wallet => {
                     const balance = walletBalances.balances[wallet.id];
                     const secondaryValue = (wallet.id === 'bank_bs' && rates.usd > 0) ? (balance / rates.usd) : null;
                     return (
@@ -489,12 +541,42 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                             </div>
                         </div>
 
+                        {/* Por que banco entro o salio cada cosa. Solo aparece si la
+                            billetera tiene cuentas dadas de alta: si no, estorba. */}
+                        {desgloseCuentas.length > 0 && (
+                            <div className="px-4 sm:px-6 py-2.5 border-b border-slate-100 dark:border-white/5 flex gap-2 overflow-x-auto custom-scrollbar shrink-0">
+                                <button
+                                    onClick={() => setCuentaFiltro('')}
+                                    className={cn("shrink-0 px-3 h-8 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all",
+                                        cuentaFiltro === '' ? "bg-slate-900 text-white shadow-md" : "bg-slate-100 dark:bg-white/5 text-slate-500 hover:bg-slate-200")}
+                                >
+                                    Todas
+                                </button>
+                                {desgloseCuentas.map(c => (
+                                    <button
+                                        key={c.id}
+                                        onClick={() => setCuentaFiltro(cuentaFiltro === c.id ? '' : c.id)}
+                                        title={c.banco || undefined}
+                                        className={cn("shrink-0 px-3 h-8 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5",
+                                            cuentaFiltro === c.id ? "bg-indigo-600 text-white shadow-md" : "bg-slate-100 dark:bg-white/5 text-slate-500 hover:bg-slate-200")}
+                                    >
+                                        {c.id !== 'SIN' && <LogoBanco codigo={c.bancoCodigo} texto={c.banco} size={16} />}
+                                        {c.nombre}
+                                        <span className={cn("font-bold tabular-nums", cuentaFiltro === c.id ? "opacity-80" : "opacity-50")}>
+                                            {c.total.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
                         <div className="flex-1 overflow-y-auto p-2 sm:p-4 custom-scrollbar space-y-1.5 sm:space-y-2">
                             {activeMovements.map((mov: any) => (
                                 <MovementRow
                                     key={mov.id}
                                     movement={mov}
                                     currency={currentWalletData?.currency || 'USD'}
+                                    cuenta={buscarCuenta(mov.wallet, mov.cuentaId, configBilleteras)}
                                     onClick={() => setSelectedMovement(mov)}
                                 />
                             ))}
@@ -522,7 +604,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                             <p className="text-[10px] font-bold opacity-50 uppercase">Sumando todas las cuentas</p>
                         </div>
                         <div className="mt-4 sm:mt-6 space-y-2 relative z-10">
-                            {WALLETS_CONFIG.map(w => {
+                            {WALLETS.map(w => {
                                 const bal = walletBalances.balances[w.id];
                                 const inUSD = w.id === 'bank_bs' ? (rates.usd > 0 ? bal / rates.usd : 0) : bal;
                                 return (
@@ -617,6 +699,19 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                                         <div className="p-3 bg-slate-50 dark:bg-white/5 rounded-xl text-sm font-bold capitalize">
                                             {selectedMovement.metodoPago || 'No especificado'}
                                         </div>
+                                        {(() => {
+                                            const cta = buscarCuenta(selectedMovement.wallet, selectedMovement.cuentaId, configBilleteras);
+                                            return (
+                                                <div className="flex items-center gap-1.5 pt-1 text-[11px] font-bold text-slate-500">
+                                                    {cta
+                                                        ? <LogoBanco codigo={cta.bancoCodigo} texto={cta.banco} size={14} />
+                                                        : <Landmark className="w-3 h-3 shrink-0" />}
+                                                    {cta
+                                                        ? <span>{cta.nombre}{cta.banco ? " · " + cta.banco : ''}{cta.referencia ? " · " + cta.referencia : ''}</span>
+                                                        : <span className="text-slate-400">Sin cuenta asignada</span>}
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                     <div className="space-y-1">
                                         <Label className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-1"><FileText className="w-3 h-3"/> Nota / Referencia</Label>
@@ -671,10 +766,33 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                     <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl mb-2"><button onClick={() => setManualForm({...manualForm, mode: 'SIMPLE', monto: '', montoReal: ''})} className={cn("flex-1 py-2 rounded-xl text-xs font-black uppercase transition-all", manualForm.mode === 'SIMPLE' ? "bg-white dark:bg-slate-700 shadow-sm text-slate-800 dark:text-white" : "text-slate-400 hover:text-slate-600")}>Movimiento Único</button><button onClick={() => setManualForm({...manualForm, mode: 'CUADRE', monto: '', montoReal: ''})} className={cn("flex-1 py-2 rounded-xl text-xs font-black uppercase transition-all flex items-center justify-center gap-2", manualForm.mode === 'CUADRE' ? "bg-white dark:bg-slate-700 shadow-sm text-indigo-600" : "text-slate-400 hover:text-slate-600")}><Calculator className="w-3 h-3"/> Cuadre Total</button></div>
                     <div className="space-y-4 py-2">
                         {manualForm.mode === 'SIMPLE' ? (
-                            <><Select value={manualForm.billetera} onValueChange={(v) => setManualForm({...manualForm, billetera: v})}><SelectTrigger className="h-12 bg-slate-50 border-none rounded-xl font-bold"><SelectValue/></SelectTrigger><SelectContent>{WALLETS_CONFIG.map(w => <SelectItem key={w.id} value={w.id}>{w.label}</SelectItem>)}</SelectContent></Select><div className="grid grid-cols-2 gap-4"><Button variant={manualForm.tipo === 'INGRESO' ? 'default' : 'outline'} onClick={() => setManualForm({...manualForm, tipo: 'INGRESO'})} className={cn("rounded-xl font-black", manualForm.tipo === 'INGRESO' && "bg-emerald-600 text-white")}>Ingreso</Button><Button variant={manualForm.tipo === 'EGRESO' ? 'default' : 'outline'} onClick={() => setManualForm({...manualForm, tipo: 'EGRESO'})} className={cn("rounded-xl font-black", manualForm.tipo === 'EGRESO' && "bg-rose-600 text-white")}>Egreso</Button></div><Input type="number" placeholder="Monto" className="h-12 bg-slate-50 border-none rounded-xl font-bold" value={manualForm.monto} onChange={e => setManualForm({...manualForm, monto: e.target.value})} /><Input placeholder="Descripción (Ej: Pago proveedor)" className="h-12 bg-slate-50 border-none rounded-xl" value={manualForm.descripcion} onChange={e => setManualForm({...manualForm, descripcion: e.target.value})} /><Button onClick={handleManual} className="w-full h-12 bg-slate-900 text-white rounded-xl uppercase font-black">Guardar Movimiento</Button></>
+                            <><Select value={manualForm.billetera} onValueChange={(v) => {
+                                const propias = cuentasActivas(v, configBilleteras);
+                                setManualForm({...manualForm, billetera: v, cuentaId: propias.length === 1 ? propias[0].id : ''});
+                            }}><SelectTrigger className="h-12 bg-slate-50 border-none rounded-xl font-bold"><SelectValue/></SelectTrigger><SelectContent>{WALLETS.map(w => <SelectItem key={w.id} value={w.id}>{w.label}</SelectItem>)}</SelectContent></Select>
+                            {cuentasActivas(manualForm.billetera, configBilleteras).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5">
+                                    {cuentasActivas(manualForm.billetera, configBilleteras).map(c => (
+                                        <button
+                                            key={c.id}
+                                            type="button"
+                                            onClick={() => setManualForm({...manualForm, cuentaId: manualForm.cuentaId === c.id ? '' : c.id})}
+                                            title={[c.banco, c.referencia].filter(Boolean).join(' \u00b7 ') || undefined}
+                                            className={cn("flex items-center gap-1.5 px-2.5 h-8 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all border",
+                                                manualForm.cuentaId === c.id
+                                                    ? "bg-slate-900 text-white border-slate-900 shadow-md"
+                                                    : "bg-slate-50 dark:bg-white/5 text-slate-500 border-transparent hover:border-slate-200")}
+                                        >
+                                            <LogoBanco codigo={c.bancoCodigo} texto={c.banco} size={13} />
+                                            {c.nombre}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                            <div className="grid grid-cols-2 gap-4"><Button variant={manualForm.tipo === 'INGRESO' ? 'default' : 'outline'} onClick={() => setManualForm({...manualForm, tipo: 'INGRESO'})} className={cn("rounded-xl font-black", manualForm.tipo === 'INGRESO' && "bg-emerald-600 text-white")}>Ingreso</Button><Button variant={manualForm.tipo === 'EGRESO' ? 'default' : 'outline'} onClick={() => setManualForm({...manualForm, tipo: 'EGRESO'})} className={cn("rounded-xl font-black", manualForm.tipo === 'EGRESO' && "bg-rose-600 text-white")}>Egreso</Button></div><Input type="number" placeholder="Monto" className="h-12 bg-slate-50 border-none rounded-xl font-bold" value={manualForm.monto} onChange={e => setManualForm({...manualForm, monto: e.target.value})} /><Input placeholder="Descripción (Ej: Pago proveedor)" className="h-12 bg-slate-50 border-none rounded-xl" value={manualForm.descripcion} onChange={e => setManualForm({...manualForm, descripcion: e.target.value})} /><Button onClick={handleManual} className="w-full h-12 bg-slate-900 text-white rounded-xl uppercase font-black">Guardar Movimiento</Button></>
                         ) : (
                             <div className="space-y-4"><p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider text-center mb-4">Desbloquea la cuenta que deseas cuadrar.</p>
-                                {WALLETS_CONFIG.map(w => {
+                                {WALLETS.map(w => {
                                     const sysBal = getWalletBalance(w.id); const isUnlocked = unlockedWallets[w.id]; const realVal = cuadreData[w.id]; const diff = (realVal !== undefined && realVal !== '') ? parseFloat(realVal) - sysBal : 0;
                                     return (<div key={w.id} className={cn("p-4 rounded-2xl border transition-all", isUnlocked ? "bg-indigo-50 border-indigo-100" : "bg-slate-50 border-slate-100 opacity-80")}><div className="flex justify-between items-center mb-3"><div className="flex items-center gap-2"><span className="p-1.5 rounded-lg bg-white shadow-sm text-slate-700">{w.icon}</span><span className="font-black text-sm uppercase text-slate-700">{w.label}</span></div>{!isUnlocked ? (<Button size="sm" variant="outline" className="h-7 text-[10px] uppercase font-bold rounded-lg" onClick={() => handleUnlockWallet(w.id, w.label)}>Ajustar</Button>) : (<Badge className="bg-indigo-600 hover:bg-indigo-600">Editando</Badge>)}</div><div className="flex gap-3 items-end"><div className="flex-1"><Label className="text-[9px] font-bold uppercase text-slate-400">Saldo Sistema</Label><div className="font-black text-slate-600">{formatCurrency(sysBal)}</div></div><div className="flex-[2]"><Label className="text-[9px] font-bold uppercase text-indigo-600">Saldo Real (Físico/Banco)</Label><Input disabled={!isUnlocked} type="number" placeholder="0.00" value={cuadreData[w.id] ?? ''} onChange={(e) => setCuadreData(prev => ({...prev, [w.id]: e.target.value}))} className={cn("h-10 border-none font-black text-right", isUnlocked ? "bg-white text-indigo-700 shadow-sm" : "bg-slate-200/50 text-slate-400")} /></div></div>{isUnlocked && realVal !== '' && diff !== 0 && (<div className={cn("mt-3 p-2 rounded-xl text-center text-xs font-black uppercase tracking-wide", diff > 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>{diff > 0 ? "Sobrante" : "Faltante"}: {formatCurrency(Math.abs(diff))}<span className="block text-[8px] opacity-70 mt-0.5">Se creará un movimiento automático</span></div>)}{isUnlocked && realVal !== '' && diff === 0 && (<div className="mt-3 p-2 rounded-xl text-center text-xs font-black uppercase tracking-wide bg-slate-200 text-slate-600">Cuadre Exacto (Sin diferencias)</div>)}</div>)
                                 })}
@@ -684,6 +802,12 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                     </div>
                 </DialogContent>
             </Dialog>
+            <BilleterasConfigModal
+                open={isCuentasModalOpen}
+                onOpenChange={setIsCuentasModalOpen}
+                config={configBilleteras}
+            />
+
             <Dialog open={isExchangeModalOpen} onOpenChange={setIsExchangeModalOpen}>
                 <DialogContent className="w-[95vw] max-w-md rounded-[2.5rem] bg-white dark:bg-[#1c1c1e] shadow-2xl overflow-hidden"><DialogHeader><DialogTitle className="text-2xl font-black uppercase italic tracking-tighter flex items-center gap-3"><RefreshCcw className="text-indigo-600"/> Compra de Divisas</DialogTitle></DialogHeader><div className="py-4 space-y-5"><div className="bg-slate-50 p-1 rounded-2xl flex items-center border border-slate-100"><div className="pl-4 pr-2 text-[10px] font-black uppercase text-slate-400">Destino:</div><Select value={exchangeForm.destino} onValueChange={(v) => setExchangeForm({...exchangeForm, destino: v})}><SelectTrigger className="h-10 bg-white border-none rounded-xl font-bold text-xs shadow-sm text-indigo-700 flex-1"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="cash_usd">💵 Caja Chica (Efectivo)</SelectItem><SelectItem value="zelle">🏛️ Zelle / Bofa</SelectItem><SelectItem value="usdt">🪙 Binance / USDT</SelectItem></SelectContent></Select></div><div className="grid grid-cols-2 gap-4"><div className="space-y-1"><Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Precio Compra (Tasa)</Label><Input type="number" className="h-12 bg-indigo-50 border-indigo-100 text-indigo-700 font-black rounded-xl text-center text-lg" value={exchangeForm.tasa} onChange={(e) => {const newRate = parseFloat(e.target.value); const usd = parseFloat(exchangeForm.montoEntrada); const newBs = (usd && newRate) ? (usd * newRate).toFixed(2) : exchangeForm.montoSalida; setExchangeForm({ ...exchangeForm, tasa: e.target.value, montoSalida: newBs });}}/></div><div className="space-y-1"><Label className="text-[9px] font-black uppercase text-emerald-600 ml-2">Dólares a Recibir ($)</Label><Input type="number" className="h-12 bg-emerald-50 border-emerald-100 text-emerald-600 font-black rounded-xl text-center text-lg shadow-inner" value={exchangeForm.montoEntrada} onChange={(e) => {const newUSD = parseFloat(e.target.value); const rate = parseFloat(exchangeForm.tasa); const newBs = (newUSD && rate) ? (newUSD * rate).toFixed(2) : ''; setExchangeForm({ ...exchangeForm, montoEntrada: e.target.value, montoSalida: newBs });}}/></div></div><div className="space-y-1"><Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Monto Salida (Bolívares)</Label><Input type="number" className="h-14 bg-slate-100 border-none text-slate-800 font-black rounded-2xl text-xl px-4" value={exchangeForm.montoSalida} onChange={(e) => {const newBs = parseFloat(e.target.value); const rate = parseFloat(exchangeForm.tasa); const newUSD = (newBs && rate) ? (newBs / rate).toFixed(2) : ''; setExchangeForm({ ...exchangeForm, montoSalida: e.target.value, montoEntrada: newUSD });}}/></div><Button onClick={handleEx} className="w-full h-14 bg-slate-900 hover:bg-black text-white rounded-2xl uppercase font-black tracking-widest shadow-xl mt-2 flex flex-col justify-center items-center gap-0"><span>Registrar Compra</span></Button></div></DialogContent>
             </Dialog>
@@ -726,7 +850,7 @@ function WalletCard({ config, balance, isActive, onClick, secondaryValue, rateAn
     )
 }
 
-function MovementRow({ movement, currency, onClick }: any) {
+function MovementRow({ movement, currency, cuenta, onClick }: any) {
     const isIncome = movement.type === 'INGRESO' || movement.type === 'SALDO_INICIAL';
     const isInitial = movement.type === 'SALDO_INICIAL';
     return (
@@ -742,11 +866,18 @@ function MovementRow({ movement, currency, onClick }: any) {
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5">
                         <Badge variant="secondary" className="text-[8px] font-black uppercase px-1.5 h-4 bg-white border-slate-200 shadow-sm hidden sm:flex">{movement.category}</Badge>
-                        {movement.imagenUrl && <ImageIcon className="w-3 h-3 text-blue-500 opacity-50 group-hover:opacity-100 transition-opacity" title="Tiene comprobante" />}
+                        {movement.imagenUrl && <span title="Tiene comprobante" className="inline-flex"><ImageIcon className="w-3 h-3 text-blue-500 opacity-50 group-hover:opacity-100 transition-opacity" /></span>}
+                        {cuenta && (
+                            <Badge variant="secondary" className="text-[8px] font-black uppercase px-1.5 h-4 gap-1 bg-indigo-50 text-indigo-600 border-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-400 shadow-sm max-w-[9rem]">
+                                <LogoBanco codigo={cuenta.bancoCodigo} texto={cuenta.banco} size={11} />
+                                <span className="truncate">{cuenta.nombre}</span>
+                            </Badge>
+                        )}
                     </div>
                     <p className="text-[11px] sm:text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{movement.description}</p>
                     <p className="text-[9px] font-bold text-slate-400 truncate mt-0.5">
                         {movement.date.toLocaleDateString()}
+                        {movement.metodoPago && movement.metodoPago !== 'N/A' && <span> • {movement.metodoPago}</span>}
                         {movement.referencia && <span className="hidden sm:inline"> • {movement.referencia}</span>}
                     </p>
                 </div>

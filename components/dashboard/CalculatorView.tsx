@@ -48,7 +48,7 @@ const itemVariants = {
     visible: { 
         y: 0, 
         opacity: 1,
-        transition: { type: "spring", stiffness: 300, damping: 25 }
+        transition: { type: "spring" as const, stiffness: 300, damping: 25 }
     },
     exit: { 
         scale: 0.98, 
@@ -62,7 +62,7 @@ const historyItemVariants = {
     visible: { 
         x: 0, 
         opacity: 1,
-        transition: { type: "spring", stiffness: 300, damping: 25 }
+        transition: { type: "spring" as const, stiffness: 300, damping: 25 }
     },
     exit: { 
         x: 10, 
@@ -864,7 +864,7 @@ const CalculatorView = ({ onSendToProduction }: { onSendToProduction?: (calc: an
                             <motion.div 
                                 key={activeTab} 
                                 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
-                                transition={{ type: "spring", stiffness: 200, damping: 25 }}
+                                transition={{ type: "spring" as const, stiffness: 200, damping: 25 }}
                             >
                                 {activeTab === "currency" && <CurrencyConverterCalculator rates={rates} />}
                                 {activeTab === "area" && <MetroCuadradoCalculator rates={rates} onSendToProduction={onSendToProduction} />}

@@ -309,7 +309,7 @@ export function GastosFijosView({ gastos, rates, onNotification }: ViewProps) {
                     <span className="text-[11px] font-black uppercase tracking-[0.4em]">Solventes</span>
                 </h3>
                 <div className="opacity-60">
-                    <GastosFijosList gastos={stats.pagados} onPay={() => {}} onDelete={() => {}} onEdit={() => {}} isLoading={false} isPaidMode={true} />
+                    <GastosFijosList gastos={stats.pagados} onPay={() => {}} onDelete={async () => {}} onEdit={() => {}} isLoading={false} isPaidMode={true} />
                 </div>
             </div>
         )}

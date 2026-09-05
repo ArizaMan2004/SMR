@@ -15,7 +15,7 @@ import { Card } from "@/components/ui/card"
 import { Moon, Sun, Mail, Lock, User, Key, ArrowRight, Loader2, Eye, EyeOff, ShieldAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const springConfig = { type: "spring", stiffness: 300, damping: 30 };
+const springConfig = { type: "spring" as const, stiffness: 300, damping: 30 };
 
 export default function LoginForm() {
   const [isLogin, setIsLogin] = useState(true)

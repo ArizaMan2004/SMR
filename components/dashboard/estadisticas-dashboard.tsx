@@ -54,8 +54,8 @@ const COLORES_KEYS: any = {
 };
 
 const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.05 } } };
-const itemVariants = { hidden: { opacity: 0, y: 10 }, visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 100, damping: 15 } } };
-const hoverEffect = { y: -2, transition: { type: "spring", stiffness: 300, damping: 15 } };
+const itemVariants = { hidden: { opacity: 0, y: 10 }, visible: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 100, damping: 15 } } };
+const hoverEffect = { y: -2, transition: { type: "spring" as const, stiffness: 300, damping: 15 } };
 const tapEffect = { scale: 0.98 };
 
 interface EstadisticasDashboardProps {

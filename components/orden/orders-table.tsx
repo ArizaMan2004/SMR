@@ -42,7 +42,7 @@ interface OrdersTableProps {
   onDelete: (ordenId: string) => void
   onEdit: (orden: OrdenServicio) => void
   onRegisterPayment: (orden: OrdenServicio) => void
-  onSavePayment?: (ordenId: string, abonoUSD: number, nota: string | undefined, imagenUrl: string | undefined, metodo: string, descuento?: number, fechaPago?: string) => Promise<void> | void
+  onSavePayment?: (ordenId: string, abonoUSD: number, nota: string | undefined, imagenUrl: string | undefined, metodo: string, descuento?: number, fechaPago?: string, cuentaId?: string) => Promise<void> | void
   onUpdateOrden?: (ordenId: string, changes: Partial<OrdenServicio>) => Promise<void>
   currentUserId: string
   rates: {
@@ -321,9 +321,9 @@ export function OrdersTable({
               isOpen={isPaymentModalOpen}
               orden={orderForPayment}
               onClose={() => setIsPaymentModalOpen(false)}
-              onSave={async (abonoUSD, nota, imagenUrl, metodo, descuento, fechaPago) => {
+              onSave={async (abonoUSD, nota, imagenUrl, metodo, descuento, fechaPago, cuentaId) => {
                   if (onSavePayment) {
-                      await onSavePayment(orderForPayment.id, abonoUSD, nota, imagenUrl, metodo, descuento, fechaPago);
+                      await onSavePayment(orderForPayment.id!, abonoUSD, nota, imagenUrl, metodo, descuento, fechaPago, cuentaId);
                   } else {
                       toast.error("Por favor, configura onSavePayment en el componente padre para procesar este pago.");
                   }

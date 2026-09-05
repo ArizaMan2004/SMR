@@ -22,12 +22,18 @@ export interface ClienteFirestore {
     prefijoRif: typeof PREFIJOS_RIF[number];
     numeroRif: string; 
     
-    domicilioFiscal: string;
-    correo: string;
-    // ✅ CORRECCIÓN: Ahora acepta string o null, no undefined.
-    personaContactoCliente: string | null; 
-    
-    fechaCreacion: string; 
+    // Opcionales a propósito: el asistente de órdenes guarda clientes con solo
+    // nombre y teléfono, y en la base hay fichas viejas sin estos campos.
+    // Declararlos obligatorios era una promesa falsa que escondía los sitios
+    // donde el código los daba por seguros.
+    domicilioFiscal?: string;
+    correo?: string;
+    personaContactoCliente?: string | null;
+
+    /** REGULAR / ALIADO. Decide el precio que se le aplica al cliente. */
+    tipoCliente?: 'REGULAR' | 'ALIADO' | string;
+
+    fechaCreacion?: string; 
 }
 
 // -------------------------------------------------------------------

@@ -71,7 +71,7 @@ const containerVariants = {
 
 const itemVariants = {
     hidden: { opacity: 0, y: 15, scale: 0.98 },
-    visible: { opacity: 1, y: 0, scale: 1, transition: { type: "spring", stiffness: 400, damping: 30 } }
+    visible: { opacity: 1, y: 0, scale: 1, transition: { type: "spring" as const, stiffness: 400, damping: 30 } }
 }
 
 export function NewsBar({ 
@@ -380,7 +380,7 @@ export function NewsBar({
                                 </motion.span>
                             )}
                         </AnimatePresence>
-                        <motion.div animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ type: "spring", stiffness: 300, damping: 20 }}>
+                        <motion.div animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ type: "spring" as const, stiffness: 300, damping: 20 }}>
                             <ChevronDown className="w-5 h-5 text-slate-400" />
                         </motion.div>
                     </motion.div>
@@ -450,7 +450,7 @@ export function NewsBar({
                                 initial={{ opacity: 0, scale: 0.98, y: 10 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.98, y: 10 }}
-                                transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                                transition={{ type: "spring" as const, damping: 25, stiffness: 300 }}
                                 className="flex flex-col h-full w-full"
                             >
                                 <DialogHeader className="p-6 pb-5 shrink-0 border-b border-black/5 dark:border-white/5 bg-white dark:bg-[#1c1c1e] z-10 relative overflow-hidden">

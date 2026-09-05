@@ -37,10 +37,15 @@ import {
 import { PaymentHistoryView } from '@/components/orden/PaymentHistoryView' 
 import { OrderDetailModal } from '@/components/orden/order-detail-modal' 
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
+import {
+    subscribeToBilleteras, nombreBilletera, cuentasActivas,
+    type ConfigBilleteras,
+} from "@/lib/services/billeteras-service"
 import { generateGeneralAccountStatusPDF } from "@/lib/services/pdf-generator"
 import { buscarOrdenesHistoricas } from "@/lib/services/ordenes-service" 
 import { getFrequentClients } from "@/lib/firebase/clientes" 
 import { cn } from '@/lib/utils'
+import { LogoBanco } from '@/components/dashboard/LogoBanco'
 import { toast } from 'sonner'
 
 // FIREBASE
@@ -58,7 +63,10 @@ interface ClientSummary {
     rif: string
     totalOrdenes: number
     totalPendienteUSD: number
-    ordenesPendientes: OrdenServicio[]
+    // Estas órdenes SIEMPRE vienen leídas de Firestore, así que su id existe.
+    // En OrdenServicio el id es opcional (al crearla todavía no hay), y esa
+    // duda se arrastraba hasta doc(db, "ordenes", id) y las listas de marcados.
+    ordenesPendientes: (OrdenServicio & { id: string })[]
 }
 
 interface ClientsAndPaymentsViewProps {
@@ -127,7 +135,22 @@ export function ClientsAndPaymentsView({
     const [globalPaymentData, setGlobalPaymentData] = useState({ nota: '', imagenUrl: '' })
     
     // --- NUEVOS ESTADOS: CÁLCULO DE TASAS GLOBALES Y BILLETERAS ---
-    const [globalWallet, setGlobalWallet] = useState('cash_usd'); 
+    const [globalWallet, setGlobalWallet] = useState('cash_usd');
+
+    // Por que cuenta de banco entra el abono global. Mismo criterio que en el
+    // cobro de una orden suelta: si la empresa no ha dado de alta cuentas para
+    // esa billetera, el paso no aparece.
+    const [configBilleteras, setConfigBilleteras] = useState<ConfigBilleteras>({});
+    const [globalCuentaId, setGlobalCuentaId] = useState('');
+    useEffect(() => subscribeToBilleteras(setConfigBilleteras), []);
+
+    const cuentasGlobales = cuentasActivas(globalWallet, configBilleteras);
+
+    useEffect(() => {
+        const propias = cuentasActivas(globalWallet, configBilleteras);
+        setGlobalCuentaId(prev => propias.some(c => c.id === prev) ? prev : (propias.length === 1 ? propias[0].id : ''));
+    }, [globalWallet, configBilleteras]);
+
     const [globalCurrencyMode, setGlobalCurrencyMode] = useState<'USD' | 'BS'>('USD');
     const [globalCalculationBase, setGlobalCalculationBase] = useState<'USD' | 'EUR' | 'USDT'>('USD');
     const [globalAmountUSD, setGlobalAmountUSD] = useState<string>('');
@@ -550,6 +573,11 @@ export function ClientsAndPaymentsView({
         if (globalWallet === 'usdt') metodoLegible = "Binance USDT";
         if (globalWallet === 'cash_usd' && globalCurrencyMode === 'BS') metodoLegible = "Efectivo Bs";
 
+        // El banco tambien va en la etiqueta, ademas de guardarse el id: los
+        // historiales que solo leen el texto lo siguen mostrando.
+        const cuentaElegida = cuentasGlobales.find(c => c.id === globalCuentaId);
+        if (cuentaElegida) metodoLegible = metodoLegible + " - " + cuentaElegida.nombre;
+
         const metodoFinal = `${metodoLegible} (Abono Global)`;
         
         try {
@@ -590,7 +618,8 @@ export function ClientsAndPaymentsView({
                         nota: finalNota,
                         imagenUrl: globalPaymentData.imagenUrl || "",
                         tasaBCV: rates.usd,
-                        metodo: metodoFinal
+                        metodo: metodoFinal,
+                        cuentaId: globalCuentaId || ""
                     };
 
                     batch.update(ordenRef, {
@@ -612,7 +641,7 @@ export function ClientsAndPaymentsView({
     const closeGlobalModal = () => {
         setIsGlobalModalOpen(false); setPreviewUrl(null); setGlobalPaymentData({ nota: '', imagenUrl: '' });
         setSelectedOrdersForGlobal([]); setGlobalAmountUSD(''); setGlobalAmountBS('');
-        setGlobalCurrencyMode('USD'); setGlobalCalculationBase('USD'); setGlobalWallet('cash_usd'); 
+        setGlobalCurrencyMode('USD'); setGlobalCalculationBase('USD'); setGlobalWallet('cash_usd'); setGlobalCuentaId(''); 
     };
 
     // --- REVERSIÓN DE ABONOS ---
@@ -1195,6 +1224,35 @@ export function ClientsAndPaymentsView({
                                         <WalletOption id="usdt" label="Binance" icon={Coins} active={globalWallet} onClick={setGlobalWallet} color="orange" />
                                     </div>
                                 </div>
+
+                                {cuentasGlobales.length > 0 && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase tracking-widest ml-1 text-slate-400">
+                                            {nombreBilletera(globalWallet, configBilleteras)} · ¿A qué cuenta?
+                                        </label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {cuentasGlobales.map(c => (
+                                                <button
+                                                    key={c.id}
+                                                    type="button"
+                                                    onClick={() => setGlobalCuentaId(globalCuentaId === c.id ? '' : c.id)}
+                                                    title={[c.banco, c.referencia].filter(Boolean).join(' · ') || undefined}
+                                                    className={cn(
+                                                        "px-3 h-9 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border",
+                                                        globalCuentaId === c.id
+                                                            ? "bg-slate-900 text-white border-slate-900 shadow-md"
+                                                            : "bg-slate-50 dark:bg-white/5 text-slate-500 border-transparent hover:border-slate-200"
+                                                    )}
+                                                >
+                                                    <span className="inline-flex items-center gap-1.5">
+                                                        <LogoBanco codigo={c.bancoCodigo} texto={c.banco} size={14} />
+                                                        {c.nombre}
+                                                    </span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* SELECTOR DE MONEDA E INPUTS */}
                                 <div className="space-y-4">

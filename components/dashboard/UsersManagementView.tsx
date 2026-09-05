@@ -50,7 +50,7 @@ export function UsersManagementView() {
         });
 
         const unsubCodigos = onSnapshot(collection(db, "admin_codes"), (snap) => {
-            const loadedCodes = snap.docs.map(doc => ({ code: doc.id, ...doc.data() }));
+            const loadedCodes: any[] = snap.docs.map(doc => ({ code: doc.id, ...doc.data() }));
             loadedCodes.sort((a, b) => {
                 const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
                 const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;

@@ -173,7 +173,7 @@ export function FormatConverterView() {
                     ...i, status: "done", convertedUrl: dataUrl, convertedFormat: targetFormat, convertedSize: size,
                 } : i))
                 setHistory(prev => [{
-                    ...target, status: "done", convertedUrl: dataUrl, convertedFormat: targetFormat, convertedSize: size,
+                    ...target, status: "done" as ItemStatus, convertedUrl: dataUrl, convertedFormat: targetFormat, convertedSize: size,
                 }, ...prev].slice(0, 12))
             } catch (error) {
                 console.error(error)

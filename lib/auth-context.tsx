@@ -39,10 +39,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    let unsubscribeDoc: () => void;
+    let unsubscribeDoc: (() => void) | undefined;
+
+    // Cierra el listener del documento anterior antes de abrir otro. Sin esto,
+    // cada vez que Firebase reemitía el estado de sesión (cambio de usuario,
+    // refresco del token) quedaba viva una suscripción más al documento del
+    // usuario: lecturas de Firestore que se pagan y no sirven a nadie.
+    const cerrarDoc = () => {
+      if (unsubscribeDoc) {
+        unsubscribeDoc()
+        unsubscribeDoc = undefined
+      }
+    }
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser)
+      cerrarDoc()
 
       if (currentUser) {
         try {
@@ -75,13 +87,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setUserData(null);
         setLoading(false);
-        if (unsubscribeDoc) unsubscribeDoc();
       }
     })
 
     return () => {
       unsubscribeAuth();
-      if (unsubscribeDoc) unsubscribeDoc();
+      cerrarDoc();
     }
   }, [])
 

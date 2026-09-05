@@ -9,7 +9,8 @@ import { generateBudgetPDF } from "@/lib/services/pdf-generator";
 import { 
     saveBudgetToFirestore, 
     loadBudgetsFromFirestore, 
-    deleteBudgetFromFirestore 
+    deleteBudgetFromFirestore,
+    numerarPresupuestosAntiguos
 } from "@/lib/firebase/firestore-budget-service";
 import { createOrden } from "@/lib/services/ordenes-service";
 import { getNextOrderNumber } from "@/lib/firebase/ordenes";
@@ -83,6 +84,21 @@ const SMR_CATALOG_FALLBACK = [
     "Instalación de Vinil en Vidrieras"
 ];
 
+/**
+ * Clave para ordenar y buscar clientes.
+ *
+ * Quita espacios sobrantes, tildes y mayúsculas. Los nombres se teclean a mano
+ * y en la base conviven " DISBATTERY,SA", "DISBATTERY.,SA " y "Disbattery SA":
+ * sin normalizar, el mismo cliente aparece esparcido por toda la lista.
+ */
+const claveCliente = (nombre: any): string =>
+    String(nombre ?? '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/\s+/g, ' ');
+
 // Búsqueda por palabras (todas deben aparecer, en cualquier orden) — más tolerante que un "includes" plano,
 // y permite que la predicción encuentre coincidencias tanto en el nombre como en la descripción/detalle del ítem.
 const matchesQuery = (haystack: string, query: string) => {
@@ -94,12 +110,13 @@ const matchesQuery = (haystack: string, query: string) => {
 
 export default function BudgetEntryView({
     rates = { usd: 0, eur: 0, usdt: 0 }, 
+    // Las tres imagenes llegan ya en base64 solo para armar el PDF.
+    // Cambiarlas es cosa de Ajustes -> Identidad de Empresa, no de esta vista.
     currentBcvRate, pdfLogoBase64, firmaBase64, selloBase64,
-    handleLogoUpload, handleClearLogo, handleFirmaUpload, 
-    handleClearFirma, handleSelloUpload, handleClearSello,
     currentUserId
 }: any) {
     
+
     const safeRates = useMemo(() => ({
         usd: rates.usd || currentBcvRate || 1,
         eur: rates.eur || 1,
@@ -133,8 +150,11 @@ export default function BudgetEntryView({
         maxMonto: '',
         minItems: '',
         date: 'ALL', // 'ALL', 'TODAY', 'WEEK', 'MONTH'
-        sortBy: 'dateCreated', // 'dateCreated', 'clienteNombre', 'totalUSD', 'itemsCount'
-        sortOrder: 'desc' // 'asc', 'desc'
+        // Por defecto agrupados por cliente en orden alfabético: así los
+        // presupuestos de una misma persona quedan juntos y se encuentran de un
+        // vistazo, que es como se busca un presupuesto en el mostrador.
+        sortBy: 'clienteNombre', // 'dateCreated', 'clienteNombre', 'totalUSD', 'itemsCount'
+        sortOrder: 'asc' // 'asc', 'desc'
     });
 
     const suggestionRef = useRef<HTMLDivElement>(null);
@@ -654,6 +674,23 @@ export default function BudgetEntryView({
         }
     };
 
+    /** Pone número correlativo a los presupuestos creados antes de esta función. */
+    const handleNumerarAntiguos = async () => {
+        setIsLoading(true);
+        try {
+            const cuantos = await numerarPresupuestosAntiguos();
+            toast.success(cuantos > 0
+                ? `${cuantos} presupuesto(s) numerados por orden de creación`
+                : 'Todos ya tenían número');
+            await fetchHistory();
+        } catch (e) {
+            console.error(e);
+            toast.error('No se pudieron numerar los presupuestos');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const clearError = (field: string) => {
         if (errors[field]) setErrors((prev: any) => ({ ...prev, [field]: false }));
     };
@@ -662,7 +699,21 @@ export default function BudgetEntryView({
     const filteredHistory = useMemo(() => {
         let result = history.filter(entry => {
             // Filtrado
-            if (filters.search && !entry.clienteNombre.toLowerCase().includes(filters.search.toLowerCase())) return false;
+            // La búsqueda mira el cliente Y el número, para poder escribir "45"
+            // o "#45" y encontrar el presupuesto directamente.
+            if (filters.search) {
+                const bruto = filters.search.trim();
+                // Con almohadilla se busca SOLO por número: escribir "#67" debe
+                // dar el presupuesto 67 y no todos los clientes cuyo RIF
+                // contenga un 67. Sin ella se busca en el nombre y en el número.
+                const soloNumero = bruto.startsWith('#');
+                const q = claveCliente(bruto.replace(/^#/, ''));
+                if (!q) return true;
+
+                const porNumero = String(entry.numero ?? '') === q || (!soloNumero && String(entry.numero ?? '').includes(q));
+                const porCliente = !soloNumero && claveCliente(entry.clienteNombre).includes(q);
+                if (!porCliente && !porNumero) return false;
+            }
             if (filters.type === 'MASTER' && !entry.isMaster) return false;
             if (filters.type === 'NORMAL' && entry.isMaster) return false;
             if (filters.minMonto !== '' && entry.totalUSD < Number(filters.minMonto)) return false;
@@ -682,7 +733,11 @@ export default function BudgetEntryView({
             let comparison = 0;
             switch (filters.sortBy) {
                 case 'clienteNombre':
-                    comparison = (a.clienteNombre || '').localeCompare(b.clienteNombre || '');
+                    // Se compara por la clave normalizada. En la base hay nombres
+                    // con espacios al principio (" DISBATTERY,SA"), y esos espacios
+                    // cuentan para localeCompare: mandaban al cliente al principio
+                    // de la lista como si empezara por un carácter raro.
+                    comparison = claveCliente(a.clienteNombre).localeCompare(claveCliente(b.clienteNombre), 'es');
                     break;
                 case 'totalUSD':
                     comparison = (a.totalUSD || 0) - (b.totalUSD || 0);
@@ -703,7 +758,12 @@ export default function BudgetEntryView({
         return result;
     }, [history, filters]);
 
-    const hasActiveFilters = filters.search || filters.type !== 'ALL' || filters.date !== 'ALL' || filters.minMonto || filters.maxMonto || filters.minItems || filters.sortBy !== 'dateCreated' || filters.sortOrder !== 'desc';
+    // El punto rojo del botón de filtros avisa de que hay algo distinto de lo
+    // normal, así que se compara contra los valores por defecto REALES.
+    const hasActiveFilters = filters.type !== 'ALL' || filters.date !== 'ALL' || filters.minMonto || filters.maxMonto || filters.minItems || filters.sortBy !== 'clienteNombre' || filters.sortOrder !== 'asc';
+
+    /** Presupuestos que aún no tienen número asignado (los creados antes). */
+    const sinNumerar = useMemo(() => history.filter(h => !h.numero).length, [history]);
 
     return (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto space-y-4 sm:space-y-8 pb-24 sm:pb-32 px-2 sm:px-4">
@@ -722,11 +782,10 @@ export default function BudgetEntryView({
                     </div>
                 </div>
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
-                    <div className="flex flex-wrap justify-start sm:justify-center gap-2">
-                        <AssetPill active={!!pdfLogoBase64} label="Logo" onUpload={handleLogoUpload} onClear={handleClearLogo} />
-                        <AssetPill active={!!firmaBase64} label="Firma" onUpload={handleFirmaUpload} onClear={handleClearFirma} />
-                        <AssetPill active={!!selloBase64} label="Sello" onUpload={handleSelloUpload} onClear={handleClearSello} />
-                    </div>
+                    {/* El logo, la firma y el sello ya no se suben desde aqui.
+                        Son de la empresa entera, viven en la nube y se cambian en
+                        Ajustes -> Identidad de Empresa. Tener botones sueltos aqui
+                        solo invitaba a que cada quien pusiera el suyo. */}
 
                     <Button
                         onClick={() => handleNewBudget()}
@@ -1188,13 +1247,13 @@ export default function BudgetEntryView({
                     <div className="flex flex-col gap-3">
                         <div className="flex items-center justify-between px-4">
                             <h2 className="text-base sm:text-xl font-black italic uppercase flex items-center gap-2 sm:gap-3 text-slate-900 dark:text-white">
-                                <Clock className="w-5 h-5 text-blue-600" /> Recientes
+                                <Clock className="w-5 h-5 text-blue-600" /> Presupuestos
                             </h2>
                             <div className="flex items-center gap-2">
-                                <Button 
-                                    variant="ghost" 
-                                    size="icon" 
-                                    onClick={() => setShowFilters(!showFilters)} 
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => setShowFilters(!showFilters)}
                                     className={cn("h-8 w-8 rounded-xl transition-colors relative", showFilters ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-500 hover:bg-slate-200")}
                                 >
                                     <Filter className="w-4 h-4" />
@@ -1202,6 +1261,43 @@ export default function BudgetEntryView({
                                 </Button>
                                 <Badge className="rounded-full bg-blue-100 text-blue-600 px-3 border-none font-black">{filteredHistory.length}</Badge>
                             </div>
+                        </div>
+
+                        {/* BUSCADOR SIEMPRE A LA VISTA.
+                            Antes vivía dentro del panel de filtros plegado, así que
+                            para buscar un presupuesto había que acordarse de abrirlo. */}
+                        <div className="px-2">
+                            <div className="relative">
+                                <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                <Input
+                                    value={filters.search}
+                                    onChange={e => setFilters({ ...filters, search: e.target.value })}
+                                    placeholder="Buscar por cliente o número..."
+                                    className="h-12 pl-11 pr-10 rounded-2xl border-none bg-slate-50 dark:bg-slate-800/50 font-bold text-xs shadow-inner"
+                                />
+                                {filters.search && (
+                                    <button
+                                        onClick={() => setFilters({ ...filters, search: '' })}
+                                        title="Limpiar búsqueda"
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Aviso puntual: los presupuestos creados antes de que
+                                existiera la numeración no tienen número. */}
+                            {sinNumerar > 0 && (
+                                <button
+                                    onClick={handleNumerarAntiguos}
+                                    disabled={isLoading}
+                                    className="mt-2 w-full h-9 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 font-black uppercase text-[9px] tracking-widest flex items-center justify-center gap-2 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors"
+                                >
+                                    <Layers className="w-3 h-3" />
+                                    Numerar {sinNumerar} presupuesto{sinNumerar > 1 ? 's' : ''} antiguo{sinNumerar > 1 ? 's' : ''}
+                                </button>
+                            )}
                         </div>
 
                         <AnimatePresence>
@@ -1324,8 +1420,19 @@ export default function BudgetEntryView({
                                             <div className="flex justify-between items-start mb-3">
                                                 <div className="space-y-2 min-w-0 pr-4">
                                                     <h4 className="font-black text-slate-800 dark:text-slate-100 text-sm truncate uppercase italic tracking-tight flex items-center gap-2">
+                                                        {/* Número correlativo: es lo que se le dice al cliente
+                                                            por teléfono, el id de Firestore no sirve para eso. */}
+                                                        {entry.numero ? (
+                                                            <span className="shrink-0 text-[10px] font-black text-blue-600 bg-blue-50 dark:bg-blue-500/15 rounded-lg px-1.5 py-0.5 not-italic tracking-normal">
+                                                                #{entry.numero}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="shrink-0 text-[10px] font-black text-slate-300 dark:text-slate-600 not-italic" title="Presupuesto anterior a la numeración">
+                                                                #—
+                                                            </span>
+                                                        )}
                                                         {entry.isMaster && <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0"/>}
-                                                        {entry.clienteNombre}
+                                                        <span className="truncate">{entry.clienteNombre}</span>
                                                     </h4>
                                                     <div className="flex flex-wrap gap-2">
                                                         <Badge variant="outline" className="border-slate-200 text-slate-400 font-bold text-[9px] h-5 px-1.5 flex gap-1">
@@ -1427,18 +1534,5 @@ function StatCard({ label, value, icon, color, className }: any) {
                 <h3 className="text-base sm:text-2xl font-black tracking-tighter leading-none truncate">{value}</h3>
             </div>
         </Card>
-    );
-}
-
-function AssetPill({ active, label, onUpload, onClear }: any) {
-    return (
-        <div className="flex items-center gap-1.5 p-1 pl-3 sm:pl-4 rounded-full bg-white dark:bg-slate-800 border border-black/5 shadow-sm h-9 sm:h-11">
-            <span className={cn("text-[9px] font-black uppercase tracking-widest", active ? "text-blue-600" : "text-slate-400")}>{label}</span>
-            <input type="file" className="hidden" id={`pill-${label}`} onChange={onUpload} />
-            <Button variant="ghost" size="icon" onClick={() => document.getElementById(`pill-${label}`)?.click()} className={cn("h-7 w-7 sm:h-8 sm:w-8 rounded-full transition-all", active ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "bg-slate-50 dark:bg-white/5")}>
-                {active ? <CheckCircle2 className="w-3.5 h-3.5"/> : <Plus className="w-3.5 h-3.5"/>}
-            </Button>
-            {active && <Button variant="ghost" size="icon" onClick={onClear} className="h-8 w-8 rounded-full text-red-400 hover:bg-red-50"><X className="w-4 h-4"/></Button>}
-        </div>
     );
 }

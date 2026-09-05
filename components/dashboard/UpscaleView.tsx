@@ -70,7 +70,7 @@ export function UpscaleView() {
     const [[imgWidth, imgHeight], setSize] = useState([0, 0])
     const [processedSize, setProcessedSize] = useState<{ w: number, h: number } | null>(null)
 
-    const upscalerRef = useRef<Upscaler | null>(null)
+    const upscalerRef = useRef<InstanceType<typeof Upscaler> | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
     const objectUrlRef = useRef<string | null>(null) // para revocar y no fugar memoria

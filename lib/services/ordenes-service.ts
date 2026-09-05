@@ -13,9 +13,8 @@ import {
   limit,
   getDocs,
   getCountFromServer,
-  getAggregateFromServer,
-  sum,
-  count,
+  getDoc,
+  runTransaction,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { OrdenServicio, EstadoOrden, EstadoPago, PaymentLog } from "@/lib/types/orden";
@@ -23,36 +22,88 @@ import type { OrdenServicio, EstadoOrden, EstadoPago, PaymentLog } from "@/lib/t
 /**
  * 🔹 MOTOR DE AUTO-SANACIÓN: Obtiene el siguiente número de orden de forma 100% segura.
  * Ignora si hay números guardados accidentalmente como texto y siempre encuentra el mayor.
+ *
+ * Se usa como red de seguridad y para sembrar el contador la primera vez.
  */
 export async function getNextSafeOrderNumber() {
     try {
-        const colRef = collection(db, "ordenes");
-        // Buscamos los últimos 30 documentos por fecha para evitar bloqueos del índice
-        const q = query(colRef, orderBy("fecha", "desc"), limit(30));
-        const snap = await getDocs(q);
-        
-        let max = 0;
-        snap.forEach(doc => {
-            const num = Number(doc.data().ordenNumero);
-            if (!isNaN(num) && num > max) {
-                max = num;
-            }
-        });
-        
-        // Fallback: Si no encuentra por fecha, busca por el índice tradicional
-        if (max === 0) {
-            const q2 = query(colRef, orderBy("ordenNumero", "desc"), limit(1));
-            const snap2 = await getDocs(q2);
-            if (!snap2.empty) {
-                const num2 = Number(snap2.docs[0].data().ordenNumero);
-                if (!isNaN(num2)) max = num2;
-            }
-        }
-
+        const max = await calcularMayorNumeroExistente();
         return max > 0 ? max + 1 : 1;
     } catch (error) {
         console.error("Error buscando el próximo correlativo:", error);
         return Date.now() % 100000; // Fallback de emergencia
+    }
+}
+
+/** Mayor `ordenNumero` que existe hoy en la base, mirando por fecha y por número. */
+async function calcularMayorNumeroExistente(): Promise<number> {
+    const colRef = collection(db, "ordenes");
+    let max = 0;
+
+    // Los últimos 30 por fecha: cubre el caso normal sin depender de índices raros.
+    const snap = await getDocs(query(colRef, orderBy("fecha", "desc"), limit(30)));
+    snap.forEach(doc => {
+        const num = Number(doc.data().ordenNumero);
+        if (!isNaN(num) && num > max) max = num;
+    });
+
+    // Y el mayor por número, por si alguna orden vieja lleva un correlativo más alto.
+    try {
+        const snap2 = await getDocs(query(colRef, orderBy("ordenNumero", "desc"), limit(1)));
+        if (!snap2.empty) {
+            const num2 = Number(snap2.docs[0].data().ordenNumero);
+            if (!isNaN(num2) && num2 > max) max = num2;
+        }
+    } catch {
+        // Si falta el índice de ordenNumero seguimos con lo que dio la fecha.
+    }
+
+    return max;
+}
+
+/**
+ * 🔹 Reserva el siguiente número de orden SIN riesgo de duplicados.
+ *
+ * El método anterior era "leer las últimas órdenes, quedarme con la mayor y
+ * sumarle uno". Con dos personas facturando a la vez (que es lo normal en el
+ * mostrador) las dos leían el mismo máximo y las dos creaban la orden 1803:
+ * dos órdenes distintas con el mismo número, y luego cuadres imposibles.
+ *
+ * Ahora el número lo entrega una transacción de Firestore sobre un contador
+ * único: el servidor serializa las peticiones y reintenta solo si hay choque,
+ * así que cada quien se lleva un número distinto.
+ *
+ * La primera vez el contador no existe y se siembra con el mayor correlativo
+ * que ya haya en la base, para no reiniciar la numeración. Si la transacción
+ * falla (sin conexión, o reglas que no dejan escribir en `contadores`), se cae
+ * al método antiguo: es peor, pero nunca deja de poderse facturar.
+ */
+async function reservarNumeroDeOrden(): Promise<number> {
+    // Un único contador para toda la empresa.
+    const contadorRef = doc(db, "contadores", "ordenes");
+
+    try {
+        const existe = (await getDoc(contadorRef)).exists();
+        if (!existe) {
+            const base = await calcularMayorNumeroExistente();
+            // `set` dentro de transacción para que dos siembras simultáneas no
+            // se pisen: la segunda ve el documento ya creado y no toca nada.
+            await runTransaction(db, async tx => {
+                const snap = await tx.get(contadorRef);
+                if (!snap.exists()) tx.set(contadorRef, { ultimo: base });
+            });
+        }
+
+        return await runTransaction(db, async tx => {
+            const snap = await tx.get(contadorRef);
+            const actual = Number(snap.data()?.ultimo) || 0;
+            const siguiente = actual + 1;
+            tx.set(contadorRef, { ultimo: siguiente }, { merge: true });
+            return siguiente;
+        });
+    } catch (error) {
+        console.error("No se pudo reservar el correlativo con transacción, se usa el método antiguo:", error);
+        return getNextSafeOrderNumber();
     }
 }
 
@@ -63,8 +114,9 @@ export async function createOrden(data: OrdenServicio) {
   try {
     const colRef = collection(db, "ordenes"); 
     
-    // 🔥 CALCULAMOS EL NÚMERO DIRECTAMENTE AQUÍ PARA EVITAR QUE SE CONGELE
-    const numeroSeguro = await getNextSafeOrderNumber();
+    // El correlativo lo entrega el contador transaccional: nunca dos órdenes
+    // con el mismo número, aunque se facture desde dos equipos a la vez.
+    const numeroSeguro = await reservarNumeroDeOrden();
 
     const clienteBusqueda = data.cliente?.nombreRazonSocial ? data.cliente.nombreRazonSocial.toLowerCase() : "";
 
@@ -211,7 +263,24 @@ export async function updateOrdenPaymentLog(
 }
 
 /**
- * 🔹 Busca una orden específica
+ * 🔹 Trae una orden por su ID de documento de Firestore.
+ *
+ * No confundir con `buscarOrdenEspecifica`, que busca por NÚMERO de orden.
+ * Pasarle un ID a aquella devolvía siempre null sin avisar.
+ */
+export async function getOrdenById(ordenId: string): Promise<OrdenServicio | null> {
+  try {
+    const snap = await getDoc(doc(db, "ordenes", ordenId));
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...snap.data() } as OrdenServicio;
+  } catch (error) {
+    console.error("❌ Error al leer la orden:", error);
+    return null;
+  }
+}
+
+/**
+ * 🔹 Busca una orden específica POR SU NÚMERO de orden (no por su ID).
  */
 export async function buscarOrdenEspecifica(numeroDeOrden: string) {
   try {

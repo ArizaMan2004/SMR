@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils"
 import { esAdmin } from '@/lib/roles'
 import { claveFechaLocal } from '@/lib/utils/fechas'
 
-const springConfig = { type: "spring", stiffness: 300, damping: 30 };
+const springConfig = { type: "spring" as const, stiffness: 300, damping: 30 };
 
 const MATERIALES = ["Vinil", "Banner", "Micro", "Clear", "Stickers", "V. Corte", "DTF", "V. Textil", "Laser"]
 const ADICIONALES = ["Refilado", "Bolsillos", "Laminado", "PVC", "Ojales", "Tubos", "Otros"]
@@ -225,7 +225,7 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                                         orden={orden} 
                                         onView={() => { setFormData(orden); setIsReadOnly(true); setIsModalOpen(true); }}
                                         onEdit={() => { setFormData(orden); setIsReadOnly(false); setIsModalOpen(true); }}
-                                        onMove={(newArea) => handleMoveArea(orden.id!, newArea)}
+                                        onMove={(newArea: string) => handleMoveArea(orden.id!, newArea)}
                                         onComplete={() => handleComplete(orden.id!)}
                                         onDelete={() => handleDelete(orden.id!)}
                                         isAdmin={isAdmin}
@@ -251,7 +251,7 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                                 orden={orden} 
                                 onView={() => { setFormData(orden); setIsReadOnly(true); setIsModalOpen(true); }}
                                 onEdit={() => { setFormData(orden); setIsReadOnly(false); setIsModalOpen(true); }}
-                                onMove={(newArea) => handleMoveArea(orden.id!, newArea)} 
+                                onMove={(newArea: string) => handleMoveArea(orden.id!, newArea)} 
                                 onComplete={() => {}}
                                 onDelete={() => handleDelete(orden.id!)}
                                 isAdmin={isAdmin}

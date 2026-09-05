@@ -39,6 +39,8 @@ export interface GastoFijo {
   /** Último monto realmente pagado, para mostrarlo sin recalcularlo por tasa. */
   ultimoMontoPagadoUSD?: number
   ultimoMontoPagadoBs?: number
+  /** Con qué se pagó la última vez, para proponerlo por defecto. */
+  ultimoMetodoPago?: string
 }
 
 /** Comisión, bono o adelanto cargado a mano a un empleado y aún sin pagar. */

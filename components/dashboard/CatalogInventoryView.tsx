@@ -41,6 +41,7 @@ import {
     createVentaCatalogo,
     anularVentaCatalogo,
     calcPrecioM2,
+    precioDeServicio,
     type CatalogoCategoria,
     type CatalogoProducto,
     type CatalogoVariante,
@@ -165,8 +166,16 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
 
     // Forms
     const [prodForm, setProdForm] = useState<CatalogoProducto>({ ...PROD_DEFAULT })
+
+    /**
+     * Material que se vende por metro cuadrado (vinil, banner, lona...).
+     *
+     * Estos no llevan stock por servicio: salen de un rollo entero y el
+     * recuento se hace a mano sobre los rollos, no sobre cada impresión.
+     */
+    const esPorM2 = prodForm.tipoVenta === 'metro_cuadrado'
     const [catForm, setCatForm] = useState<CatalogoCategoria>({ ...CAT_DEFAULT })
-    const [prodVarianteInput, setProdVarianteInput] = useState({ nombre: '', stock: 0, stockMinimo: 0 })
+    const [prodVarianteInput, setProdVarianteInput] = useState({ nombre: '', stock: 0, stockMinimo: 0, precioGeneral: 0, precioAliado: 0 })
 
     // ============================================================
     // FIRESTORE LISTENERS
@@ -294,10 +303,14 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
             id: `var_${Date.now()}`,
             nombre: prodVarianteInput.nombre.trim(),
             stock: Number(prodVarianteInput.stock) || 0,
-            stockMinimo: Number(prodVarianteInput.stockMinimo) || 0
+            stockMinimo: Number(prodVarianteInput.stockMinimo) || 0,
+            // Precios propios del servicio derivado. Si se dejan en 0 se hereda
+            // el del material base, que es lo razonable para "vinil solo".
+            precioGeneral: Number(prodVarianteInput.precioGeneral) || undefined,
+            precioAliado: Number(prodVarianteInput.precioAliado) || undefined,
         }
         setProdForm(p => ({ ...p, variantes: [...p.variantes, nueva] }))
-        setProdVarianteInput({ nombre: '', stock: 0, stockMinimo: 0 })
+        setProdVarianteInput({ nombre: '', stock: 0, stockMinimo: 0, precioGeneral: 0, precioAliado: 0 })
     }
 
     const removeVarianteFromForm = (varId: string) => {
@@ -350,14 +363,19 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
         if (!configProduct) return { precio: 0, moneda: 'USD' as const, subtotalUSD: 0 }
 
         const esPublicista = cartConfig.tipoCliente === 'publicista'
-        const precioElegido = esPublicista && configProduct.precioPublicista
-            ? configProduct.precioPublicista
-            : configProduct.precioBase
         const monedaPrecio: 'USD' | 'EUR' = esPublicista ? 'EUR' : 'USD'
         const varianteActual = configProduct.tieneVariantes
             ? configProduct.variantes.find(v => v.id === cartConfig.varianteId)
             : null
-        const precioConAjuste = precioElegido + (varianteActual?.precioAjuste || 0)
+
+        // El precio sale del servicio derivado si lo tiene definido; si no, del
+        // material base. Un único sitio decide esto para que el carrito, la
+        // ficha del producto y el PDF no puedan discrepar.
+        const precioConAjuste = precioDeServicio(
+            configProduct,
+            varianteActual,
+            esPublicista ? 'publicista' : 'general'
+        )
 
         let subtotalEnMoneda: number
         if (configProduct.tipoVenta === 'metro_cuadrado') {
@@ -382,7 +400,7 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
         if (configProduct.tipoVenta === 'metro_cuadrado' && (cartConfig.cmAlto <= 0 || cartConfig.cmAncho <= 0))
             return toast.error('Ingresa las medidas')
         if (configProduct.tieneVariantes && !cartConfig.varianteId)
-            return toast.error('Selecciona una variante')
+            return toast.error('Elige el servicio derivado')
 
         const variante = configProduct.tieneVariantes
             ? configProduct.variantes.find(v => v.id === cartConfig.varianteId) : null
@@ -1380,11 +1398,11 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                             </div>
                         )}
 
-                        {/* Toggle variantes */}
+                        {/* Toggle servicios derivados */}
                         <div className="flex items-center justify-between bg-slate-50 dark:bg-white/5 p-4 rounded-2xl">
                             <div>
-                                <p className="font-black text-xs uppercase">Tiene variantes / colores</p>
-                                <p className="text-[9px] text-slate-400">Ej. Acrílico blanco, negro, transparente</p>
+                                <p className="font-black text-xs uppercase">Tiene servicios derivados</p>
+                                <p className="text-[9px] text-slate-400">Del vinil salen: vinil solo, impresión mate, brillante, blackout, corte en plóter, stickers…</p>
                             </div>
                             <Switch checked={prodForm.tieneVariantes} onCheckedChange={v => setProdForm(p => ({ ...p, tieneVariantes: v }))} />
                         </div>
@@ -1392,13 +1410,20 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                         {/* Gestión de variantes */}
                         {prodForm.tieneVariantes && (
                             <div className="bg-slate-50 dark:bg-white/5 p-4 rounded-2xl space-y-3">
-                                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Variantes / Colores / Tamaños</p>
+                                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Servicios derivados de este material</p>
 
                                 {prodForm.variantes.map(v => (
                                     <div key={v.id} className="flex items-center gap-2 bg-white dark:bg-black/20 p-3 rounded-xl border border-black/5">
                                         <div className="flex-1 min-w-0">
                                             <p className="font-black text-xs uppercase truncate">{v.nombre}</p>
-                                            <p className="text-[8px] text-slate-400">Stock: {v.stock} · Mín: {v.stockMinimo}</p>
+                                            <p className="text-[8px] text-slate-400">
+                                                {/* Si el servicio no tiene precio propio, se ve que hereda
+                                                    el del material base en vez de quedar en blanco. */}
+                                                {v.precioGeneral
+                                                    ? <>Regular ${v.precioGeneral} · Aliado €{v.precioAliado || v.precioGeneral}</>
+                                                    : <span className="italic">Hereda el precio del material</span>}
+                                                {!esPorM2 && <>{' · '}Stock: {v.stock}</>}
+                                            </p>
                                         </div>
                                         <button onClick={() => removeVarianteFromForm(v.id)} className="text-red-400 hover:text-red-600 p-1 rounded-lg transition-colors">
                                             <X className="w-3.5 h-3.5" />
@@ -1406,28 +1431,63 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                     </div>
                                 ))}
 
-                                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                                    <div className="col-span-2 sm:col-span-2">
-                                        <Input placeholder="Nombre variante" value={prodVarianteInput.nombre}
+                                <div className={cn("grid gap-2", esPorM2 ? "grid-cols-[1fr_auto]" : "grid-cols-2 sm:grid-cols-5")}>
+                                    <div className={esPorM2 ? "" : "col-span-2 sm:col-span-2"}>
+                                        <Input placeholder="Ej. Impresión en vinil mate" value={prodVarianteInput.nombre}
                                             onChange={e => setProdVarianteInput(p => ({ ...p, nombre: e.target.value }))}
                                             className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-bold" />
                                     </div>
-                                    <div>
-                                        <Input type="number" placeholder="Stock" value={prodVarianteInput.stock || ''}
-                                            onChange={e => setProdVarianteInput(p => ({ ...p, stock: parseInt(e.target.value) || 0 }))}
-                                            className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black text-center" />
-                                    </div>
-                                    <div>
-                                        <Input type="number" placeholder="Mín." value={prodVarianteInput.stockMinimo || ''}
-                                            onChange={e => setProdVarianteInput(p => ({ ...p, stockMinimo: parseInt(e.target.value) || 0 }))}
-                                            className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black text-center" />
-                                    </div>
+
+                                    {/* El stock por servicio solo tiene sentido cuando se vende por
+                                        unidad. La impresión sale de un rollo entero: lo que se
+                                        controla es el rollo, no cada servicio por separado, y ese
+                                        recuento se lleva a mano en el campo de rollos del material. */}
+                                    {!esPorM2 && (
+                                        <>
+                                            <div>
+                                                <Input type="number" placeholder="Stock" value={prodVarianteInput.stock || ''}
+                                                    onChange={e => setProdVarianteInput(p => ({ ...p, stock: parseInt(e.target.value) || 0 }))}
+                                                    className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black text-center" />
+                                            </div>
+                                            <div>
+                                                <Input type="number" placeholder="Mín." value={prodVarianteInput.stockMinimo || ''}
+                                                    onChange={e => setProdVarianteInput(p => ({ ...p, stockMinimo: parseInt(e.target.value) || 0 }))}
+                                                    className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black text-center" />
+                                            </div>
+                                        </>
+                                    )}
+
                                     <Button onClick={addVarianteToForm} size="sm"
                                         className="h-10 rounded-xl bg-blue-600 text-white font-black">
                                         <Plus className="w-3.5 h-3.5" />
                                     </Button>
                                 </div>
-                                <p className="text-[8px] text-slate-400">Nombre · Stock inicial · Stock mínimo</p>
+
+                                {/* PRECIOS PROPIOS DEL SERVICIO DERIVADO.
+                                    De un mismo material salen servicios que se cobran
+                                    distinto: el vinil solo no vale lo mismo que la
+                                    impresión en vinil mate o que un juego de stickers. */}
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-400">$</span>
+                                        <Input type="number" step="0.01" placeholder="Precio regular"
+                                            value={prodVarianteInput.precioGeneral || ''}
+                                            onChange={e => setProdVarianteInput(p => ({ ...p, precioGeneral: parseFloat(e.target.value) || 0 }))}
+                                            className="h-10 pl-6 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black" />
+                                    </div>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-purple-400">€</span>
+                                        <Input type="number" step="0.01" placeholder="Precio aliado"
+                                            value={prodVarianteInput.precioAliado || ''}
+                                            onChange={e => setProdVarianteInput(p => ({ ...p, precioAliado: parseFloat(e.target.value) || 0 }))}
+                                            className="h-10 pl-6 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black" />
+                                    </div>
+                                </div>
+                                <p className="text-[8px] text-slate-400">
+                                    {esPorM2 ? 'Nombre · Precio regular ($) y de aliado (€) por m²' : 'Nombre · Stock inicial · Stock mínimo · Precio regular ($) y de aliado (€) por unidad'}
+                                    {prodForm.tipoVenta === 'metro_cuadrado' ? ' (por m²)' : ' (por unidad)'}.
+                                    Si dejas los precios en blanco, el servicio cobra el del material.
+                                </p>
                             </div>
                         )}
 

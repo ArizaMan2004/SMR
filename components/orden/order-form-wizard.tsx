@@ -139,7 +139,7 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                 }
             } else {
                 const safeNum = await getNextSafeOrderNumber();
-                setFormData(prev => ({ ...prev, ordenNumero: String(safeNum) }));
+                setFormData((prev: any) => ({ ...prev, ordenNumero: String(safeNum) }));
             }
         };
         load();
@@ -218,14 +218,14 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
         setIsDropdownOpen(false); 
         if (clientId === 'NEW') {
             setIsClientEditing(true); setClientSearchTerm("");
-            setFormData(p => ({ ...p, cliente: INITIAL_FORM_DATA.cliente }));
+            setFormData((p: any) => ({ ...p, cliente: INITIAL_FORM_DATA.cliente }));
             return;
         }
         const c = frequentClients.find(client => client.id === clientId);
         if (c) {
             setIsClientEditing(false); setClientSearchTerm(c.nombreRazonSocial);
             const [pref, num] = (c.rifCedula || "V-").split('-');
-            setFormData(prev => ({ ...prev, cliente: { ...prev.cliente, nombreRazonSocial: c.nombreRazonSocial, tipoCliente: c.tipoCliente, prefijoRif: pref || "V", numeroRif: num || "", prefijoTelefono: c.telefono?.substring(0, 4) || "0414", numeroTelefono: c.telefono?.substring(4) || "" } }));
+            setFormData((prev: any) => ({ ...prev, cliente: { ...prev.cliente, nombreRazonSocial: c.nombreRazonSocial, tipoCliente: c.tipoCliente, prefijoRif: pref || "V", numeroRif: num || "", prefijoTelefono: c.telefono?.substring(0, 4) || "0414", numeroTelefono: c.telefono?.substring(4) || "" } }));
         }
     };
 
@@ -257,7 +257,7 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
     };
 
     const handleChange = useCallback((path: string, value: any) => {
-        setFormData(prev => {
+        setFormData((prev: any) => {
             const next = JSON.parse(JSON.stringify(prev));
             const keys = path.split('.');
             let curr = next;

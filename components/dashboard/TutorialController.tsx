@@ -270,7 +270,7 @@ export function HelpModal({ open, onClose, activeView, onNavigate }: HelpModalPr
                         initial={{ opacity: 0, scale: 0.95, y: 20 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                        transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                        transition={{ type: 'spring' as const, stiffness: 300, damping: 25 }}
                         className="fixed inset-4 md:inset-8 z-50 bg-white dark:bg-[#111] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col"
                     >
                         {/* Header */}
@@ -348,7 +348,7 @@ export function HelpModal({ open, onClose, activeView, onNavigate }: HelpModalPr
                                         initial={{ opacity: 0 }}
                                         animate={{ opacity: 1 }}
                                         exit={{ opacity: 0 }}
-                                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                                        transition={{ type: 'spring' as const, stiffness: 400, damping: 30 }}
                                         className="w-full md:w-[340px] shrink-0 border-t md:border-t-0 border-l-0 md:border-l border-black/5 dark:border-white/5 overflow-visible md:overflow-hidden"
                                     >
                                         <div className="w-full h-auto md:h-full overflow-visible md:overflow-y-auto p-6 space-y-5">

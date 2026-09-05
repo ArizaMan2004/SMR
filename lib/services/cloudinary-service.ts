@@ -1,5 +1,7 @@
 // @/lib/services/cloudinary-service.ts
 
+import { auth } from "@/lib/firebase";
+
 /**
  * Sube un archivo (File) a Cloudinary y devuelve la URL pública.
  * @param file El archivo (File object) a subir.
@@ -49,13 +51,20 @@ export async function uploadFileToCloudinary(file: File): Promise<string> {
  * @param imageUrl La URL de la imagen a eliminar.
  */
 export async function deleteFileFromCloudinary(imageUrl: string): Promise<void> {
-    console.log(`[Cloudinary Service] Solicitud de eliminación para: ${imageUrl}`);
-    
+    // La API Route exige el token de la sesión: sin esto responde 401 y no borra
+    // nada. Es lo que impide que un desconocido vacíe la cuenta de Cloudinary.
+    const usuario = auth.currentUser;
+    if (!usuario) {
+        throw new Error("Debes tener la sesión abierta para eliminar imágenes.");
+    }
+    const idToken = await usuario.getIdToken();
+
     // 1. Llama a tu propia API Route (ej. /api/cloudinary/delete-image)
     const response = await fetch('/api/cloudinary/delete-image', {
         method: 'DELETE',
         headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({ imageUrl }),
     });
@@ -73,5 +82,4 @@ export async function deleteFileFromCloudinary(imageUrl: string): Promise<void> 
         throw new Error(`Error al eliminar la imagen en Cloudinary: ${errorDetail}`);
     }
 
-    console.log(`[Cloudinary Service] Eliminación de ${imageUrl} procesada con éxito por el servidor.`);
 }

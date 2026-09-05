@@ -48,6 +48,14 @@ const DEPARTAMENTOS = [
 ]
 
 // LISTA DE MÉTODOS DE PAGO (Sincronizada con Billeteras)
+// A que cuenta concreta sale el gasto. Se ofrece solo si la empresa dio de
+// alta cuentas para esa billetera; si no, el formulario queda como estaba.
+import {
+  subscribeToBilleteras, cuentasActivas, billeteraDeMetodo,
+  type ConfigBilleteras,
+} from "@/lib/services/billeteras-service"
+import { LogoBanco } from "@/components/dashboard/LogoBanco"
+
 const PAYMENT_METHODS = [
     { value: "Efectivo USD", label: "Caja Chica ($)" },
     { value: "Pago Móvil (Bs)", label: "Banco Nacional (Bs)" },
@@ -65,8 +73,14 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
     categoria: "insumos",
     area: "GENERAL",
     metodoPago: "Efectivo USD", // Valor por defecto
+    cuentaId: "",
     fecha: new Date().toISOString().split("T")[0],
   })
+
+  const [configBilleteras, setConfigBilleteras] = useState<ConfigBilleteras>({})
+  useEffect(() => subscribeToBilleteras(setConfigBilleteras), [])
+
+  const cuentasDelMetodo = cuentasActivas(billeteraDeMetodo(formData.metodoPago), configBilleteras)
 
   // EFECTO: Cargar datos para edición cuando cambie initialData
   useEffect(() => {
@@ -80,6 +94,7 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
         categoria: initialData.categoria || "insumos",
         area: initialData.area || "GENERAL",
         metodoPago: initialData.metodoPago || "Efectivo USD", // Cargar método existente
+        cuentaId: initialData.cuentaId || "",
         fecha: fechaRaw.toISOString().split("T")[0],
       });
     } else {
@@ -92,6 +107,7 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
         categoria: "insumos",
         area: "GENERAL",
         metodoPago: "Efectivo USD",
+        cuentaId: "",
         fecha: new Date().toISOString().split("T")[0],
       });
     }
@@ -137,7 +153,8 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
             descripcion: "", 
             montoUSD: "", 
             montoBs: "", 
-            metodoPago: "Efectivo USD" 
+            metodoPago: "Efectivo USD",
+            cuentaId: ""
         }))
     }
   }
@@ -285,7 +302,15 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
             <label className="text-[9px] font-black uppercase text-slate-400 ml-4 tracking-widest">Cuenta de Salida</label>
             <Select 
                 value={formData.metodoPago} 
-                onValueChange={(v) => setFormData(p => ({ ...p, metodoPago: v }))}
+                onValueChange={(v) => setFormData(p => {
+                    const propias = cuentasActivas(billeteraDeMetodo(v), configBilleteras)
+                    return {
+                        ...p,
+                        metodoPago: v,
+                        // Si la nueva billetera solo tiene una cuenta, se elige sola.
+                        cuentaId: propias.some(c => c.id === p.cuentaId) ? p.cuentaId : (propias.length === 1 ? propias[0].id : ""),
+                    }
+                })}
             >
                 <SelectTrigger className="w-full h-[56px] rounded-2xl bg-slate-50 dark:bg-white/5 border-none font-bold text-xs">
                     <div className="flex items-center gap-2">
@@ -299,6 +324,28 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
                     ))}
                 </SelectContent>
             </Select>
+
+            {cuentasDelMetodo.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1 pl-1">
+                    {cuentasDelMetodo.map(c => (
+                        <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setFormData(p => ({ ...p, cuentaId: p.cuentaId === c.id ? "" : c.id }))}
+                            title={[c.banco, c.referencia].filter(Boolean).join(' \u00b7 ') || undefined}
+                            className={cn(
+                                "flex items-center gap-1.5 px-2.5 h-8 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all border",
+                                formData.cuentaId === c.id
+                                    ? "bg-slate-900 text-white border-slate-900 shadow-md"
+                                    : "bg-slate-50 dark:bg-white/5 text-slate-500 border-transparent hover:border-slate-200"
+                            )}
+                        >
+                            <LogoBanco codigo={c.bancoCodigo} texto={c.banco} size={13} />
+                            {c.nombre}
+                        </button>
+                    ))}
+                </div>
+            )}
           </div>
 
           <div className="flex-1 space-y-1.5">

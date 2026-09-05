@@ -18,12 +18,37 @@ export interface CatalogoCategoria {
     createdAt?: any
 }
 
+/**
+ * SERVICIO DERIVADO de un material.
+ *
+ * Todo lo que vende el taller sale de un material base. Del vinil salen el
+ * vinil solo, la impresión en vinil mate, la brillante, la blackout, el corte
+ * en plóter, los stickers... Cada uno se cobra distinto, pero todos consumen
+ * metros cuadrados DEL MISMO material, así que agrupándolos bajo el material
+ * se sabe cuánto vinil se gastó de verdad, sin importar cómo se vendió.
+ *
+ * (Se sigue llamando "variante" en el código porque así se llamaba y hay datos
+ * guardados con ese nombre; en pantalla se presenta como servicio derivado.)
+ */
 export interface CatalogoVariante {
     id: string
-    nombre: string      // "Blanco", "Media Lámina - Negro", "Cuarto - Transparente", etc.
+    nombre: string      // "Vinil solo", "Impresión en vinil mate", "Stickers"...
     stock: number
     stockMinimo: number
-    precioAjuste?: number   // extra sobre el precio base (puede ser negativo)
+
+    /**
+     * Precio propio del servicio, por m² o por unidad según el material.
+     * Si no se define, se usa el del material base.
+     */
+    precioGeneral?: number
+    /** Precio para aliados y publicistas. Si falta, se cobra el general. */
+    precioAliado?: number
+
+    /**
+     * Forma antigua: un extra sumado al precio base. Se conserva para no
+     * romper lo ya guardado, pero los precios propios mandan sobre él.
+     */
+    precioAjuste?: number
 }
 
 export interface CatalogoProducto {
@@ -108,6 +133,118 @@ export interface VentaCatalogo {
 // ============================================================
 // FÓRMULA M² — igual que la calculadora del sistema
 // ============================================================
+/**
+ * Precio que se cobra por un servicio derivado, según el tipo de cliente.
+ *
+ * Orden de preferencia:
+ *   1. El precio propio del servicio (lo normal a partir de ahora).
+ *   2. El precio del material base más el ajuste antiguo, si lo tenía.
+ *   3. El precio del material base a secas.
+ *
+ * Para aliados, si el servicio no tiene precio preferencial se le cobra el
+ * general: es mejor cobrar de más que regalar el trabajo por un hueco en la
+ * ficha, y así se nota en seguida que falta configurarlo.
+ */
+export const precioDeServicio = (
+    producto: Pick<CatalogoProducto, 'precioBase' | 'precioPublicista'>,
+    variante: CatalogoVariante | null | undefined,
+    tipoCliente: TipoCliente = 'general'
+): number => {
+    const esAliado = tipoCliente === 'publicista'
+
+    if (variante) {
+        const propio = esAliado
+            ? (variante.precioAliado ?? variante.precioGeneral)
+            : variante.precioGeneral
+        if (typeof propio === 'number' && propio > 0) return propio
+
+        const base = esAliado
+            ? (producto.precioPublicista ?? producto.precioBase)
+            : producto.precioBase
+        return Math.max(0, (Number(base) || 0) + (Number(variante.precioAjuste) || 0))
+    }
+
+    const base = esAliado
+        ? (producto.precioPublicista ?? producto.precioBase)
+        : producto.precioBase
+    return Number(base) || 0
+}
+
+export interface ConsumoMaterial {
+    productoId: string
+    productoNombre: string
+    m2Totales: number
+    unidadesTotales: number
+    ingresosUSD: number
+    /** Desglose por servicio derivado, de mayor a menor consumo. */
+    porServicio: {
+        varianteId: string
+        nombre: string
+        m2: number
+        unidades: number
+        ingresosUSD: number
+    }[]
+}
+
+/**
+ * Cuántos metros cuadrados se gastaron de cada MATERIAL, sumando todos sus
+ * servicios derivados.
+ *
+ * Es la pregunta que no se podía responder antes: da igual que el vinil se
+ * vendiera como impresión mate, como stickers o cortado en plóter — sigue
+ * siendo vinil saliendo del rollo, y para reponer hace falta el total.
+ */
+export const consumoPorMaterial = (ventas: VentaCatalogo[]): ConsumoMaterial[] => {
+    const mapa = new Map<string, ConsumoMaterial>()
+
+    ventas.forEach(venta => {
+        // Una venta anulada no consumió material.
+        if ((venta as any)?.estado === 'ANULADA') return
+
+        ;(venta.items || []).forEach(item => {
+            if (!item?.productoId) return
+
+            if (!mapa.has(item.productoId)) {
+                mapa.set(item.productoId, {
+                    productoId: item.productoId,
+                    productoNombre: item.productoNombre || 'Sin nombre',
+                    m2Totales: 0,
+                    unidadesTotales: 0,
+                    ingresosUSD: 0,
+                    porServicio: [],
+                })
+            }
+
+            const material = mapa.get(item.productoId)!
+            const m2 = Number(item.m2Total) || 0
+            const uds = Number(item.cantidad) || 0
+            const importe = Number(item.subtotalUSD) || 0
+
+            material.m2Totales += m2
+            material.unidadesTotales += uds
+            material.ingresosUSD += importe
+
+            const claveServicio = item.varianteId || '__base__'
+            let servicio = material.porServicio.find(s => s.varianteId === claveServicio)
+            if (!servicio) {
+                servicio = {
+                    varianteId: claveServicio,
+                    nombre: item.varianteNombre || 'Sin servicio derivado',
+                    m2: 0, unidades: 0, ingresosUSD: 0,
+                }
+                material.porServicio.push(servicio)
+            }
+            servicio.m2 += m2
+            servicio.unidades += uds
+            servicio.ingresosUSD += importe
+        })
+    })
+
+    const salida = Array.from(mapa.values())
+    salida.forEach(m => m.porServicio.sort((a, b) => (b.m2 - a.m2) || (b.unidades - a.unidades)))
+    return salida.sort((a, b) => (b.m2Totales - a.m2Totales) || (b.ingresosUSD - a.ingresosUSD))
+}
+
 export const calcPrecioM2 = (
     precioPorM2: number,
     cmAlto: number,

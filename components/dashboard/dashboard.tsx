@@ -2,6 +2,7 @@
 "use client"
 
 import React, { useEffect, useState, useMemo, useCallback } from "react"
+import dynamic from "next/dynamic"
 import { motion, AnimatePresence } from "framer-motion"
 import { useAuth } from "@/lib/auth-context"
 
@@ -15,41 +16,59 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { toast } from "sonner" 
 
-// Componentes SMR
+// Componentes SMR (los que se ven siempre o casi siempre: viajan en el paquete
+// principal porque hacen falta desde el primer segundo)
 import Sidebar from "@/components/dashboard/sidebar"
 import { OrdersTable } from "@/components/orden/orders-table"
-import { ClientsAndPaymentsView } from "@/components/dashboard/ClientsAndPaymentsView"
 import { NotificationCenter } from "@/components/dashboard/NotificationCenter"
 import { NotificationBell } from "@/components/dashboard/NotificationBell"
 import { OrderFormWizardV2 } from "@/components/orden/order-form-wizard"
-import { DesignerPayrollView } from "@/components/dashboard/DesignerPayrollView" 
 import TasksView from "@/components/dashboard/tasks-view"
-import BudgetEntryView from "@/components/dashboard/BudgetEntryView" 
-import CalculatorView from "@/components/dashboard/CalculatorView" 
-import { CurrencyToast } from "@/components/dashboard/CurrencyToast" 
-import { WalletsView } from "@/components/dashboard/WalletsView"
+import { CurrencyToast } from "@/components/dashboard/CurrencyToast"
 import { PaymentEditModal } from "@/components/dashboard/PaymentEditModal"
-import { PaymentAuditView } from "@/components/dashboard/PaymentAuditView"
 import { NewsBar, type NewsAction } from "@/components/dashboard/news-bar" 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal" 
-import { TaskControlView } from "@/components/dashboard/TaskControlView"
-import { CatalogInventoryView } from "@/components/dashboard/CatalogInventoryView"
 
-// --- IMPORTACIONES DE HERRAMIENTAS IA Y DISEÑO ---
-import { BackgroundRemoverView } from "@/components/dashboard/BackgroundRemoverView" 
-import { UpscaleView } from "@/components/dashboard/UpscaleView"
-import { FormatConverterView } from "@/components/dashboard/FormatConverterView" 
+// --- VISTAS QUE SE CARGAN SOLO AL ABRIRLAS ---
+//
+// Antes TODO esto entraba en el mismo paquete que el panel: TensorFlow y el
+// upscaler, el quita-fondos de IA, las gráficas, los generadores de PDF...
+// varios megas que descargaba hasta quien solo entra a marcar tareas en el
+// taller. Con `dynamic` cada vista se descarga la primera vez que alguien la
+// abre, y quien nunca la abre no la paga.
+//
+// `ssr: false` porque todas son pantallas de panel privado: no hay nada que
+// renderizar en el servidor y varias tocan `window` al montarse.
+const CargandoVista = () => (
+    <div className="flex items-center justify-center py-20 text-muted-foreground">
+        <Loader2 className="w-6 h-6 animate-spin mr-2" />
+        <span className="text-sm">Cargando sección...</span>
+    </div>
+)
 
-// Componentes Administrativos y de Perfil
-import { GastosFijosView } from "@/components/dashboard/gastos-fijos-view"
-import { InsumosView } from "@/components/dashboard/InsumosView"
+const ClientsAndPaymentsView = dynamic(() => import("@/components/dashboard/ClientsAndPaymentsView").then(m => m.ClientsAndPaymentsView), { ssr: false, loading: CargandoVista })
+const DesignerPayrollView = dynamic(() => import("@/components/dashboard/DesignerPayrollView").then(m => m.DesignerPayrollView), { ssr: false, loading: CargandoVista })
+const BudgetEntryView = dynamic(() => import("@/components/dashboard/BudgetEntryView"), { ssr: false, loading: CargandoVista })
+const CalculatorView = dynamic(() => import("@/components/dashboard/CalculatorView"), { ssr: false, loading: CargandoVista })
+const WalletsView = dynamic(() => import("@/components/dashboard/WalletsView").then(m => m.WalletsView), { ssr: false, loading: CargandoVista })
+const PaymentAuditView = dynamic(() => import("@/components/dashboard/PaymentAuditView").then(m => m.PaymentAuditView), { ssr: false, loading: CargandoVista })
+const TaskControlView = dynamic(() => import("@/components/dashboard/TaskControlView").then(m => m.TaskControlView), { ssr: false, loading: CargandoVista })
+const CatalogInventoryView = dynamic(() => import("@/components/dashboard/CatalogInventoryView").then(m => m.CatalogInventoryView), { ssr: false, loading: CargandoVista })
 
-import { EmpleadosView } from "@/components/dashboard/empleados-view"
-import { EstadisticasDashboard } from "@/components/dashboard/estadisticas-dashboard"
-import { UsersManagementView } from "@/components/dashboard/UsersManagementView" 
-import { ProfileSettingsView } from "@/components/dashboard/ProfileSettingsView"
-import { EmployeeFinancesView } from "@/components/dashboard/EmployeeFinancesView"
-import { HorariosView } from "@/components/dashboard/HorariosView"
+// Herramientas de IA y diseño: son las más pesadas de todo el sistema.
+const BackgroundRemoverView = dynamic(() => import("@/components/dashboard/BackgroundRemoverView").then(m => m.BackgroundRemoverView), { ssr: false, loading: CargandoVista })
+const UpscaleView = dynamic(() => import("@/components/dashboard/UpscaleView").then(m => m.UpscaleView), { ssr: false, loading: CargandoVista })
+const FormatConverterView = dynamic(() => import("@/components/dashboard/FormatConverterView").then(m => m.FormatConverterView), { ssr: false, loading: CargandoVista })
+
+// Administración y perfil.
+const GastosFijosView = dynamic(() => import("@/components/dashboard/gastos-fijos-view").then(m => m.GastosFijosView), { ssr: false, loading: CargandoVista })
+const InsumosView = dynamic(() => import("@/components/dashboard/InsumosView").then(m => m.InsumosView), { ssr: false, loading: CargandoVista })
+const EmpleadosView = dynamic(() => import("@/components/dashboard/empleados-view").then(m => m.EmpleadosView), { ssr: false, loading: CargandoVista })
+const EstadisticasDashboard = dynamic(() => import("@/components/dashboard/estadisticas-dashboard").then(m => m.EstadisticasDashboard), { ssr: false, loading: CargandoVista })
+const UsersManagementView = dynamic(() => import("@/components/dashboard/UsersManagementView").then(m => m.UsersManagementView), { ssr: false, loading: CargandoVista })
+const ProfileSettingsView = dynamic(() => import("@/components/dashboard/ProfileSettingsView").then(m => m.ProfileSettingsView), { ssr: false, loading: CargandoVista })
+const EmployeeFinancesView = dynamic(() => import("@/components/dashboard/EmployeeFinancesView").then(m => m.EmployeeFinancesView), { ssr: false, loading: CargandoVista })
+const HorariosView = dynamic(() => import("@/components/dashboard/HorariosView").then(m => m.HorariosView), { ssr: false, loading: CargandoVista })
 
 // Controlador del Tutorial
 import { HelpModal } from "@/components/dashboard/TutorialController"
@@ -66,7 +85,7 @@ import {
 import { type OrdenServicio } from "@/lib/types/orden"
 import { 
     subscribeToOrdenes, deleteOrden, createOrden, actualizarOrden, 
-    getTotalOrdenesCount, buscarOrdenEspecifica, getOrdenesStatsFromServer,
+    getTotalOrdenesCount, getOrdenById, getOrdenesStatsFromServer,
     buscarOrdenesHistoricas 
 } from "@/lib/services/ordenes-service"
 import { subscribeToDesigners, type Designer } from "@/lib/services/designers-service"
@@ -88,13 +107,14 @@ import { cn } from "@/lib/utils"
 import type { GastoFijo, Empleado, PagoEmpleado } from "@/lib/types/gastos"
 import { NotificationProvider } from "@/lib/contexts/notification-context"
 import { usePermisos } from "@/lib/contexts/permisos-context"
-import { puedeSupervisarTareas } from "@/lib/roles"
+import { puedeSupervisarTareas, esAdmin } from "@/lib/roles"
 import { crearNotificacion, notificarNuevaOrden } from "@/lib/services/notificaciones-service"
 import { estaSaldada, estaAbonada, aCentimos } from '@/lib/utils/estados'
 import { subscribeToHorarios } from '@/lib/services/horarios-service'
 import { ResumenDelDia } from '@/components/dashboard/ResumenDelDia'
+import { subscribeToIdentidad, identidadParaPDF } from '@/lib/services/identidad-service'
 
-const springConfig = { type: "spring", stiffness: 300, damping: 30 } as const;
+const springConfig = { type: "spring" as const, stiffness: 300, damping: 30 } as const;
 type ActiveView = string; 
 
 export default function Dashboard() {
@@ -166,6 +186,24 @@ export default function Dashboard() {
     const [eurRate, setEurRate] = useState<number>(0)
     const [parallelRate, setParallelRate] = useState<number>(0)
     const [assets, setAssets] = useState({ logo: "", firma: "", sello: "" })
+
+    // Logo, firma y sello salen de la nube, no del navegador. Antes vivian en
+    // localStorage: habia que recargarlos en cada PC y dos empleados podian
+    // emitir PDF con sellos distintos sin saberlo. Ahora se suben una vez desde
+    // Ajustes -> Identidad de Empresa y valen para toda la empresa.
+    //
+    // Va suscrito y no de una sola lectura: si el admin cambia el sello mientras
+    // alguien tiene el dashboard abierto, el PDF sale ya con el nuevo.
+    //
+    // pdfmake necesita la imagen en base64 y no sabe ir a buscar una URL, asi
+    // que se descargan y se convierten aqui.
+    useEffect(() => {
+        return subscribeToIdentidad(identidad => {
+            identidadParaPDF(identidad)
+                .then(({ logo, firma, sello }) => setAssets({ logo: logo || "", firma: firma || "", sello: sello || "" }))
+                .catch(e => console.error("No se pudo preparar la identidad para los PDF:", e))
+        })
+    }, [])
     
     
     const [ordenes, setOrdenes] = useState<OrdenServicio[]>([]) 
@@ -340,27 +378,6 @@ export default function Dashboard() {
         toast.success("Cálculo cargado en el terminal de ventas");
     };
 
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'firma' | 'sello') => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-            const base64 = reader.result as string;
-            if (type === 'logo') await setLogoBase64(base64);
-            if (type === 'firma') await setFirmaBase64(base64);
-            if (type === 'sello') await setSelloBase64(base64);
-            setAssets(prev => ({ ...prev, [type]: base64 }));
-        };
-        reader.readAsDataURL(file);
-    };
-
-    const handleClearAsset = async (type: 'logo' | 'firma' | 'sello') => {
-        if (type === 'logo') await setLogoBase64("");
-        if (type === 'firma') await setFirmaBase64("");
-        if (type === 'sello') await setSelloBase64("");
-        setAssets(prev => ({ ...prev, [type]: "" }));
-    };
-
     const handleUpdateRate = useCallback(async (label: string) => {
         if (!currentUserId) return;
         let newValue = 0;
@@ -390,7 +407,10 @@ export default function Dashboard() {
         imagenUrl?: string,
         metodo?: string,
         descuento?: number,
-        fechaPago?: string
+        fechaPago?: string,
+        // Por que cuenta concreta entro el dinero: "Banesco Corriente" y no
+        // solo "Banco". Es lo que luego permite cuadrar banco por banco.
+        cuentaId?: string
     ) => {
         const descuentoAplicado = descuento || 0;
         const fechaRecibo = fechaPago || new Date().toISOString();
@@ -403,6 +423,7 @@ export default function Dashboard() {
                 imagenUrl: imagenUrl || "",
                 tasaBCV: currentBcvRate,
                 metodo: metodo || "Efectivo USD",
+                cuentaId: cuentaId || "",
             },
         ];
         if (descuentoAplicado > 0) {
@@ -496,11 +517,14 @@ export default function Dashboard() {
         setOrdenes(prev => prev.filter(o => o.id !== id));
     };
 
-    const handleUpdateOrden = async (...args: any[]) => {
-        await actualizarOrden(...args);
+    const handleUpdateOrden = async (ordenId: string, cambios: Partial<OrdenServicio>) => {
+        await actualizarOrden(ordenId, cambios);
         // Si editamos una orden antigua, buscamos su versión fresca para la tabla local
         if (editingOrder?.id) {
-            const orderUpdated = await buscarOrdenEspecifica(editingOrder.id);
+            // Antes se llamaba a buscarOrdenEspecifica, que busca por NÚMERO de
+            // orden: al pasarle el ID del documento siempre devolvía null y la
+            // fila editada se quedaba con los datos viejos hasta recargar.
+            const orderUpdated = await getOrdenById(editingOrder.id);
             if (orderUpdated) {
                 setOrdenes(prev => prev.map(o => o.id === editingOrder?.id ? orderUpdated : o));
             }
@@ -588,10 +612,6 @@ export default function Dashboard() {
 
         fetchBCVRateFromAPI().then(data => { setCurrentBcvRate(data.usd); setEurRate(data.eur || 0); });
         fetch('https://ve.dolarapi.com/v1/dolares/paralelo').then(res => res.json()).then(data => { if (data?.promedio) setParallelRate(data.promedio); });
-        
-        Promise.all([getLogoBase64(), getFirmaBase64(), getSelloBase64()]).then(([l, f, s]) => { 
-            setAssets({ logo: l || "", firma: f || "", sello: s || "" }); 
-        });
 
         getTotalOrdenesCount().then(total => {
             if (total > 0) setTotalHistoricoOrdenes(total);
@@ -736,7 +756,9 @@ export default function Dashboard() {
             switch (cardSortBy) {
                 case 'mayor_deuda': return deudaB - deudaA;
                 case 'mayor_abono': return (b.montoPagadoUSD || 0) - (a.montoPagadoUSD || 0);
-                case 'numero_orden': return (b.ordenNumero || 0) - (a.ordenNumero || 0);
+                // ordenNumero convive en la base como número y como texto: sin
+                // Number() la resta daba NaN y el listado no se ordenaba.
+                case 'numero_orden': return (Number(b.ordenNumero) || 0) - (Number(a.ordenNumero) || 0);
                 case 'cliente':
                     const clienteA = (a.cliente?.nombreRazonSocial || '').toLowerCase();
                     const clienteB = (b.cliente?.nombreRazonSocial || '').toLowerCase();
@@ -926,8 +948,8 @@ export default function Dashboard() {
                                 onDelete={handleDeleteOrden}
                                 onEdit={(o) => {setEditingOrder(o); setIsWizardOpen(true);}}
                                 onRegisterPayment={handleOpenPaymentModal}
-                                onSavePayment={async (ordenId, amount, note, img, method, discount, fechaPago) => {
-                                    await handleRegisterOrderPayment(ordenId, amount, note, img, method, discount, fechaPago);
+                                onSavePayment={async (ordenId, amount, note, img, method, discount, fechaPago, cuentaId) => {
+                                    await handleRegisterOrderPayment(ordenId, amount, note, img, method, discount, fechaPago, cuentaId);
                                 }}
                                 onUpdateOrden={async (ordenId, changes) => {
                                     await actualizarOrden(ordenId, changes);
@@ -1021,7 +1043,10 @@ export default function Dashboard() {
                 )}
 
                 {activeView === "employees_mgmt" && puedeVer("employees_mgmt") && <EmpleadosView empleados={empleados} pagos={pagos} tareas={tareasControl} rates={{ usd: currentBcvRate, eur: eurRate }} />}
-                {activeView === "wallets" && puedeVer("wallets") && <WalletsView ordenes={ordenes} gastos={gastos} gastosFijos={gastosFijos} pagosEmpleados={pagos} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} movimientosManuales={movimientosCaja} />}
+                {activeView === "wallets" && puedeVer("wallets") && /* WalletsView carga sus propios movimientos desde Firestore: las listas
+                     que se le pasaban antes (ordenes, gastos, nomina...) las descartaba
+                     React sin usarlas. */
+                    <WalletsView rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} />}
                 {activeView === "payment_audit" && puedeVer("payment_audit") && <PaymentAuditView />}
                 {activeView === "design_production" && puedeVer("design_production") && <DesignerPayrollView designers={designers} ordenes={ordenes} bcvRate={currentBcvRate} eurRate={eurRate} usdtRate={parallelRate} />}
                 {activeView === "clients" && puedeVer("clients") && <ClientsAndPaymentsView ordenes={ordenes} rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }} onRegisterPayment={handleOpenPaymentModal} pdfLogoBase64={assets.logo} firmaBase64={assets.firma} selloBase64={assets.sello} />}
@@ -1032,10 +1057,9 @@ export default function Dashboard() {
                         currentUserId={currentUserId}
                         rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
                         currentBcvRate={currentBcvRate}
-                        pdfLogoBase64={assets.logo} 
-                        handleLogoUpload={(e: any) => handleFileUpload(e, 'logo')} handleClearLogo={() => handleClearAsset('logo')}
-                        firmaBase64={assets.firma} handleFirmaUpload={(e: any) => handleFileUpload(e, 'firma')} handleClearFirma={() => handleClearAsset('firma')}
-                        selloBase64={assets.sello} handleSelloUpload={(e: any) => handleFileUpload(e, 'sello')} handleClearSello={() => handleClearAsset('sello')}
+                        pdfLogoBase64={assets.logo}
+                        firmaBase64={assets.firma}
+                        selloBase64={assets.sello}
                     />
                 )}
                 
@@ -1084,7 +1108,7 @@ export default function Dashboard() {
                 orden={selectedOrdenForPayment}
                 rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
                 onSave={async (amount, note, img, method, discount, fechaPago) => {
-                    await handleRegisterOrderPayment(selectedOrdenForPayment.id, amount, note, img, method, discount, fechaPago); 
+                    await handleRegisterOrderPayment(selectedOrdenForPayment.id!, amount, note, img, method, discount, fechaPago); 
                 }}
                 currentUserId={currentUserId || ""}
             />
