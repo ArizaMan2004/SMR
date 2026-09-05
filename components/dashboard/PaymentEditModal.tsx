@@ -15,7 +15,7 @@ import {
     DollarSign, RefreshCw, Loader2, Upload, X, 
     Banknote, ArrowLeftRight, CheckCircle2, Euro, 
     Wallet, Landmark, CreditCard, Coins, Image as ImageIcon,
-    Tag, CalendarDays
+    Tag, CalendarDays, QrCode
 } from 'lucide-react'
 
 import { formatCurrency } from '@/lib/utils/order-utils'
@@ -23,9 +23,10 @@ import { fetchBCVRateFromAPI } from "@/lib/services/bcv-service"
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
 import { type OrdenServicio } from '@/lib/types/orden'
 import {
-    subscribeToBilleteras, nombreBilletera, cuentasActivas,
-    type ConfigBilleteras,
+    subscribeToBilleteras, nombreBilletera, cuentasActivas, tieneDatosParaCobrar,
+    type ConfigBilleteras, type CuentaBilletera,
 } from '@/lib/services/billeteras-service'
+import { DatosCuentaModal } from '@/components/dashboard/DatosCuentaModal'
 import { cn } from '@/lib/utils'
 import { LogoBanco } from '@/components/dashboard/LogoBanco'
 
@@ -55,6 +56,8 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
     // ninguna dada de alta, este paso ni se muestra.
     const [configBilleteras, setConfigBilleteras] = useState<ConfigBilleteras>({})
     const [cuentaId, setCuentaId] = useState<string>('')
+    // La cuenta cuyos datos se le están enseñando al cliente en este momento.
+    const [cuentaAMostrar, setCuentaAMostrar] = useState<CuentaBilletera | null>(null)
     useEffect(() => subscribeToBilleteras(setConfigBilleteras), [])
 
     const cuentasDeEstaBilletera = cuentasActivas(wallet, configBilleteras)
@@ -299,9 +302,26 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
                         alta cuentas para esta billetera. */}
                     {cuentasDeEstaBilletera.length > 0 && (
                         <div className="space-y-2">
-                            <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
-                                {nombreBilletera(wallet, configBilleteras)} · ¿A qué cuenta?
-                            </Label>
+                            <div className="flex items-center justify-between gap-2">
+                                <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                                    {nombreBilletera(wallet, configBilleteras)} · ¿A qué cuenta?
+                                </Label>
+                                {/* Enseñarle al cliente el QR y los datos sin salir del cobro:
+                                    es el momento exacto en que los pide. */}
+                                {(() => {
+                                    const elegida = cuentasDeEstaBilletera.find(c => c.id === cuentaId)
+                                    if (!tieneDatosParaCobrar(elegida)) return null
+                                    return (
+                                        <button
+                                            type="button"
+                                            onClick={() => setCuentaAMostrar(elegida!)}
+                                            className="flex items-center gap-1.5 px-2.5 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 text-[9px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-colors"
+                                        >
+                                            <QrCode className="w-3 h-3" /> Ver datos
+                                        </button>
+                                    )
+                                })()}
+                            </div>
                             <div className="flex flex-wrap gap-2">
                                 {cuentasDeEstaBilletera.map(c => (
                                     <button
@@ -454,6 +474,14 @@ export function PaymentEditModal({ isOpen, orden, onSave, onClose, rates }: Paym
                     </Button>
                 </DialogFooter>
             </DialogContent>
+
+            {/* Los datos y el QR de la cuenta elegida, para enseñárselos al
+                cliente sin salir del cobro. */}
+            <DatosCuentaModal
+                cuenta={cuentaAMostrar || undefined}
+                open={!!cuentaAMostrar}
+                onOpenChange={o => !o && setCuentaAMostrar(null)}
+            />
         </Dialog>
     )
 }

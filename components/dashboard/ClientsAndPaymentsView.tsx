@@ -30,7 +30,7 @@ import {
     ChevronLeft, ChevronRight, Layers, CreditCard,
     UploadCloud, X, Loader2,
     Printer, Banknote, History, Trash2, Eye, EyeOff,
-    Lock, Unlock, ExternalLink, ImageIcon, Landmark, Coins
+    Lock, Unlock, ExternalLink, ImageIcon, Landmark, Coins, QrCode
 } from 'lucide-react'
 
 // Servicios y Utilidades
@@ -38,9 +38,10 @@ import { PaymentHistoryView } from '@/components/orden/PaymentHistoryView'
 import { OrderDetailModal } from '@/components/orden/order-detail-modal' 
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
 import {
-    subscribeToBilleteras, nombreBilletera, cuentasActivas,
-    type ConfigBilleteras,
+    subscribeToBilleteras, nombreBilletera, cuentasActivas, tieneDatosParaCobrar,
+    type ConfigBilleteras, type CuentaBilletera,
 } from "@/lib/services/billeteras-service"
+import { DatosCuentaModal } from "@/components/dashboard/DatosCuentaModal"
 import { generateGeneralAccountStatusPDF } from "@/lib/services/pdf-generator"
 import { buscarOrdenesHistoricas } from "@/lib/services/ordenes-service" 
 import { getFrequentClients } from "@/lib/firebase/clientes" 
@@ -142,6 +143,7 @@ export function ClientsAndPaymentsView({
     // esa billetera, el paso no aparece.
     const [configBilleteras, setConfigBilleteras] = useState<ConfigBilleteras>({});
     const [globalCuentaId, setGlobalCuentaId] = useState('');
+    const [cuentaAMostrar, setCuentaAMostrar] = useState<CuentaBilletera | null>(null);
     useEffect(() => subscribeToBilleteras(setConfigBilleteras), []);
 
     const cuentasGlobales = cuentasActivas(globalWallet, configBilleteras);
@@ -1227,9 +1229,24 @@ export function ClientsAndPaymentsView({
 
                                 {cuentasGlobales.length > 0 && (
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase tracking-widest ml-1 text-slate-400">
-                                            {nombreBilletera(globalWallet, configBilleteras)} · ¿A qué cuenta?
-                                        </label>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <label className="text-[10px] font-black uppercase tracking-widest ml-1 text-slate-400">
+                                                {nombreBilletera(globalWallet, configBilleteras)} · ¿A qué cuenta?
+                                            </label>
+                                            {(() => {
+                                                const elegida = cuentasGlobales.find(c => c.id === globalCuentaId);
+                                                if (!tieneDatosParaCobrar(elegida)) return null;
+                                                return (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setCuentaAMostrar(elegida!)}
+                                                        className="flex items-center gap-1.5 px-2.5 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 text-[9px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-colors"
+                                                    >
+                                                        <QrCode className="w-3 h-3" /> Ver datos
+                                                    </button>
+                                                );
+                                            })()}
+                                        </div>
                                         <div className="flex flex-wrap gap-2">
                                             {cuentasGlobales.map(c => (
                                                 <button
@@ -1386,6 +1403,14 @@ export function ClientsAndPaymentsView({
                         </div>
                     </div>
                 </DialogContent>
+            
+                {/* Los datos y el QR de la cuenta elegida, para enseñárselos al
+                    cliente sin salir del cobro. */}
+                <DatosCuentaModal
+                    cuenta={cuentaAMostrar || undefined}
+                    open={!!cuentaAMostrar}
+                    onOpenChange={o => !o && setCuentaAMostrar(null)}
+                />
             </Dialog>
 
             {/* MODAL HISTORIAL Y REVERSIÓN DE ABONOS GLOBALES AUTÓNOMO */}

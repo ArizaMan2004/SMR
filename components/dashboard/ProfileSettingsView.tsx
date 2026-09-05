@@ -15,9 +15,11 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge' // <--- ¡AQUÍ ESTÁ LA CORRECCIÓN!
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from 'sonner'
-import { UserCircle, Shield, Key, Mail, User, Loader2, Save, Eye, EyeOff, AlertTriangle, Building2 } from 'lucide-react'
+import { UserCircle, Shield, Key, Mail, User, Loader2, Save, Eye, EyeOff, AlertTriangle, Building2, Landmark } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { IdentidadEmpresaPanel } from '@/components/dashboard/IdentidadEmpresaPanel'
+import { CuentasBancariasPanel, CuentasBancariasHeader } from '@/components/dashboard/CuentasBancariasPanel'
+import { subscribeToBilleteras, type ConfigBilleteras } from '@/lib/services/billeteras-service'
 
 export function ProfileSettingsView() {
     const { user, userData } = useAuth()
@@ -36,6 +38,11 @@ export function ProfileSettingsView() {
     const [showCurrentPassword, setShowCurrentPassword] = useState(false)
     const [showNewPassword, setShowNewPassword] = useState(false)
     const [isSavingSecurity, setIsSavingSecurity] = useState(false)
+
+    // Las cuentas bancarias son de la empresa y viven en la nube. Va suscrito
+    // para que dos personas editando a la vez no se pisen sin enterarse.
+    const [configBilleteras, setConfigBilleteras] = useState<ConfigBilleteras>({})
+    useEffect(() => subscribeToBilleteras(setConfigBilleteras), [])
 
     // Cargar datos iniciales
     useEffect(() => {
@@ -162,10 +169,21 @@ export function ProfileSettingsView() {
                     <TabsTrigger value="seguridad" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                         <Shield className="w-4 h-4 mr-2 inline-block"/> Seguridad y Acceso
                     </TabsTrigger>
+                    <TabsTrigger value="cuentas" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
+                        <Landmark className="w-4 h-4 mr-2 inline-block"/> Cuentas Bancarias
+                    </TabsTrigger>
                     <TabsTrigger value="identidad" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                         <Building2 className="w-4 h-4 mr-2 inline-block"/> Identidad de Empresa
                     </TabsTrigger>
                 </TabsList>
+
+                {/* --- PESTAÑA 4: CUENTAS BANCARIAS Y QR DE COBRO --- */}
+                <TabsContent value="cuentas" className="mt-0">
+                    <Card className="rounded-[2.5rem] border-0 shadow-xl bg-white dark:bg-[#1c1c1e] p-6 md:p-10 space-y-8">
+                        <CuentasBancariasHeader />
+                        <CuentasBancariasPanel config={configBilleteras} />
+                    </Card>
+                </TabsContent>
 
                 {/* --- PESTAÑA 3: LOGO, FIRMA Y SELLO DE LA EMPRESA --- */}
                 <TabsContent value="identidad" className="mt-0">

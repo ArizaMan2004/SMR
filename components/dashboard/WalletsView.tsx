@@ -8,7 +8,7 @@ import {
     Plus, Coins, Landmark, CreditCard, ArrowUpRight, ArrowDownLeft,
     Banknote, Settings, Calculator, HelpCircle, X, AlertTriangle, 
     Megaphone, ShieldAlert, Loader2, Search, Receipt, FileText, Image as ImageIcon,
-    ExternalLink, Eye, Layers
+    ExternalLink, Eye, Layers, ChevronDown
 } from "lucide-react"
 
 import { Card } from "@/components/ui/card"
@@ -65,6 +65,8 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
     const [isCuentasModalOpen, setIsCuentasModalOpen] = useState(false)
     // Chip de filtro del historial: '' = todas las cuentas de esa billetera.
     const [cuentaFiltro, setCuentaFiltro] = useState<string>('')
+    // Qué tarjetas tienen abierto el desglose por banco.
+    const [desplegadas, setDesplegadas] = useState<Record<string, boolean>>({})
 
     useEffect(() => subscribeToBilleteras(setConfigBilleteras), [])
     useEffect(() => { setCuentaFiltro('') }, [selectedWallet])
@@ -348,21 +350,33 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
         return movs;
     }, [walletBalances.movements, selectedWallet, searchQuery, cuentaFiltro]);
 
-    // Cuánto entró y salió por cada banco de la billetera que se está mirando.
-    // Es la pregunta de siempre: "¿esto por dónde me lo pagaron?".
-    const desgloseCuentas = useMemo(() => {
-        const propias = cuentasActivas(selectedWallet, configBilleteras);
-        const movs = walletBalances.movements.filter((m:any) => m.wallet === selectedWallet);
+    // Cuánto entró y salió por cada banco, billetera por billetera. Es la
+    // pregunta de siempre: "el saldo del banco está bien, ¿pero cuánto hay en
+    // Banesco y cuánto en Mercantil?".
+    const desglosePorBilletera = useMemo(() => {
+        const porBilletera: Record<string, { id: string; nombre: string; banco?: string; bancoCodigo?: string; total: number }[]> = {};
 
-        const neto = (id: string) => movs
-            .filter((m:any) => id === 'SIN' ? !m.cuentaId : m.cuentaId === id)
-            .reduce((t:number, m:any) => t + (m.type === 'EGRESO' ? -m.amount : m.amount), 0);
+        WALLETS_CONFIG.forEach(w => {
+            const propias = cuentasActivas(w.id, configBilleteras);
+            const movs = walletBalances.movements.filter((m:any) => m.wallet === w.id);
 
-        const filas = propias.map(c => ({ id: c.id, nombre: c.nombre, banco: c.banco, bancoCodigo: c.bancoCodigo, total: neto(c.id) }));
-        const sinAsignar = movs.filter((m:any) => !m.cuentaId).length;
-        if (sinAsignar > 0) filas.push({ id: 'SIN', nombre: 'Sin cuenta asignada', banco: '', bancoCodigo: '', total: neto('SIN') });
-        return filas;
-    }, [walletBalances.movements, selectedWallet, configBilleteras]);
+            const neto = (id: string) => movs
+                .filter((m:any) => id === 'SIN' ? !m.cuentaId : m.cuentaId === id)
+                .reduce((t:number, m:any) => t + (m.type === 'EGRESO' ? -m.amount : m.amount), 0);
+
+            const filas = propias.map(c => ({ id: c.id, nombre: c.nombre, banco: c.banco, bancoCodigo: c.bancoCodigo, total: neto(c.id) }));
+            // Casi todo el histórico se registró antes de que existieran las
+            // cuentas: sin esta fila, los totales no cuadrarían con la tarjeta.
+            if (movs.some((m:any) => !m.cuentaId)) {
+                filas.push({ id: 'SIN', nombre: 'Sin cuenta asignada', banco: '', bancoCodigo: '', total: neto('SIN') });
+            }
+            porBilletera[w.id] = filas;
+        });
+
+        return porBilletera;
+    }, [walletBalances.movements, configBilleteras]);
+
+    const desgloseCuentas = desglosePorBilletera[selectedWallet] || [];
 
     const rateAnalysis = useMemo(() => {
         const diff = rates.usd - prevRate;
@@ -514,6 +528,9 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                             key={wallet.id} config={wallet} balance={balance}
                             isActive={selectedWallet === wallet.id} onClick={() => setSelectedWallet(wallet.id)}
                             secondaryValue={secondaryValue} rateAnalysis={wallet.id === 'bank_bs' ? rateAnalysis : null}
+                            desglose={desglosePorBilletera[wallet.id] || []}
+                            desplegada={desplegadas[wallet.id]}
+                            onDesplegar={() => setDesplegadas(p => ({ ...p, [wallet.id]: !p[wallet.id] }))}
                         />
                     )
                 })}
@@ -815,7 +832,9 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
     )
 }
 
-function WalletCard({ config, balance, isActive, onClick, secondaryValue, rateAnalysis }: any) {
+function WalletCard({ config, balance, isActive, onClick, secondaryValue, rateAnalysis, desglose = [], desplegada, onDesplegar }: any) {
+    const simbolo = config.currency === 'USD' ? '$' : config.currency === 'USDT' ? '₮' : 'Bs.';
+    const hayDesglose = desglose.length > 0;
     return (
         <motion.div onClick={onClick} whileHover={{ y: -3 }} whileTap={{ scale: 0.97 }}
             className={cn("p-4 sm:p-6 rounded-[1.75rem] sm:rounded-[2.5rem] cursor-pointer transition-all border-2 relative overflow-hidden group",
@@ -833,6 +852,44 @@ function WalletCard({ config, balance, isActive, onClick, secondaryValue, rateAn
                     {config.currency === 'USD' ? '$' : config.currency === 'USDT' ? '₮' : 'Bs.'}
                     {balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </h3>
+                {/* El saldo de la tarjeta es el de la billetera entera. Cuando hay
+                    varias cuentas debajo, esto abre el reparto: cuánto hay en
+                    cada banco sin tener que entrar al historial. */}
+                {hayDesglose && (
+                    <>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onDesplegar?.(); }}
+                            className="mt-2 flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors"
+                        >
+                            {desglose.length} {desglose.length === 1 ? 'cuenta' : 'cuentas'}
+                            <ChevronDown className={cn("w-3 h-3 transition-transform", desplegada && "rotate-180")} />
+                        </button>
+
+                        <AnimatePresence initial={false}>
+                            {desplegada && (
+                                <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    className="overflow-hidden"
+                                >
+                                    <div className="mt-2 space-y-1 pt-2 border-t border-slate-100 dark:border-white/5">
+                                        {desglose.map((c: any) => (
+                                            <div key={c.id} className="flex items-center gap-1.5 text-[10px] font-bold">
+                                                {c.id !== 'SIN' && <LogoBanco codigo={c.bancoCodigo} texto={c.banco} size={13} />}
+                                                <span className="flex-1 min-w-0 truncate text-slate-500">{c.nombre}</span>
+                                                <span className="tabular-nums text-slate-700 dark:text-slate-300 shrink-0">
+                                                    {simbolo}{c.total.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </>
+                )}
+
                 {secondaryValue !== null && secondaryValue !== undefined && (
                     <div className="mt-1.5 sm:mt-2 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
                         <Badge variant="secondary" className="bg-slate-100 text-slate-500 font-bold border-none text-[9px] sm:text-[10px] w-fit">
