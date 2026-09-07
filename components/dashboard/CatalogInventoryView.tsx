@@ -1,7 +1,7 @@
 // @/components/dashboard/CatalogInventoryView.tsx
 "use client"
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef} from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -22,9 +22,9 @@ import {
     Receipt, Percent, BarChart3, Palette, Grid3X3,
     ArrowUpCircle, ArrowDownCircle, RefreshCw, Settings2,
     CircleDollarSign, TrendingUp, FileText, Eye, FileDown,
-    User, Phone
-} from 'lucide-react'
+    User, Phone, Image as ImageIcon} from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { uploadFileToCloudinary } from '@/lib/services/cloudinary-service'
 import { subscribeToClients } from '@/lib/services/clientes-service'
 import { generateCatalogSalePDF } from '@/lib/services/pdf-generator'
 import {
@@ -42,6 +42,16 @@ import {
     anularVentaCatalogo,
     calcPrecioM2,
     precioDeServicio,
+    UNIDADES,
+    unidadDe,
+    abrevUnidad,
+    tipoEntradaDe,
+    costoUnitario,
+    precioRecomendado,
+    categoriasRaiz,
+    subcategoriasDe,
+    type UnidadVenta,
+    type TipoEntrada,
     type CatalogoCategoria,
     type CatalogoProducto,
     type CatalogoVariante,
@@ -195,10 +205,17 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
      * Estos no llevan stock por servicio: salen de un rollo entero y el
      * recuento se hace a mano sobre los rollos, no sobre cada impresión.
      */
-    const esPorM2 = prodForm.tipoVenta === 'metro_cuadrado'
+    const unidadActual = unidadDe(prodForm)
+    const esPorM2 = unidadActual === 'metro_cuadrado'
+    const esPorMetroLineal = unidadActual === 'metro_lineal'
+    // Lo que sale de un rollo o una lámina no se cuenta por piezas: su stock se
+    // lleva por rollos enteros, a mano.
+    const seMideEnRollo = esPorM2 || esPorMetroLineal
     const [catForm, setCatForm] = useState<CatalogoCategoria>({ ...CAT_DEFAULT })
     const [prodVarianteInput, setProdVarianteInput] = useState({ nombre: '', stock: 0, stockMinimo: 0, precioGeneral: 0, precioAliado: 0 })
     const [prodAcabadoInput, setProdAcabadoInput] = useState('')
+    const [subiendoFoto, setSubiendoFoto] = useState(false)
+    const fotoInputRef = useRef<HTMLInputElement | null>(null)
 
     // ============================================================
     // FIRESTORE LISTENERS
@@ -321,6 +338,30 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     }
 
     /** Un acabado es solo un nombre: el rollo del que sale el trabajo. */
+    /**
+     * Foto del producto.
+     *
+     * Va a Cloudinary como el resto de imágenes de la empresa: quien factura
+     * la ve desde cualquier equipo. Es opcional; sirve para reconocer de un
+     * vistazo cuál de los tres llaveros parecidos es el que pide el cliente.
+     */
+    const subirFotoProducto = async (file?: File | null) => {
+        if (!file) return
+        if (!file.type.startsWith('image/')) return toast.error('Tiene que ser una imagen')
+        if (file.size > 3 * 1024 * 1024) return toast.error('La imagen supera 3 MB. Redúcela antes de subirla.')
+        setSubiendoFoto(true)
+        try {
+            const url = await uploadFileToCloudinary(file)
+            setProdForm(p => ({ ...p, fotoUrl: url }))
+            toast.success('Foto cargada. Acuérdate de guardar el producto.')
+        } catch (e) {
+            console.error(e)
+            toast.error('No se pudo subir la foto')
+        } finally {
+            setSubiendoFoto(false)
+        }
+    }
+
     const addAcabadoToForm = () => {
         const nombre = prodAcabadoInput.trim()
         if (!nombre) return
@@ -1343,25 +1384,159 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                     <SelectValue placeholder="Seleccionar categoría..." />
                                 </SelectTrigger>
                                 <SelectContent className="rounded-2xl">
-                                    {categorias.map(c => <SelectItem key={c.id} value={c.id!} className="font-bold text-xs">{c.nombre}</SelectItem>)}
+                                    {/* Las subcategorías van sangradas debajo de su padre:
+                                        una lista plana de veinte no se lee. */}
+                                    {categoriasRaiz(categorias).flatMap(raiz => [
+                                        <SelectItem key={raiz.id} value={raiz.id!} className="font-bold text-xs">{raiz.nombre}</SelectItem>,
+                                        ...subcategoriasDe(categorias, raiz.id).map(sub => (
+                                            <SelectItem key={sub.id} value={sub.id!} className="font-bold text-xs pl-8">
+                                                <span className="text-slate-400 mr-1">└</span>{sub.nombre}
+                                            </SelectItem>
+                                        )),
+                                    ])}
                                 </SelectContent>
                             </Select>
                         </div>
 
-                        {/* Tipo de venta */}
-                        <div className="grid grid-cols-2 gap-3">
-                            <button onClick={() => setProdForm(p => ({ ...p, tipoVenta: 'unidad' }))}
-                                className={cn('p-4 rounded-2xl border text-left transition-all',
-                                    prodForm.tipoVenta === 'unidad' ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10' : 'border-black/10 dark:border-white/10')}>
-                                <p className="font-black text-xs uppercase text-blue-600">Por Unidad</p>
-                                <p className="text-[9px] text-slate-400">Piezas, láminas, rollos</p>
-                            </button>
-                            <button onClick={() => setProdForm(p => ({ ...p, tipoVenta: 'metro_cuadrado' }))}
-                                className={cn('p-4 rounded-2xl border text-left transition-all',
-                                    prodForm.tipoVenta === 'metro_cuadrado' ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10' : 'border-black/10 dark:border-white/10')}>
-                                <p className="font-black text-xs uppercase text-blue-600">Por m²</p>
-                                <p className="text-[9px] text-slate-400">Vinil, banner, impresión</p>
-                            </button>
+                        {/* Qué es esto: decide en qué pestaña sale al facturar. */}
+                        <div className="space-y-2">
+                            <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Tipo</Label>
+                            <div className="grid grid-cols-3 gap-2">
+                                {([
+                                    { valor: 'material', txt: 'Material',  ayuda: 'Sale de un rollo o lámina' },
+                                    { valor: 'servicio', txt: 'Servicio',  ayuda: 'Mano de obra o acabado' },
+                                    { valor: 'producto', txt: 'Producto',  ayuda: 'Mercancía que se cuenta' },
+                                ] as const).map(t => {
+                                    const activo = tipoEntradaDe(prodForm) === t.valor
+                                    return (
+                                        <button key={t.valor} onClick={() => setProdForm(p => ({ ...p, tipoEntrada: t.valor as TipoEntrada }))}
+                                            className={cn('p-3 rounded-2xl border text-left transition-all',
+                                                activo ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10' : 'border-black/10 dark:border-white/10')}>
+                                            <p className="font-black text-[10px] uppercase text-blue-600">{t.txt}</p>
+                                            <p className="text-[9px] text-slate-400 leading-snug">{t.ayuda}</p>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Cómo se mide al venderlo. Cada unidad pide datos distintos. */}
+                        <div className="space-y-2">
+                            <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Se vende por</Label>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                {UNIDADES.map(u => {
+                                    const activo = unidadActual === u.valor
+                                    return (
+                                        <button key={u.valor}
+                                            onClick={() => setProdForm(p => ({
+                                                ...p,
+                                                unidadVenta: u.valor as UnidadVenta,
+                                                // tipoVenta se mantiene al día para todo lo que aún lo lee.
+                                                tipoVenta: u.valor === 'metro_cuadrado' ? 'metro_cuadrado' : 'unidad',
+                                                unidadLabel: u.abrev,
+                                            }))}
+                                            className={cn('p-3 rounded-2xl border text-left transition-all',
+                                                activo ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10' : 'border-black/10 dark:border-white/10')}>
+                                            <p className="font-black text-[10px] uppercase text-blue-600">{u.etiqueta}</p>
+                                            <p className="text-[9px] text-slate-400 leading-snug">{u.ayuda}</p>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </div>
+
+                        {/* El ancho del rollo solo hace falta para el metro lineal, y ahí
+                            es imprescindible: es lo que se gasta aunque la pieza sea
+                            estrecha, porque la tira que sobra al lado no se reaprovecha. */}
+                        {esPorMetroLineal && (
+                            <div className="space-y-2">
+                                <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Ancho del rollo (cm) *</Label>
+                                <Input type="number" placeholder="137" value={prodForm.anchoBaseCm || ''}
+                                    onChange={e => setProdForm(p => ({ ...p, anchoBaseCm: parseFloat(e.target.value) || 0 }))}
+                                    className="h-12 rounded-2xl bg-slate-50 dark:bg-white/5 border-none font-black" />
+                                <p className="text-[9px] text-slate-400 ml-2 leading-snug">
+                                    Se cobra el largo, pero del rollo se va el ancho entero: una tira
+                                    de 20 × 200 cm gasta lo mismo que una de 137 × 200.
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Foto: opcional, pero ahorra equivocarse entre tres
+                            llaveros parecidos cuando hay cola en el mostrador. */}
+                        <div className="space-y-2">
+                            <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Foto (opcional)</Label>
+                            <div className="flex items-center gap-3 bg-slate-50 dark:bg-white/5 p-3 rounded-2xl">
+                                <div className="w-16 h-16 shrink-0 rounded-xl bg-white dark:bg-black/20 border border-black/5 flex items-center justify-center overflow-hidden">
+                                    {prodForm.fotoUrl
+                                        ? <img src={prodForm.fotoUrl} alt="" className="w-full h-full object-cover" />
+                                        : <ImageIcon className="w-6 h-6 text-slate-300" />}
+                                </div>
+                                <p className="flex-1 min-w-0 text-[9px] font-bold text-slate-400 leading-snug">
+                                    Para reconocerlo de un vistazo al facturar.
+                                </p>
+                                <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" ref={fotoInputRef}
+                                    onChange={e => { subirFotoProducto(e.target.files?.[0]); e.target.value = '' }} />
+                                <Button onClick={() => fotoInputRef.current?.click()} disabled={subiendoFoto}
+                                    className="h-9 shrink-0 rounded-xl bg-slate-900 dark:bg-white dark:text-slate-900 text-white font-black uppercase text-[9px] px-3">
+                                    {subiendoFoto ? 'Subiendo…' : prodForm.fotoUrl ? 'Cambiar' : 'Subir'}
+                                </Button>
+                                {prodForm.fotoUrl && (
+                                    <Button variant="ghost" size="icon" onClick={() => setProdForm(p => ({ ...p, fotoUrl: '' }))}
+                                        className="h-9 w-9 shrink-0 rounded-xl text-slate-400 hover:text-red-500">
+                                        <X className="w-4 h-4" />
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Cuánto costó traerlo. La cuenta que se hacía de cabeza:
+                            llegó una caja de doce a cuarenta, ¿a cómo la vendo? */}
+                        <div className="bg-slate-50 dark:bg-white/5 p-4 rounded-2xl space-y-3">
+                            <div>
+                                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Costo de compra (opcional)</p>
+                                <p className="text-[9px] text-slate-400 mt-0.5">
+                                    Lo que pagaste por el lote. Sirve para proponerte un precio; el que se cobra es el de arriba.
+                                </p>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2">
+                                <div className="space-y-1">
+                                    <Label className="text-[8px] font-black uppercase text-slate-400">Costó el lote</Label>
+                                    <Input type="number" placeholder="40" value={prodForm.costo?.montoLoteUSD || ''}
+                                        onChange={e => setProdForm(p => ({ ...p, costo: { ...(p.costo || { montoLoteUSD: 0, unidadesLote: 0 }), montoLoteUSD: parseFloat(e.target.value) || 0 } }))}
+                                        className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black" />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-[8px] font-black uppercase text-slate-400">Trae</Label>
+                                    <Input type="number" placeholder="12" value={prodForm.costo?.unidadesLote || ''}
+                                        onChange={e => setProdForm(p => ({ ...p, costo: { ...(p.costo || { montoLoteUSD: 0, unidadesLote: 0 }), unidadesLote: parseFloat(e.target.value) || 0 } }))}
+                                        className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black" />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-[8px] font-black uppercase text-slate-400">Margen %</Label>
+                                    <Input type="number" placeholder="100" value={prodForm.costo?.margenPct || ''}
+                                        onChange={e => setProdForm(p => ({ ...p, costo: { ...(p.costo || { montoLoteUSD: 0, unidadesLote: 0 }), margenPct: parseFloat(e.target.value) || 0 } }))}
+                                        className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black" />
+                                </div>
+                            </div>
+
+                            {costoUnitario(prodForm.costo) > 0 && (
+                                <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-black/20 rounded-xl px-3 py-2.5">
+                                    <div>
+                                        <p className="text-[8px] font-black uppercase text-slate-400">Te sale a</p>
+                                        <p className="text-sm font-black tabular-nums">${costoUnitario(prodForm.costo).toFixed(4)} <span className="text-[9px] font-bold text-slate-400">/{abrevUnidad(unidadActual)}</span></p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[8px] font-black uppercase text-emerald-600">Precio sugerido</p>
+                                        <p className="text-sm font-black tabular-nums text-emerald-600">${precioRecomendado(prodForm.costo).toFixed(2)}</p>
+                                    </div>
+                                    <Button
+                                        onClick={() => setProdForm(p => ({ ...p, precioBase: precioRecomendado(p.costo) }))}
+                                        className="h-9 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-[9px] px-3">
+                                        Usar este precio
+                                    </Button>
+                                </div>
+                            )}
                         </div>
 
                         {/* Precio y etiqueta */}
@@ -1673,6 +1848,25 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                     onChange={e => setCatForm(p => ({ ...p, descripcion: e.target.value }))}
                                     className="h-10 rounded-2xl bg-white dark:bg-black/20 border-none text-sm" />
                             </div>
+                            {/* Colgarla de otra. Un nivel basta: con más, en el
+                                mostrador ya nadie encuentra nada. */}
+                            <div>
+                                <p className="text-[8px] font-black uppercase text-slate-400 mb-2">Cuelga de</p>
+                                <select
+                                    value={catForm.padreId || ''}
+                                    onChange={e => setCatForm(p => ({ ...p, padreId: e.target.value || undefined }))}
+                                    className="w-full h-10 px-3 rounded-xl text-xs font-bold shadow-sm outline-none cursor-pointer bg-white text-slate-900 dark:bg-slate-800 dark:text-white [color-scheme:light] dark:[color-scheme:dark]"
+                                >
+                                    <option value="">Ninguna · es una categoría principal</option>
+                                    {categoriasRaiz(categorias)
+                                        .filter(c => c.id !== editingCat?.id)
+                                        .map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                                </select>
+                                <p className="text-[8px] font-bold text-slate-400 mt-1.5 leading-snug">
+                                    Una subcategoría hereda el área de su padre si no se le pone una propia.
+                                </p>
+                            </div>
+
                             <div>
                                 <p className="text-[8px] font-black uppercase text-slate-400 mb-2">Área del taller</p>
                                 <div className="flex gap-1.5 p-1 rounded-xl bg-white dark:bg-black/20">
