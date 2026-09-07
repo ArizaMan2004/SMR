@@ -67,6 +67,55 @@ export interface CatalogoVariante {
     precioAjuste?: number
 }
 
+/**
+ * ACABADO de un material: el rollo concreto del que sale.
+ *
+ * Es un eje distinto del de las formas de venta. El vinil mate, el brillante y
+ * el blackout son rollos separados pero siguen siendo vinil, y valen lo mismo
+ * se venda como impresión, como stickers o cortado en plóter. Por eso el
+ * acabado no lleva precio: solo sirve para saber de qué rollo salió el trabajo
+ * y cuál se está gastando más.
+ *
+ * Con un solo eje habría que multiplicar acabados por formas de venta y el
+ * catálogo se llenaría de entradas como "impresión en vinil mate", "impresión
+ * en vinil brillante", "stickers en vinil mate"…
+ */
+export interface CatalogoAcabado {
+    id: string
+    nombre: string
+    /** Un acabado que se deja de traer se archiva: los trabajos viejos lo nombran. */
+    activo?: boolean
+}
+
+/**
+ * Qué se le puede hacer a un material al crear una orden.
+ *
+ * Antes esto estaba escrito a fuego en el formulario de ítems: unas funciones
+ * miraban el nombre del material y decidían («si dice banner, enseña ojales»;
+ * «si dice vinil y no dice textil, enseña pegado»). Funcionaba mientras la
+ * lista de materiales fuera fija, pero cualquier material nuevo nacía sin
+ * opciones y había que tocar el código para dárselas.
+ *
+ * Ahora lo decide el propio material. Añadir una forma de imprimir es dar de
+ * alta un material y marcarle sus casillas, sin programar nada.
+ */
+export interface OpcionesImpresion {
+    /** Ojales, bolsillos y tubos: lo típico de un banner colgado. */
+    ojales?: boolean
+    bolsillos?: boolean
+    tubos?: boolean
+    /** Refilado al corte. */
+    refilado?: boolean
+    /** Admite laminado encima. */
+    laminado?: boolean
+    /** Se puede pegar sobre PVC o acrílico. */
+    pegado?: boolean
+    /** El corte de plóter es obligatorio (los stickers siempre van cortados). */
+    corteObligatorio?: boolean
+    /** Se puede pedir con corte de plóter, pero no obliga. */
+    corteOpcional?: boolean
+}
+
 export interface CatalogoProducto {
     id?: string
     categoriaId: string
@@ -76,7 +125,12 @@ export interface CatalogoProducto {
     precioBase: number          // precio por unidad O precio por m²
     unidadLabel: string         // "lámina", "rollo", "metro", "pieza", "unidad"
     tieneVariantes: boolean
+    /** Las formas de venta: impresión, corte en plóter, stickers, vinil solo… */
     variantes: CatalogoVariante[]
+    /** Los acabados o rollos: mate, brillante, blackout, cara negra… */
+    acabados?: CatalogoAcabado[]
+    /** Qué extras admite este material al crear una orden. */
+    opcionesImpresion?: OpcionesImpresion
     // Solo aplica para tipoVenta === 'unidad':
     stockSimple: number
     stockMinimo: number
@@ -413,3 +467,43 @@ export const areaDeProducto = (
 /** ¿Se muestra este material en la vista de esta área? */
 export const materialEsDelArea = (area: AreaTaller, vista: "IMPRESION" | "CORTE"): boolean =>
     area === "AMBAS" || area === vista;
+
+/**
+ * Los materiales que se ofrecen al crear una orden, ya filtrados y ordenados.
+ *
+ * `area` decide de qué lista salen: el formulario de impresión no debe ofrecer
+ * acrílico, ni el de corte ofrecer banner.
+ */
+export const materialesDelArea = (
+    productos: CatalogoProducto[],
+    categorias: CatalogoCategoria[],
+    area: "IMPRESION" | "CORTE"
+): CatalogoProducto[] =>
+    productos
+        .filter(p => p.activo !== false && materialEsDelArea(areaDeProducto(p, categorias), area))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+
+/** Los acabados que siguen en uso de un material. */
+export const acabadosActivos = (producto?: CatalogoProducto): CatalogoAcabado[] =>
+    (producto?.acabados || []).filter(a => a.activo !== false);
+
+/**
+ * Las opciones de un material, con los valores de siempre para los que
+ * todavía no las tienen configuradas.
+ *
+ * Sin esto, al pasar el formulario a leer del catálogo, los materiales ya
+ * dados de alta se quedarían de golpe sin ojales ni laminado.
+ */
+export const opcionesDe = (producto?: CatalogoProducto): Required<OpcionesImpresion> => {
+    const o = producto?.opcionesImpresion || {};
+    return {
+        ojales: o.ojales ?? false,
+        bolsillos: o.bolsillos ?? false,
+        tubos: o.tubos ?? false,
+        refilado: o.refilado ?? true,
+        laminado: o.laminado ?? true,
+        pegado: o.pegado ?? false,
+        corteObligatorio: o.corteObligatorio ?? false,
+        corteOpcional: o.corteOpcional ?? true,
+    };
+};

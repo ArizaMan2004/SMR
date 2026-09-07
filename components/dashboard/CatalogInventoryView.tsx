@@ -107,8 +107,22 @@ const formatDate = (ts: any): string => {
 const PROD_DEFAULT: CatalogoProducto = {
     categoriaId: '', nombre: '', descripcion: '', tipoVenta: 'unidad',
     precioBase: 0, precioPublicista: 0, unidadLabel: 'unidad', tieneVariantes: false,
-    variantes: [], stockSimple: 0, stockMinimo: 0, rollosEnStock: 0, activo: true
+    variantes: [], acabados: [], stockSimple: 0, stockMinimo: 0, rollosEnStock: 0, activo: true
 }
+
+// Lo que se le puede hacer a un material al crear una orden. Antes estaba
+// escrito a fuego en el formulario de ítems; ahora lo decide cada material,
+// así que dar de alta una forma de imprimir nueva no toca código.
+const OPCIONES_IMPRESION = [
+    { campo: 'corteOpcional',     etiqueta: 'Corte de plóter',      ayuda: 'Se puede pedir cortado' },
+    { campo: 'corteObligatorio',  etiqueta: 'Corte obligatorio',    ayuda: 'Siempre va cortado, como los stickers' },
+    { campo: 'laminado',          etiqueta: 'Laminado',             ayuda: 'Admite laminado encima' },
+    { campo: 'pegado',            etiqueta: 'Pegado en PVC/acrílico', ayuda: 'Se puede montar sobre lámina' },
+    { campo: 'ojales',            etiqueta: 'Ojales',               ayuda: 'Típico del banner colgado' },
+    { campo: 'bolsillos',         etiqueta: 'Bolsillos',            ayuda: 'Para pasar tubo por arriba y abajo' },
+    { campo: 'tubos',             etiqueta: 'Tubos',                ayuda: 'Se entrega con tubos' },
+    { campo: 'refilado',          etiqueta: 'Refilado',             ayuda: 'Se refila al corte' },
+] as const
 
 const CAT_DEFAULT: CatalogoCategoria = { nombre: '', color: 'blue', descripcion: '', orden: 0, area: 'IMPRESION' }
 
@@ -184,6 +198,7 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     const esPorM2 = prodForm.tipoVenta === 'metro_cuadrado'
     const [catForm, setCatForm] = useState<CatalogoCategoria>({ ...CAT_DEFAULT })
     const [prodVarianteInput, setProdVarianteInput] = useState({ nombre: '', stock: 0, stockMinimo: 0, precioGeneral: 0, precioAliado: 0 })
+    const [prodAcabadoInput, setProdAcabadoInput] = useState('')
 
     // ============================================================
     // FIRESTORE LISTENERS
@@ -304,6 +319,23 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
             toast.success('Producto eliminado')
         } catch (err: any) { toast.error(`Error: ${err?.message}`) }
     }
+
+    /** Un acabado es solo un nombre: el rollo del que sale el trabajo. */
+    const addAcabadoToForm = () => {
+        const nombre = prodAcabadoInput.trim()
+        if (!nombre) return
+        if ((prodForm.acabados || []).some(a => a.nombre.toLowerCase() === nombre.toLowerCase())) {
+            return toast.error('Ese acabado ya está en la lista')
+        }
+        setProdForm(p => ({
+            ...p,
+            acabados: [...(p.acabados || []), { id: `ac_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, nombre, activo: true }],
+        }))
+        setProdAcabadoInput('')
+    }
+
+    const removeAcabadoFromForm = (id: string) =>
+        setProdForm(p => ({ ...p, acabados: (p.acabados || []).filter(a => a.id !== id) }))
 
     const addVarianteToForm = () => {
         if (!prodVarianteInput.nombre.trim()) return
@@ -1413,6 +1445,87 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                 <p className="text-[9px] text-slate-400">Del vinil salen: vinil solo, impresión mate, brillante, blackout, corte en plóter, stickers…</p>
                             </div>
                             <Switch checked={prodForm.tieneVariantes} onCheckedChange={v => setProdForm(p => ({ ...p, tieneVariantes: v }))} />
+                        </div>
+
+                        {/* Qué extras ofrece este material al crear una orden. */}
+                        <div className="bg-slate-50 dark:bg-white/5 p-4 rounded-2xl space-y-3">
+                            <div>
+                                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Opciones al crear la orden</p>
+                                <p className="text-[9px] text-slate-400 mt-0.5">
+                                    Marca lo que se le puede hacer a este material. Es lo que verá quien tome la orden.
+                                </p>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {OPCIONES_IMPRESION.map(op => {
+                                    const activo = !!(prodForm.opcionesImpresion || {})[op.campo]
+                                    return (
+                                        <button
+                                            key={op.campo}
+                                            type="button"
+                                            onClick={() => setProdForm(p => ({
+                                                ...p,
+                                                opcionesImpresion: { ...(p.opcionesImpresion || {}), [op.campo]: !activo },
+                                            }))}
+                                            className={cn(
+                                                'flex items-start gap-2.5 text-left rounded-xl p-2.5 border transition-colors',
+                                                activo
+                                                    ? 'bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/30'
+                                                    : 'bg-white dark:bg-black/20 border-black/5 hover:border-slate-200'
+                                            )}
+                                        >
+                                            <span className={cn(
+                                                'w-4 h-4 shrink-0 rounded-md border flex items-center justify-center mt-0.5',
+                                                activo ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 dark:border-white/20'
+                                            )}>
+                                                {activo && <CheckCircle2 className="w-3 h-3" />}
+                                            </span>
+                                            <span className="min-w-0">
+                                                <span className="block text-[10px] font-black uppercase leading-tight">{op.etiqueta}</span>
+                                                <span className="block text-[9px] text-slate-400 leading-snug">{op.ayuda}</span>
+                                            </span>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Acabados: de qué rollo sale. Eje aparte del de las formas
+                            de venta, porque todos los acabados de un material valen
+                            lo mismo y lo que interesa es cuál se gasta más. */}
+                        <div className="bg-slate-50 dark:bg-white/5 p-4 rounded-2xl space-y-3">
+                            <div>
+                                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Acabados de este material</p>
+                                <p className="text-[9px] text-slate-400 mt-0.5">
+                                    Los rollos distintos del mismo material: mate, brillante, blackout, cara negra…
+                                    Todos valen igual; sirve para saber cuál se gasta más.
+                                </p>
+                            </div>
+
+                            {(prodForm.acabados || []).length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                    {(prodForm.acabados || []).map(a => (
+                                        <span key={a.id} className="inline-flex items-center gap-1.5 bg-white dark:bg-black/20 border border-black/5 rounded-full pl-3 pr-1.5 py-1">
+                                            <span className="text-[10px] font-black uppercase">{a.nombre}</span>
+                                            <button onClick={() => removeAcabadoFromForm(a.id)} className="text-red-400 hover:text-red-600 p-0.5 rounded-full transition-colors">
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-[1fr_auto] gap-2">
+                                <Input
+                                    placeholder="Ej. Mate, Brillante, Blackout, Cara Negra"
+                                    value={prodAcabadoInput}
+                                    onChange={e => setProdAcabadoInput(e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addAcabadoToForm() } }}
+                                    className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-bold"
+                                />
+                                <Button onClick={addAcabadoToForm} size="sm" className="h-10 rounded-xl bg-slate-900 dark:bg-white dark:text-slate-900 text-white font-black">
+                                    <Plus className="w-3.5 h-3.5" />
+                                </Button>
+                            </div>
                         </div>
 
                         {/* Gestión de variantes */}

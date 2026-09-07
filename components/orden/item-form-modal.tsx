@@ -22,7 +22,9 @@ import {
     BookOpen, ChevronDown, ChevronUp
 } from "lucide-react"
 
-import { subscribeToCatalogoProducts } from "@/lib/services/catalog-service"
+import {
+    subscribeToCatalogoProducts, precioDeServicio, acabadosActivos, opcionesDe,
+} from "@/lib/services/catalog-service"
 
 // --- CONSTANTES ---
 const PRECIO_LASER_POR_MINUTO = 0.80;
@@ -122,6 +124,9 @@ export function ItemFormModal({
   // Material del catálogo seleccionado para IMPRESION
   const [catalogMaterialId, setCatalogMaterialId] = useState<string | null>(null)
   const [catalogVarianteId, setCatalogVarianteId] = useState<string | null>(null)
+  // De qué rollo sale: mate, brillante, blackout… No cambia el precio, pero es
+  // lo que permite saber después cuál se está gastando más.
+  const [catalogAcabadoId, setCatalogAcabadoId] = useState<string | null>(null)
   const [modoMaterialManual, setModoMaterialManual] = useState(false)
 
   useEffect(() => {
@@ -162,21 +167,74 @@ export function ItemFormModal({
       [catalogM2, catalogMaterialId]
   )
 
-  const seleccionarMaterialCatalogo = (prod: any, varianteId?: string | null) => {
+  /**
+   * Qué extras admite lo que está elegido ahora mismo.
+   *
+   * Con un material del catálogo mandan sus casillas configuradas. En modo
+   * manual no hay material que consultar, así que se siguen usando las reglas
+   * de siempre sobre el nombre — es lo único que hay, y quitarlas dejaría el
+   * modo manual sin ninguna opción.
+   */
+  const opcionesActivas = useMemo(() => {
+      if (!modoMaterialManual && materialSeleccionado) return opcionesDe(materialSeleccionado)
+      const m = state.materialImpresion
+      return {
+          ojales: isBanner(m),
+          bolsillos: isBanner(m),
+          tubos: isBanner(m),
+          refilado: isBanner(m),
+          laminado: isVinilPegable(m) || isClear(m) || isBanner(m),
+          pegado: isVinilPegable(m) || isClear(m),
+          corteObligatorio: isSticker(m),
+          corteOpcional: !isBanner(m) && m !== 'Vinil con Corte',
+      }
+  }, [modoMaterialManual, materialSeleccionado, state.materialImpresion])
+
+  const seleccionarMaterialCatalogo = (prod: any, varianteId?: string | null, acabadoId?: string | null) => {
       const variante = varianteId ? prod.variantes?.find((v: any) => v.id === varianteId) : null
       const usarPublicista = esAliado && (prod.precioPublicista ?? 0) > 0
-      const precioBase = usarPublicista ? prod.precioPublicista : prod.precioBase
-      const precio = precioBase + (variante?.precioAjuste || 0)
+
+      // El precio lo decide un único sitio, el mismo que usa el catálogo: así
+      // el formulario de órdenes y la venta de mostrador no pueden discrepar.
+      const precio = precioDeServicio(prod, variante, usarPublicista ? 'publicista' : 'general')
       const moneda: 'USD' | 'EUR' = usarPublicista ? 'EUR' : 'USD'
+
+      // Al cambiar de material el acabado anterior deja de existir; si el nuevo
+      // tiene uno solo, se elige solo.
+      const acabados = acabadosActivos(prod)
+      const acabadoFinal = acabadoId !== undefined
+          ? acabadoId
+          : (acabados.length === 1 ? acabados[0].id : null)
+      const acabado = acabados.find(a => a.id === acabadoFinal)
+
+      // Las opciones del material mandan sobre las casillas del formulario.
+      const op = opcionesDe(prod)
+
       setCatalogMaterialId(prod.id)
       setCatalogVarianteId(varianteId ?? null)
+      setCatalogAcabadoId(acabadoFinal)
       setModoMaterialManual(false)
       setState((s: any) => ({
           ...s,
           precioUnitario: precio,
-          materialImpresion: prod.nombre,
+          // El nombre lleva el acabado: es lo que se lee en producción y en el
+          // historial, donde no hay desplegables que consultar.
+          materialImpresion: acabado ? `${prod.nombre} ${acabado.nombre}` : prod.nombre,
           nombre: s.nombre || prod.nombre,
           monedaItem: moneda,
+          impresionConCorte: op.corteObligatorio ? true : (op.corteOpcional ? s.impresionConCorte : false),
+          impresionPegado: op.pegado ? s.impresionPegado : false,
+          impresionLaminado: op.laminado ? s.impresionLaminado : false,
+          impresionOjales: op.ojales ? s.impresionOjales : false,
+          impresionBolsillos: op.bolsillos ? s.impresionBolsillos : false,
+          impresionTubos: op.tubos ? s.impresionTubos : false,
+          // Referencias al catálogo: con esto la orden ya nace sabiendo qué
+          // material gastó y no hace falta auditarla después.
+          catalogoProductoId: prod.id,
+          catalogoVarianteId: varianteId ?? null,
+          catalogoVarianteNombre: variante?.nombre || null,
+          catalogoAcabadoId: acabadoFinal,
+          catalogoAcabadoNombre: acabado?.nombre || null,
           _catalogPrecioBase: prod.precioBase || 0,
           _catalogPrecioPublicista: prod.precioPublicista || 0,
           _catalogVarianteAjuste: variante?.precioAjuste || 0,
@@ -340,7 +398,7 @@ export function ItemFormModal({
         detallesExtras.push(`Mat: ${state.materialImpresion}`);
         
         // Corte detallado
-        if ((state.impresionConCorte || isSticker(state.materialImpresion)) && state.materialImpresion !== 'Vinil con Corte') {
+        if ((state.impresionConCorte || opcionesActivas.corteObligatorio) && opcionesActivas.corteOpcional) {
             detallesExtras.push("Corte");
         }
         
@@ -367,7 +425,27 @@ export function ItemFormModal({
             ? detallesExtras.join(" | ")
             : null,
         precioUnitario: finalUnitPrice,
-        tiempoCorte: state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo' ? tiempoString : "Servicio" 
+        tiempoCorte: state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo' ? tiempoString : "Servicio",
+
+        // La orden nace sabiendo que material gasto.
+        //
+        // Esto es lo que hace innecesario auditarla despues: el material sale
+        // del catalogo, no de adivinarlo por la descripcion. Solo se rellena
+        // cuando se eligio del catalogo; en modo manual no hay material que
+        // referenciar y se deja vacio a proposito, para que salga en la lista
+        // de pendientes en vez de colarse con un dato inventado.
+        ...(materialSeleccionado && !modoMaterialManual ? {
+            materialAuditado: {
+                nombre: materialSeleccionado.nombre,
+                productoId: materialSeleccionado.id,
+                m2: state.tipoServicio === 'IMPRESION'
+                    ? Math.round((state.medidaXCm / 100) * (state.medidaYCm / 100) * (state.cantidad || 1) * 10000) / 10000
+                    : 0,
+                laminado: !!state.impresionLaminado,
+                auditadoEn: new Date().toISOString(),
+                origen: 'manual' as const,
+            },
+        } : {}),
     });
     
     onClose();
@@ -707,25 +785,47 @@ export function ItemFormModal({
                                                 </div>
                                             )}
 
-                                            {/* Variantes del material seleccionado */}
+                                            {/* Acabado: de qué rollo sale. No cambia el precio;
+                                                sirve para saber cuál se está gastando. */}
+                                            {acabadosActivos(materialSeleccionado).length > 0 && (
+                                                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-2">
+                                                    <p className="text-[8px] font-black uppercase text-blue-500">Acabado</p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {acabadosActivos(materialSeleccionado).map((a: any) => (
+                                                            <button key={a.id} type="button"
+                                                                onClick={() => seleccionarMaterialCatalogo(materialSeleccionado, catalogVarianteId, a.id)}
+                                                                className={cn(
+                                                                    'px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase transition-all',
+                                                                    catalogAcabadoId === a.id
+                                                                        ? 'bg-slate-900 dark:bg-white dark:text-slate-900 border-slate-900 text-white'
+                                                                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                                                                )}>
+                                                                {a.nombre}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </motion.div>
+                                            )}
+
+                                            {/* Formas de venta del material seleccionado */}
                                             {materialSeleccionado?.tieneVariantes && materialSeleccionado.variantes?.length > 0 && (
                                                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-2">
-                                                    <p className="text-[8px] font-black uppercase text-blue-500">Variante</p>
+                                                    <p className="text-[8px] font-black uppercase text-blue-500">Forma de venta</p>
                                                     <div className="flex flex-wrap gap-2">
                                                         {/* Opción base (sin variante) */}
                                                         <button type="button"
-                                                            onClick={() => seleccionarMaterialCatalogo(materialSeleccionado, null)}
+                                                            onClick={() => seleccionarMaterialCatalogo(materialSeleccionado, null, catalogAcabadoId)}
                                                             className={cn(
                                                                 'px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase transition-all',
                                                                 !catalogVarianteId
                                                                     ? 'bg-blue-600 border-blue-600 text-white'
                                                                     : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
                                                             )}>
-                                                            Base ${materialSeleccionado.precioBase}
+                                                            Base {esAliado ? '€' : '$'}{precioDeServicio(materialSeleccionado, null, esAliado ? 'publicista' : 'general').toFixed(2)}
                                                         </button>
                                                         {materialSeleccionado.variantes.map((v: any) => (
                                                             <button key={v.id} type="button"
-                                                                onClick={() => seleccionarMaterialCatalogo(materialSeleccionado, v.id)}
+                                                                onClick={() => seleccionarMaterialCatalogo(materialSeleccionado, v.id, catalogAcabadoId)}
                                                                 className={cn(
                                                                     'px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase transition-all',
                                                                     catalogVarianteId === v.id
@@ -733,8 +833,8 @@ export function ItemFormModal({
                                                                         : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
                                                                 )}>
                                                                 {v.nombre}
-                                                                {v.precioAjuste ? ` +$${v.precioAjuste}` : ''}
-                                                                {' · $'}{(materialSeleccionado.precioBase + (v.precioAjuste || 0)).toFixed(2)}/m²
+                                                                {' · '}{esAliado ? '€' : '$'}{precioDeServicio(materialSeleccionado, v, esAliado ? 'publicista' : 'general').toFixed(2)}
+                                                                /{materialSeleccionado.unidadLabel || 'm²'}
                                                             </button>
                                                         ))}
                                                     </div>
@@ -757,57 +857,64 @@ export function ItemFormModal({
                                         </div>
                                     )}
 
-                                    {/* CHECKBOXES DINÁMICOS */}
+                                    {/* CASILLAS SEGÚN EL MATERIAL.
+                                        Lo que sale aquí lo decide el propio material en el
+                                        catálogo, no una lista de nombres en el código: así,
+                                        una forma de imprimir nueva se da de alta y ya trae
+                                        sus opciones sin tocar nada. */}
                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-2">
-                                        {/* Añadir Corte (Oculto para Banner, Obligatorio para Stickers) */}
-                                        {!isBanner(state.materialImpresion) && state.materialImpresion !== "Vinil con Corte" && (
-                                            <div className={cn("flex items-center space-x-2 p-2.5 rounded-lg shadow-sm transition-opacity", isSticker(state.materialImpresion) ? "bg-slate-200/50 dark:bg-slate-800/50 opacity-70 pointer-events-none" : "bg-white dark:bg-slate-800")}>
-                                                <Checkbox 
-                                                    id="chk-corte" 
-                                                    checked={isSticker(state.materialImpresion) ? true : state.impresionConCorte} 
-                                                    disabled={isSticker(state.materialImpresion)}
-                                                    onCheckedChange={c => setState({...state, impresionConCorte: !!c})} 
+                                        {(opcionesActivas.corteOpcional || opcionesActivas.corteObligatorio) && (
+                                            <div className={cn("flex items-center space-x-2 p-2.5 rounded-lg shadow-sm transition-opacity", opcionesActivas.corteObligatorio ? "bg-slate-200/50 dark:bg-slate-800/50 opacity-70 pointer-events-none" : "bg-white dark:bg-slate-800")}>
+                                                <Checkbox
+                                                    id="chk-corte"
+                                                    checked={opcionesActivas.corteObligatorio ? true : state.impresionConCorte}
+                                                    disabled={opcionesActivas.corteObligatorio}
+                                                    onCheckedChange={c => setState({ ...state, impresionConCorte: !!c })}
                                                 />
                                                 <Label htmlFor="chk-corte" className="text-xs font-bold cursor-pointer">
-                                                    {isSticker(state.materialImpresion) ? "Corte (Obligatorio)" : "Añadir Corte"}
+                                                    {opcionesActivas.corteObligatorio ? "Corte (Obligatorio)" : "Añadir Corte"}
                                                 </Label>
                                             </div>
                                         )}
 
-                                        {/* Pegado en Rígido (Exclusivo Viniles y Clear) */}
-                                        {(isVinilPegable(state.materialImpresion) || isClear(state.materialImpresion)) && (
+                                        {opcionesActivas.pegado && (
                                             <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
-                                                <Checkbox id="chk-pegado" checked={state.impresionPegado} onCheckedChange={c => setState({...state, impresionPegado: !!c})} />
+                                                <Checkbox id="chk-pegado" checked={state.impresionPegado} onCheckedChange={c => setState({ ...state, impresionPegado: !!c })} />
                                                 <Label htmlFor="chk-pegado" className="text-xs font-bold cursor-pointer">Pegado en Rígido</Label>
                                             </div>
                                         )}
 
-                                        {/* Exclusivos Banner */}
-                                        {isBanner(state.materialImpresion) && (
-                                            <>
-                                                <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
-                                                    <Checkbox id="chk-ojales" checked={state.impresionOjales} onCheckedChange={c => setState({...state, impresionOjales: !!c})} />
-                                                    <Label htmlFor="chk-ojales" className="text-xs font-bold cursor-pointer">Ojales</Label>
-                                                </div>
-                                                <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
-                                                    <Checkbox id="chk-bolsillos" checked={state.impresionBolsillos} onCheckedChange={c => setState({...state, impresionBolsillos: !!c})} />
-                                                    <Label htmlFor="chk-bolsillos" className="text-xs font-bold cursor-pointer">Bolsillos</Label>
-                                                </div>
-                                                <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
-                                                    <Checkbox id="chk-tubos" checked={state.impresionTubos} onCheckedChange={c => setState({...state, impresionTubos: !!c})} />
-                                                    <Label htmlFor="chk-tubos" className="text-xs font-bold cursor-pointer">Tubos</Label>
-                                                </div>
-                                                <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
-                                                    <Checkbox id="chk-refilado" checked={state.impresionRefilado} onCheckedChange={c => setState({...state, impresionRefilado: !!c})} />
-                                                    <Label htmlFor="chk-refilado" className="text-xs font-bold cursor-pointer">Refilado</Label>
-                                                </div>
-                                            </>
+                                        {opcionesActivas.ojales && (
+                                            <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
+                                                <Checkbox id="chk-ojales" checked={state.impresionOjales} onCheckedChange={c => setState({ ...state, impresionOjales: !!c })} />
+                                                <Label htmlFor="chk-ojales" className="text-xs font-bold cursor-pointer">Ojales</Label>
+                                            </div>
                                         )}
 
-                                        {/* Compartido Viniles / Clear / Banner - LAMINADO */}
-                                        {(isVinilPegable(state.materialImpresion) || isClear(state.materialImpresion) || isBanner(state.materialImpresion)) && (
+                                        {opcionesActivas.bolsillos && (
+                                            <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
+                                                <Checkbox id="chk-bolsillos" checked={state.impresionBolsillos} onCheckedChange={c => setState({ ...state, impresionBolsillos: !!c })} />
+                                                <Label htmlFor="chk-bolsillos" className="text-xs font-bold cursor-pointer">Bolsillos</Label>
+                                            </div>
+                                        )}
+
+                                        {opcionesActivas.tubos && (
+                                            <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
+                                                <Checkbox id="chk-tubos" checked={state.impresionTubos} onCheckedChange={c => setState({ ...state, impresionTubos: !!c })} />
+                                                <Label htmlFor="chk-tubos" className="text-xs font-bold cursor-pointer">Tubos</Label>
+                                            </div>
+                                        )}
+
+                                        {opcionesActivas.refilado && (
+                                            <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
+                                                <Checkbox id="chk-refilado" checked={state.impresionRefilado} onCheckedChange={c => setState({ ...state, impresionRefilado: !!c })} />
+                                                <Label htmlFor="chk-refilado" className="text-xs font-bold cursor-pointer">Refilado</Label>
+                                            </div>
+                                        )}
+
+                                        {opcionesActivas.laminado && (
                                             <div className="flex items-center space-x-2 bg-indigo-50 dark:bg-indigo-900/20 p-2.5 rounded-lg shadow-sm border border-indigo-100 dark:border-indigo-800">
-                                                <Checkbox id="chk-laminado" checked={state.impresionLaminado} onCheckedChange={c => setState({...state, impresionLaminado: !!c})} className="data-[state=checked]:bg-indigo-500 data-[state=checked]:border-indigo-500" />
+                                                <Checkbox id="chk-laminado" checked={state.impresionLaminado} onCheckedChange={c => setState({ ...state, impresionLaminado: !!c })} className="data-[state=checked]:bg-indigo-500 data-[state=checked]:border-indigo-500" />
                                                 <Label htmlFor="chk-laminado" className="text-xs font-black text-indigo-700 dark:text-indigo-300 cursor-pointer">Laminado Extra</Label>
                                             </div>
                                         )}
@@ -818,7 +925,7 @@ export function ItemFormModal({
                                         
                                         {/* PANEL DE PEGADO */}
                                         <AnimatePresence>
-                                            {(isVinilPegable(state.materialImpresion) || isClear(state.materialImpresion)) && state.impresionPegado && (
+                                            {opcionesActivas.pegado && state.impresionPegado && (
                                                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="bg-slate-100 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 overflow-hidden">
                                                     <Label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase flex items-center gap-2"><Box className="w-3 h-3"/> Configuración de Pegado</Label>
                                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -863,7 +970,7 @@ export function ItemFormModal({
 
                                         {/* PANEL DE LAMINADO */}
                                         <AnimatePresence>
-                                            {(isVinilPegable(state.materialImpresion) || isClear(state.materialImpresion) || isBanner(state.materialImpresion)) && state.impresionLaminado && (
+                                            {opcionesActivas.laminado && state.impresionLaminado && (
                                                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="bg-indigo-50 dark:bg-indigo-900/10 p-4 rounded-xl border border-indigo-100 dark:border-indigo-800/50 space-y-3 overflow-hidden">
                                                     <Label className="text-[10px] font-black text-indigo-600 uppercase flex items-center gap-2"><Layers className="w-3 h-3"/> Configuración de Costo (Laminado)</Label>
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
