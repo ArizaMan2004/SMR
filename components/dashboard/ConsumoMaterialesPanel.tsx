@@ -32,19 +32,12 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-import {
-    consumoPorMaterial, areaDeProducto, materialEsDelArea,
-    subscribeToCatalogoProducts, subscribeToCatalogoCategories,
-    type ConsumoMaterial, type VentaCatalogo, type CatalogoProducto, type CatalogoCategoria,
-} from '@/lib/services/catalog-service'
-import { consumoDesdePresupuestos, unirConsumos, itemsSinClasificar } from '@/lib/services/subitems-service'
-import { loadBudgetsFromFirestore, type DbBudgetEntry } from '@/lib/firebase/firestore-budget-service'
+import type { ConsumoDelPeriodo } from '@/lib/hooks/use-consumo-materiales'
 
 interface Props {
-    ventasCatalogo?: any[]
-    /** Inicio y fin del periodo que se está mirando en el panel. */
-    inicio: Date
-    fin: Date
+    /** Ya calculado por useConsumoMateriales, que es quien lee de Firestore. */
+    datos: ConsumoDelPeriodo
+    cargando?: boolean
     /** El panel vive dentro de una vista de área y solo enseña la suya. */
     area: 'IMPRESION' | 'CORTE'
     /**
@@ -55,88 +48,23 @@ interface Props {
     embebido?: boolean
 }
 
-const enRango = (valor: any, inicio: Date, fin: Date): boolean => {
-    if (!valor) return false
-    // Firestore devuelve Timestamp en unas colecciones y cadena ISO en otras.
-    const fecha = typeof valor?.toDate === 'function' ? valor.toDate() : new Date(valor)
-    if (isNaN(fecha.getTime())) return false
-    return fecha >= inicio && fecha <= fin
-}
-
 const formatoM2 = (n: number) =>
     n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-export function ConsumoMaterialesPanel({ ventasCatalogo = [], inicio, fin, area, embebido }: Props) {
-    // El catálogo dice a qué área pertenece cada material. Antes esto se
-    // adivinaba por el nombre del ítem y bastaba con que alguien escribiera
-    // "vinill" para que los metros se fueran al balance equivocado.
-    const [productos, setProductos] = useState<CatalogoProducto[]>([])
-    const [categorias, setCategorias] = useState<CatalogoCategoria[]>([])
-    useEffect(() => subscribeToCatalogoProducts(setProductos), [])
-    useEffect(() => subscribeToCatalogoCategories(setCategorias), [])
-
-    const [budgets, setBudgets] = useState<DbBudgetEntry[]>([])
-    const [cargando, setCargando] = useState(true)
+export function ConsumoMaterialesPanel({ datos, cargando, area, embebido }: Props) {
     const [abierto, setAbierto] = useState<string | null>(null)
 
-    // Una sola lectura al montar. El filtro por fechas se hace en memoria: el
-    // historial completo son unos cientos de documentos y volver a Firestore
-    // cada vez que se cambia de mes saldria mas caro que tenerlos aqui.
-    useEffect(() => {
-        let vivo = true
-        loadBudgetsFromFirestore()
-            .then(b => { if (vivo) setBudgets(b) })
-            .catch(e => console.error('No se pudieron cargar los presupuestos para el consumo:', e))
-            .finally(() => { if (vivo) setCargando(false) })
-        return () => { vivo = false }
-    }, [])
-
-    const presupuestosDelPeriodo = useMemo(
-        () => budgets.filter(b => enRango(b.dateCreated, inicio, fin)),
-        [budgets, inicio, fin]
-    )
-
-    const consumo: ConsumoMaterial[] = useMemo(() => {
-        const ventas = (ventasCatalogo as VentaCatalogo[]).filter(v => enRango(v?.fecha, inicio, fin))
-        const todo = unirConsumos(
-            consumoPorMaterial(ventas),
-            consumoDesdePresupuestos(presupuestosDelPeriodo)
-        )
-        return todo.filter(m => {
-            const producto = productos.find(p => p.id === m.productoId)
-            return materialEsDelArea(areaDeProducto(producto, categorias), area)
-        })
-    }, [ventasCatalogo, presupuestosDelPeriodo, inicio, fin, productos, categorias, area])
-
-    // Categorías con material en uso a las que todavía no se les ha dicho el
-    // área. Mientras estén así el reparto lo decide el tipo de venta, que es
-    // una suposición: mejor decirlo que dejar que el numero parezca firme.
-    const categoriasSinArea = useMemo(() => {
-        const usadas = new Set(
-            consumo.map(m => productos.find(p => p.id === m.productoId)?.categoriaId).filter(Boolean)
-        )
-        return categorias.filter(c => usadas.has(c.id) && !c.area).map(c => c.nombre)
-    }, [consumo, productos, categorias])
-
-    // Cuántos presupuestos del periodo siguen sin decir qué material gastaron.
-    // Sin esto, un total bajo se lee como poca produccion en vez de como un
-    // dato incompleto.
-    const sinClasificarEnPeriodo = useMemo(
-        () => presupuestosDelPeriodo.filter(b => itemsSinClasificar(b) > 0).length,
-        [presupuestosDelPeriodo]
-    )
-
-    const totalM2 = consumo.reduce((t, m) => t + m.m2Totales, 0)
+    const consumo = datos.materiales
+    const totalM2 = datos.m2Totales
+    const sinClasificarEnPeriodo = datos.presupuestosSinDesglosar
+    const categoriasSinArea = datos.categoriasSinArea
 
     // Mas y menos pedidos. Solo tiene sentido enfrentarlos cuando hay al menos
     // dos materiales: con uno solo, es a la vez el mas y el menos pedido.
     const { masPedido, menosPedido } = useMemo(() => {
         const conMovimiento = consumo.filter(m => m.m2Totales > 0 || m.unidadesTotales > 0)
         if (conMovimiento.length < 2) return { masPedido: null, menosPedido: null }
-        return {
-            masPedido: conMovimiento[0],
-            menosPedido: conMovimiento[conMovimiento.length - 1],
-        }
+        return { masPedido: conMovimiento[0], menosPedido: conMovimiento[conMovimiento.length - 1] }
     }, [consumo])
 
     const Envoltorio: any = embebido ? 'div' : Card

@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils"
 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
 import { ConsumoMaterialesPanel } from "@/components/dashboard/ConsumoMaterialesPanel"
+import { useConsumoMateriales } from "@/lib/hooks/use-consumo-materiales"
 
 const MATERIALES_CORTE_KEYS: any = {
     'Acrilico': ['acrilico', 'acr', 'acrylic', 'plastico'],
@@ -232,6 +233,15 @@ export function EstadisticasDashboard({
     }
   };
 
+  /**
+   * Consumo real de material del taller.
+   *
+   * Se calcula una sola vez aqui y lo comparten la tarjeta de volumen y los
+   * desgloses de las dos areas. Antes cada uno contaba por su cuenta buscando
+   * palabras en el nombre de los items, y ninguno coincidia con los otros.
+   */
+  const materiales = useConsumoMateriales(ventasCatalogo);
+
   const fechas = useMemo(() => {
       const year = fechaReferencia.getFullYear();
       const month = fechaReferencia.getMonth();
@@ -242,6 +252,26 @@ export function EstadisticasDashboard({
           finPrev: new Date(year, month, 0, 23, 59, 59, 999)
       };
   }, [fechaReferencia]);
+
+  const consumoImpresion = useMemo(
+      () => materiales.consumoDe('IMPRESION', fechas.inicio, fechas.fin),
+      [materiales, fechas]
+  );
+  const consumoImpresionPrev = useMemo(
+      () => materiales.consumoDe('IMPRESION', fechas.inicioPrev, fechas.finPrev),
+      [materiales, fechas]
+  );
+  const consumoCorte = useMemo(
+      () => materiales.consumoDe('CORTE', fechas.inicio, fechas.fin),
+      [materiales, fechas]
+  );
+
+  /** Variacion de metros impresos contra el mes anterior. */
+  const variacionM2Real = useMemo(() => {
+      const previo = consumoImpresionPrev.m2Totales;
+      if (previo <= 0) return 0;
+      return ((consumoImpresion.m2Totales - previo) / previo) * 100;
+  }, [consumoImpresion, consumoImpresionPrev]);
 
   const empRoleMap = useMemo(() => {
       const m = new Map();
@@ -1181,11 +1211,21 @@ export function EstadisticasDashboard({
                             <div className="p-2 bg-white/20 rounded-xl"><Layers size={18}/></div>
                             <span className="text-xs font-bold uppercase tracking-widest opacity-80">Volumen Impreso</span>
                         </div>
-                        <p className="text-2xl sm:text-4xl font-black tracking-tighter">{productionMetrics.actual.m2Totales.toFixed(2)} <span className="text-base sm:text-lg opacity-60">m²</span></p>
+                        {/* Los metros salen del catalogo y del desglose interno de
+                            los presupuestos. Antes se contaban buscando palabras en
+                            el nombre de cada item de las ordenes, asi que un nombre
+                            escrito de otra forma no sumaba y el volumen siempre
+                            quedaba por debajo de lo que de verdad salio del rollo. */}
+                        <p className="text-2xl sm:text-4xl font-black tracking-tighter">{consumoImpresion.m2Totales.toFixed(2)} <span className="text-base sm:text-lg opacity-60">m²</span></p>
                         <div className="flex items-center gap-2 mt-3 sm:mt-4 bg-white/10 w-fit px-3 py-1 rounded-lg">
-                            {productionMetrics.variacionM2 >= 0 ? <TrendingUp size={14}/> : <TrendingDown size={14}/>}
-                            <span className="text-xs font-bold">{Math.abs(productionMetrics.variacionM2).toFixed(1)}% vs mes ant.</span>
+                            {variacionM2Real >= 0 ? <TrendingUp size={14}/> : <TrendingDown size={14}/>}
+                            <span className="text-xs font-bold">{Math.abs(variacionM2Real).toFixed(1)}% vs mes ant.</span>
                         </div>
+                        {consumoImpresion.presupuestosSinDesglosar > 0 && (
+                            <p className="text-[10px] font-bold opacity-70 mt-2 leading-snug">
+                                Faltan {consumoImpresion.presupuestosSinDesglosar} presupuestos por desglosar: el volumen real es mayor.
+                            </p>
+                        )}
                     </div>
                 </motion.div>
 
@@ -1211,9 +1251,8 @@ export function EstadisticasDashboard({
                     </p>
 
                     <ConsumoMaterialesPanel
-                        ventasCatalogo={ventasCatalogo}
-                        inicio={fechas.inicio}
-                        fin={fechas.fin}
+                        datos={consumoImpresion}
+                        cargando={materiales.cargando}
                         area="IMPRESION"
                         embebido
                     />
@@ -1285,9 +1324,8 @@ export function EstadisticasDashboard({
                                 cambio, siguen deduciendose del texto: no hay de donde
                                 sacarlos todavia. */}
                             <ConsumoMaterialesPanel
-                                ventasCatalogo={ventasCatalogo}
-                                inicio={fechas.inicio}
-                                fin={fechas.fin}
+                                datos={consumoCorte}
+                                cargando={materiales.cargando}
                                 area="CORTE"
                                 embebido
                             />
