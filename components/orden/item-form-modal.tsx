@@ -129,6 +129,19 @@ export function ItemFormModal({
   // lo que permite saber después cuál se está gastando más.
   const [catalogAcabadoId, setCatalogAcabadoId] = useState<string | null>(null)
   const [modoMaterialManual, setModoMaterialManual] = useState(false)
+  /**
+   * A qué material del catálogo se imputa un ítem escrito a mano.
+   *
+   * El modo manual existe porque siempre hay trabajos que no encajan, y
+   * quitarlo obligaría a inventar entradas de catálogo para cada rareza. Pero
+   * un ítem sin material no suma en ningún balance: así se llegó a tener un
+   * mes entero de banner contado como vinil.
+   *
+   * Con esto se escribe lo que se quiera en la descripción y aun así se dice
+   * de qué rollo salió. Es opcional: si de verdad no corresponde a ningún
+   * material, se deja vacío y sale en la lista de pendientes de Auditoría.
+   */
+  const [manualMaterialId, setManualMaterialId] = useState<string | null>(null)
 
   useEffect(() => {
       const unsub = subscribeToCatalogoProducts(setCatalogProductos)
@@ -462,6 +475,13 @@ export function ItemFormModal({
         if (state.impresionLaminado) detallesExtras.push("Laminado");
     }
 
+    // De donde sale el material que se apunta: del catalogo si se eligio ahi,
+    // del selector de respaldo si se escribio a mano. Si no hay ninguno no se
+    // inventa: el renglon sale en la lista de pendientes, que es lo honesto.
+    const materialParaAuditoria = modoMaterialManual
+        ? catalogProductos.find((p: any) => p.id === manualMaterialId)
+        : materialSeleccionado
+
     onAddItem({ 
         ...state, 
         cantidad: state.cantidad || 1, 
@@ -481,10 +501,10 @@ export function ItemFormModal({
         // cuando se eligio del catalogo; en modo manual no hay material que
         // referenciar y se deja vacio a proposito, para que salga en la lista
         // de pendientes en vez de colarse con un dato inventado.
-        ...(materialSeleccionado && !modoMaterialManual ? {
+        ...(materialParaAuditoria ? {
             materialAuditado: {
-                nombre: materialSeleccionado.nombre,
-                productoId: materialSeleccionado.id,
+                nombre: materialParaAuditoria.nombre,
+                productoId: materialParaAuditoria.id,
                 m2: state.tipoServicio === 'IMPRESION'
                     ? Math.round((state.medidaXCm / 100) * (state.medidaYCm / 100) * (state.cantidad || 1) * 10000) / 10000
                     : 0,
@@ -900,6 +920,37 @@ export function ItemFormModal({
                                                         <span className="text-[9px] opacity-70 font-bold">/m²</span>
                                                     </p>
                                                 </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Aunque el material se escriba a mano, decir de qué
+                                        rollo salió: sin eso el ítem no suma en ningún
+                                        balance ni descuenta del stock. */}
+                                    {modoMaterialManual && catalogM2.length > 0 && (
+                                        <div className="mt-3 space-y-2 bg-amber-50/70 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/20 rounded-2xl p-3">
+                                            <p className="text-[8px] font-black uppercase text-amber-600 tracking-widest">
+                                                ¿De qué material salió? · para que cuente en el balance
+                                            </p>
+                                            <div className="flex flex-wrap gap-2">
+                                                {catalogM2.map((prod: any) => (
+                                                    <button key={prod.id} type="button"
+                                                        onClick={() => setManualMaterialId(manualMaterialId === prod.id ? null : prod.id)}
+                                                        className={cn(
+                                                            'px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase transition-all',
+                                                            manualMaterialId === prod.id
+                                                                ? 'bg-slate-900 dark:bg-white dark:text-slate-900 border-slate-900 text-white'
+                                                                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                                                        )}>
+                                                        {prod.nombre}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {!manualMaterialId && (
+                                                <p className="text-[9px] font-bold text-amber-700 dark:text-amber-500 leading-snug">
+                                                    Sin material, sus metros no entran en el balance ni descuentan del rollo.
+                                                    Quedará pendiente en Auditoría.
+                                                </p>
                                             )}
                                         </div>
                                     )}
