@@ -55,6 +55,29 @@ type Contexto = Awaited<ReturnType<typeof cargarContexto>>;
 const LETTER_WIDTH = 612; 
 const MIN_HEIGHT = 792;   
 
+/**
+ * Los tamanos que se usan de verdad en el taller.
+ *
+ * 'continuo' hace la hoja tan larga como haga falta: un presupuesto de treinta
+ * renglones partido en tres paginas se lee peor que uno largo, y para mandarlo
+ * por WhatsApp da igual el alto.
+ */
+export type TamanoHoja = "carta" | "oficio" | "continuo";
+
+export const TAMANOS_HOJA: { valor: TamanoHoja; nombre: string; ayuda: string }[] = [
+    { valor: "carta",    nombre: "Carta",    ayuda: "21,6 x 27,9 cm · con paginado" },
+    { valor: "oficio",   nombre: "Oficio",   ayuda: "21,6 x 35,6 cm · con paginado" },
+    { valor: "continuo", nombre: "Continuo", ayuda: "Una sola hoja, sin cortes" },
+];
+
+const OFICIO_HEIGHT = 936; // 13 pulgadas a 72 puntos
+
+const resolverPageSize = (items: any[], tamano: TamanoHoja = "continuo") => {
+    if (tamano === "carta") return { width: LETTER_WIDTH, height: MIN_HEIGHT };
+    if (tamano === "oficio") return { width: LETTER_WIDTH, height: OFICIO_HEIGHT };
+    return getDynamicPageSize(items);
+};
+
 const getDynamicPageSize = (items: any[]) => {
     const fixedHeightBase = 850; 
     const baseHeightPerItem = 50; 
@@ -135,7 +158,20 @@ export interface PDFOptions {
     notasLegales?: string[];
     /** Ids de las cuentas que salen. Vacio o sin definir: las configuradas. */
     cuentas?: string[];
+    /** Carta, oficio o continuo. Por defecto continuo, como hasta ahora. */
+    tamanoHoja?: TamanoHoja;
+    /** Anadir IVA al total y ensenarlo desglosado. */
+    aplicarIva?: boolean;
+    /** Porcentaje de IVA. En Venezuela, 16. */
+    ivaPct?: number;
   };
+  /**
+   * Devuelve la definicion en vez de abrir el PDF.
+   *
+   * Es lo que permite pintar la vista previa mientras se tocan las casillas,
+   * sin descargar un archivo en cada cambio.
+   */
+  soloDefinicion?: boolean;
 }
 
 interface BudgetItem { subCliente?: string; descripcion: string; cantidad: number; precioUnitarioUSD: number; totalUSD: number; }
@@ -377,7 +413,7 @@ export async function generateOrderPDF(orden: any, SMRLogoBase64: string, option
   tableBody.push([{ text: "TOTAL RESTANTE", colSpan: 3, style: "finalTotalLabelBig", alignment: "right", color: restanteUSD > 0.01 ? "#dc2626" : "black" }, {}, {}, { text: formatCurrency(restanteUSD), style: "finalTotalValueBig", alignment: "right", color: restanteUSD > 0.01 ? "#dc2626" : "black" }]);
 
   const docDefinition: any = {
-    pageSize: getDynamicPageSize(orden.items),
+    pageSize: resolverPageSize(orden.items, options.ajustes?.tamanoHoja),
     pageMargins: [40, 40, 40, 40],
     content: [
       { text: `${orden.cliente.ciudad || "Coro"}, ${formatDate(orden.fecha)}`, alignment: "right", style: "dateInfo" },
@@ -403,6 +439,7 @@ export async function generateOrderPDF(orden: any, SMRLogoBase64: string, option
     styles: COMMON_STYLES,
     defaultStyle: { font: "Roboto" }
   };
+  if (options.soloDefinicion) return docDefinition;
   pdfMake.createPdf(docDefinition).open();
 }
 
@@ -456,13 +493,30 @@ export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: s
         });
     }
 
+    // El IVA se anade solo si el documento lo pide. Va desglosado: un total
+    // con el IVA metido dentro y sin decirlo es lo que hace que el cliente
+    // reclame despues.
+    const ivaPct = options.ajustes?.aplicarIva ? (options.ajustes?.ivaPct ?? 16) : 0;
+    const montoIva = ivaPct > 0 ? budgetData.totalUSD * (ivaPct / 100) : 0;
+
+    if (montoIva > 0) {
+        tableBody.push([
+            { text: "SUBTOTAL", colSpan: 3, style: "itemText", alignment: "right" }, {}, {},
+            { text: formatCurrency(budgetData.totalUSD), style: "itemTotal", alignment: "right" }
+        ]);
+        tableBody.push([
+            { text: `IVA ${ivaPct}%`, colSpan: 3, style: "itemText", alignment: "right" }, {}, {},
+            { text: formatCurrency(montoIva), style: "itemTotal", alignment: "right" }
+        ]);
+    }
+
     tableBody.push([
         { text: budgetData.isMaster ? "TOTAL GENERAL MATRIZ" : "TOTAL", colSpan: 3, style: "finalTotalLabelBig", alignment: "right" }, {}, {}, 
-        { text: formatCurrency(budgetData.totalUSD), style: "finalTotalValueBig", alignment: "right" }
+        { text: formatCurrency(budgetData.totalUSD + montoIva), style: "finalTotalValueBig", alignment: "right" }
     ]);
 
     const docDefinition: any = {
-        pageSize: getDynamicPageSize(budgetData.items),
+        pageSize: resolverPageSize(budgetData.items, options.ajustes?.tamanoHoja),
         pageMargins: [40, 40, 40, 40],
         content: [
             { text: budgetData.fechaCreacion, alignment: "right", style: "dateInfo" },
@@ -487,7 +541,8 @@ export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: s
         styles: COMMON_STYLES,
         defaultStyle: { font: "Roboto" }
     };
-    pdfMake.createPdf(docDefinition).open();
+    if (options.soloDefinicion) return docDefinition;
+  pdfMake.createPdf(docDefinition).open();
 }
 
 // 3. RECIBO GENERAL
@@ -510,7 +565,7 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
     ]);
 
     const docDefinition: any = {
-        pageSize: getDynamicPageSize(data.items), 
+        pageSize: resolverPageSize(data.items, options.ajustes?.tamanoHoja), 
         pageMargins: [40, 40, 40, 40],
         content: [
             { text: `Corte al: ${data.fechaReporte}`, style: "dateInfo", alignment: "right", margin: [0, 0, 0, 5] },
@@ -547,7 +602,8 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
         defaultStyle: { font: "Roboto" }
     };
 
-    pdfMake.createPdf(docDefinition).open();
+    if (options.soloDefinicion) return docDefinition;
+  pdfMake.createPdf(docDefinition).open();
 }
 
 // 4. NOTA DE ENTREGA — VENTAS DE CATÁLOGO
@@ -619,7 +675,7 @@ export async function generateCatalogSalePDF(venta: any, SMRLogoBase64: string, 
     if (venta.notas) clienteLines.push({ text: `Notas: ${venta.notas}`, style: "contactInfo", italics: true });
 
     const docDefinition: any = {
-        pageSize: getDynamicPageSize(venta.items || []),
+        pageSize: resolverPageSize(venta.items || [], options.ajustes?.tamanoHoja),
         pageMargins: [40, 40, 40, 40],
         content: [
             { text: `Coro, ${dateStr}`, alignment: "right", style: "dateInfo" },
@@ -647,5 +703,33 @@ export async function generateCatalogSalePDF(venta: any, SMRLogoBase64: string, 
         defaultStyle: { font: "Roboto" }
     };
 
+    if (options.soloDefinicion) return docDefinition;
+  pdfMake.createPdf(docDefinition).open();
+}
+
+/**
+ * Pinta un PDF ya montado en una imagen para la vista previa.
+ *
+ * Se devuelve una URL de datos para meterla en un iframe: es lo unico que
+ * consigue una vista previa fiel sin volver a maquetar el documento en HTML,
+ * que siempre acaba pareciendose solo un poco al PDF de verdad.
+ */
+export async function definicionAPreview(docDefinition: any): Promise<string | null> {
+    const pdfMake = await loadPdfDependencies();
+    if (!pdfMake || !docDefinition) return null;
+    return new Promise(resolve => {
+        try {
+            pdfMake.createPdf(docDefinition).getDataUrl((url: string) => resolve(url));
+        } catch (e) {
+            console.error("No se pudo generar la vista previa del PDF:", e);
+            resolve(null);
+        }
+    });
+}
+
+/** Descarga o abre un PDF ya montado. */
+export async function abrirDefinicion(docDefinition: any) {
+    const pdfMake = await loadPdfDependencies();
+    if (!pdfMake || !docDefinition) return;
     pdfMake.createPdf(docDefinition).open();
 }

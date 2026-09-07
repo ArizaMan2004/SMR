@@ -109,6 +109,7 @@ const matchesQuery = (haystack: string, query: string) => {
 };
 
 import { SubItemsModal } from '@/components/dashboard/SubItemsModal'
+import { EditorPDFModal, type AjustesPDF } from '@/components/dashboard/EditorPDFModal'
 import {
     m2DeSubItems, sinClasificar, itemsSinClasificar,
     type SubItemInterno,
@@ -149,6 +150,15 @@ export default function BudgetEntryView({
     // (todavia sin guardar) y desde una tarjeta del historial (ya facturado).
     // De ahi que haga falta saber a que presupuesto pertenece el renglon.
     const [subItemsTarget, setSubItemsTarget] = useState<{ item: any; budgetId?: string } | null>(null);
+
+    /**
+     * El presupuesto que se esta preparando para emitir.
+     *
+     * Se abre el editor en vez de soltar el PDF: asi se decide en el momento
+     * si lleva las condiciones, que cuenta bancaria sale y en que hoja va,
+     * viendolo antes de mandarselo al cliente.
+     */
+    const [pdfEnEdicion, setPdfEnEdicion] = useState<{ data: any; currency: any } | null>(null);
 
     const [isLoading, setIsLoading] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -371,7 +381,7 @@ export default function BudgetEntryView({
     const handleDownloadPDF = async (data: any, rateType: 'USD' | 'EUR' | 'USDT' | 'USD_ONLY') => {
         const dataToPrint = {
             ...data,
-            totalUSD: data.totalUSD || totalUSD, 
+            totalUSD: data.totalUSD || totalUSD,
             dateCreated: data.dateCreated || new Date().toISOString()
         };
 
@@ -380,12 +390,25 @@ export default function BudgetEntryView({
         if (rateType === 'USDT') selectedCurrency = { rate: safeRates.usdt, label: "Tasa Monitor", symbol: "Bs." };
         if (rateType === 'USD_ONLY') selectedCurrency = { rate: 1, label: "", symbol: "" };
 
-        await generateBudgetPDF(
-            dataToPrint, 
-            pdfLogoBase64, 
-            { firmaBase64, selloBase64, currency: selectedCurrency }
-        );
+        // No se genera todavia: se abre el editor con la vista previa.
+        setPdfEnEdicion({ data: dataToPrint, currency: selectedCurrency });
     };
+
+    /** Monta el presupuesto con los ajustes que se esten tocando en el editor. */
+    const construirPresupuesto = useCallback(async (ajustes: AjustesPDF) => {
+        if (!pdfEnEdicion) return null;
+        return generateBudgetPDF(
+            pdfEnEdicion.data,
+            pdfLogoBase64,
+            {
+                firmaBase64,
+                selloBase64,
+                currency: pdfEnEdicion.currency,
+                ajustes,
+                soloDefinicion: true,
+            }
+        );
+    }, [pdfEnEdicion, pdfLogoBase64, firmaBase64, selloBase64]);
 
     // --- LÓGICA DE CATÁLOGO / INVENTARIO (coherente con el Order Wizard) ---
     const handleSelectCatalogProduct = (prod: CatalogoProducto, varianteId?: string | null) => {
@@ -1666,6 +1689,14 @@ export default function BudgetEntryView({
 
             {/* Desglose interno del renglon. Vale tanto para el presupuesto que
                 se esta escribiendo como para uno del historial ya facturado. */}
+            <EditorPDFModal
+                open={!!pdfEnEdicion}
+                onOpenChange={o => !o && setPdfEnEdicion(null)}
+                tipo="presupuesto"
+                titulo={pdfEnEdicion?.data?.numero ? `Presupuesto #${pdfEnEdicion.data.numero}` : 'Presupuesto'}
+                construir={construirPresupuesto}
+            />
+
             <SubItemsModal
                 open={!!subItemsTarget}
                 onOpenChange={o => !o && setSubItemsTarget(null)}
