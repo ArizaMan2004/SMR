@@ -24,6 +24,7 @@ import {
 
 import {
     subscribeToCatalogoProducts, precioDeServicio, acabadosActivos, opcionesDe,
+    consumoMetroLineal, unidadDe,
 } from "@/lib/services/catalog-service"
 
 // --- CONSTANTES ---
@@ -90,7 +91,7 @@ const getInitialState = () => ({
   
   // --- ESTADOS LAMINADO ---
   impresionLaminado: false,
-  tipoCobroLaminado: "y", // 'x', 'y', 'manual'
+  tipoCobroLaminado: "auto", // 'auto' | 'x' | 'y' | 'manual'
   precioLaminadoLineal: 0,
   precioLaminadoManual: 0,
 
@@ -189,6 +190,40 @@ export function ItemFormModal({
           corteOpcional: !isBanner(m) && m !== 'Vinil con Corte',
       }
   }, [modoMaterialManual, materialSeleccionado, state.materialImpresion])
+
+  /**
+   * Cuánto laminado consume esta pieza y qué habría que cobrar.
+   *
+   * El rollo tiene un ancho fijo y se corta a lo largo: la pieza se gira para
+   * que su lado corto quepa, y lo que se gasta es el largo. La tira que sobra
+   * al lado NO se reaprovecha, así que una pieza estrecha consume lo mismo que
+   * una que ocupe todo el ancho. Cobrar solo el área impresa es regalar rollo.
+   *
+   * El precio que sale de aquí es una recomendación: se puede pisar a mano,
+   * porque hay retazos y trabajos donde la cuenta no aplica.
+   */
+  const laminado = useMemo(() => {
+      const mat = catalogProductos.find((p: any) =>
+          /laminaci/i.test(p?.nombre || '') && unidadDe(p) === 'metro_lineal')
+      const anchoRollo = Number(mat?.anchoBaseCm) || 0
+      if (!anchoRollo) return null
+
+      const calc = consumoMetroLineal(anchoRollo, state.medidaXCm, state.medidaYCm, state.cantidad || 1)
+      if (calc.metrosLineales <= 0) return null
+
+      const esAliadoLam = esAliado && (mat?.precioPublicista ?? 0) > 0
+      const precioML = esAliadoLam ? mat.precioPublicista : (mat?.precioBase || 0)
+
+      return {
+          anchoRollo,
+          ...calc,
+          precioML,
+          moneda: esAliadoLam ? '€' : '$',
+          costoSugerido: Math.round(calc.metrosLineales * precioML * 100) / 100,
+          // Lo que se está imprimiendo, para poder comparar con lo que se gasta.
+          m2Impresos: Math.round((state.medidaXCm / 100) * (state.medidaYCm / 100) * (state.cantidad || 1) * 100) / 100,
+      }
+  }, [catalogProductos, state.medidaXCm, state.medidaYCm, state.cantidad, esAliado])
 
   const seleccionarMaterialCatalogo = (prod: any, varianteId?: string | null, acabadoId?: string | null) => {
       const variante = varianteId ? prod.variantes?.find((v: any) => v.id === varianteId) : null
@@ -302,6 +337,12 @@ export function ItemFormModal({
 
     const cantidadCalculo = cantidad > 0 ? cantidad : 0;
 
+    // Lo que cuesta laminar UNA pieza segun el rollo real. `laminado` cuenta la
+    // tirada entera, asi que se divide entre las copias.
+    const laminadoPorUnidad = laminado && laminado.costoSugerido > 0
+        ? laminado.costoSugerido / (state.cantidad || 1)
+        : 0;
+
     // Precio efectivo: si aplica precio al mayor, usarlo
     const usaMayor = cantidadMayor > 0 && cantidadCalculo >= cantidadMayor && precioMayor > 0;
     const precioEfectivo = usaMayor ? precioMayor : precioUnitario;
@@ -318,7 +359,13 @@ export function ItemFormModal({
 
             if (tipoServicio === 'IMPRESION') {
                 if (impresionLaminado) {
-                    if (tipoCobroLaminado === 'x' && precioLaminadoLineal > 0) {
+                    // Modo automatico: el largo real que se lleva del rollo, ya
+                    // con la pieza girada y con las pasadas que hagan falta.
+                    // Es por unidad, y `laminado` ya multiplico por la cantidad,
+                    // asi que aqui se reparte de vuelta.
+                    if (tipoCobroLaminado === 'auto' && laminadoPorUnidad > 0) {
+                        costoBaseUnitario += laminadoPorUnidad;
+                    } else if (tipoCobroLaminado === 'x' && precioLaminadoLineal > 0) {
                         costoBaseUnitario += (medidaXCm / 100) * precioLaminadoLineal;
                     } else if (tipoCobroLaminado === 'y' && precioLaminadoLineal > 0) {
                         costoBaseUnitario += (medidaYCm / 100) * precioLaminadoLineal;
@@ -973,12 +1020,53 @@ export function ItemFormModal({
                                             {opcionesActivas.laminado && state.impresionLaminado && (
                                                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="bg-indigo-50 dark:bg-indigo-900/10 p-4 rounded-xl border border-indigo-100 dark:border-indigo-800/50 space-y-3 overflow-hidden">
                                                     <Label className="text-[10px] font-black text-indigo-600 uppercase flex items-center gap-2"><Layers className="w-3 h-3"/> Configuración de Costo (Laminado)</Label>
+
+                                                    {/* La cuenta del rollo, siempre a la vista: es donde
+                                                        se pierde dinero sin darse cuenta. */}
+                                                    {laminado && (
+                                                        <div className="bg-white dark:bg-slate-900 rounded-xl p-3 space-y-2 border border-indigo-100 dark:border-indigo-800/50">
+                                                            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                                                                <span className="text-[9px] font-black uppercase text-slate-400">
+                                                                    Rollo de {laminado.anchoRollo} cm
+                                                                    {laminado.pasadas > 1 && ` · ${laminado.pasadas} pasadas`}
+                                                                </span>
+                                                                <span className="text-sm font-black tabular-nums text-indigo-600">
+                                                                    {laminado.metrosLineales.toFixed(2)} m.l.
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-[10px] font-bold">
+                                                                <span className="text-slate-400">
+                                                                    Se gastan <span className="text-slate-600 dark:text-slate-300 tabular-nums">{laminado.m2Rollo.toFixed(2)} m²</span> de rollo
+                                                                    {laminado.m2Impresos > 0 && laminado.m2Rollo > laminado.m2Impresos * 1.15 && (
+                                                                        <span className="text-amber-600"> · solo {laminado.m2Impresos.toFixed(2)} m² van impresos</span>
+                                                                    )}
+                                                                </span>
+                                                            </div>
+                                                            {laminado.precioML > 0 && (
+                                                                <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-white/5">
+                                                                    <div>
+                                                                        <p className="text-[9px] font-black uppercase text-emerald-600">Cobro sugerido</p>
+                                                                        <p className="text-sm font-black tabular-nums text-emerald-600">
+                                                                            {laminado.moneda}{laminado.costoSugerido.toFixed(2)}
+                                                                            <span className="text-[9px] font-bold opacity-60"> · {laminado.moneda}{laminado.precioML}/m.l.</span>
+                                                                        </p>
+                                                                    </div>
+                                                                    <Button type="button" size="sm"
+                                                                        onClick={() => setState({ ...state, tipoCobroLaminado: 'manual', precioLaminadoManual: laminado.costoSugerido })}
+                                                                        className="h-8 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-[9px] px-3">
+                                                                        Usar
+                                                                    </Button>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                         <div className="space-y-1.5">
                                                             <Label className="text-[9px] font-bold text-indigo-500 uppercase">Modo de Cálculo</Label>
                                                             <Select value={state.tipoCobroLaminado} onValueChange={v => setState({...state, tipoCobroLaminado: v})}>
                                                                 <SelectTrigger className="bg-white dark:bg-slate-800 border-none h-11 rounded-lg text-xs font-bold"><SelectValue /></SelectTrigger>
                                                                 <SelectContent>
+                                                                    <SelectItem value="auto">Automático (rollo real)</SelectItem>
                                                                     <SelectItem value="y">M. Lineal (Gastar Alto Y)</SelectItem>
                                                                     <SelectItem value="x">M. Lineal (Gastar Ancho X)</SelectItem>
                                                                     <SelectItem value="manual">Monto Fijo (Retazos)</SelectItem>
