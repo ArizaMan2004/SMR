@@ -113,6 +113,8 @@ import { estaSaldada, estaAbonada, aCentimos } from '@/lib/utils/estados'
 import { subscribeToHorarios } from '@/lib/services/horarios-service'
 import { ResumenDelDia } from '@/components/dashboard/ResumenDelDia'
 import { subscribeToIdentidad, identidadParaPDF } from '@/lib/services/identidad-service'
+import { descontarStockDeOrden, devolverStockDeOrden } from '@/lib/services/stock-service'
+import { subscribeToCatalogoProducts, type CatalogoProducto } from '@/lib/services/catalog-service'
 
 const springConfig = { type: "spring" as const, stiffness: 300, damping: 30 } as const;
 type ActiveView = string; 
@@ -186,6 +188,10 @@ export default function Dashboard() {
     const [eurRate, setEurRate] = useState<number>(0)
     const [parallelRate, setParallelRate] = useState<number>(0)
     const [assets, setAssets] = useState({ logo: "", firma: "", sello: "" })
+
+    // El catálogo dice qué producto baja de stock al venderse y cuál no.
+    const [catalogoProductos, setCatalogoProductos] = useState<CatalogoProducto[]>([])
+    useEffect(() => subscribeToCatalogoProducts(setCatalogoProductos), [])
 
     // Logo, firma y sello salen de la nube, no del navegador. Antes vivian en
     // localStorage: habia que recargarlos en cada PC y dos empleados podian
@@ -512,6 +518,19 @@ export default function Dashboard() {
 
     // --- NUEVOS INTERCEPTORES PARA ELIMINAR Y EDITAR ÓRDENES ---
     const handleDeleteOrden = async (id: string) => {
+        // Lo que salio del inventario por esta orden vuelve a entrar. Sin esto,
+        // borrar una orden dejaba el stock descontado para siempre y la unica
+        // forma de arreglarlo era editar la ficha a mano.
+        const orden = ordenes.find(o => o.id === id);
+        if (orden?.items?.length) {
+            try {
+                await devolverStockDeOrden(orden.items, catalogoProductos);
+            } catch (e) {
+                console.error('No se pudo devolver el stock de la orden borrada:', e);
+                toast.error('La orden se borró, pero el stock no se devolvió. Revísalo a mano.');
+            }
+        }
+
         await deleteOrden(id);
         // Actualizamos estado local optimista
         setOrdenes(prev => prev.filter(o => o.id !== id));
@@ -533,6 +552,37 @@ export default function Dashboard() {
 
     const handleCreateOrden = async (payload: any) => {
         const id = await createOrden(payload);
+
+        // Lo vendido sale del inventario.
+        //
+        // Va después de crear la orden y sin bloquear: si el descuento fallara,
+        // lo peor que pasa es que haya que cuadrar el stock a mano, no que se
+        // pierda la orden que el cliente ya está pagando.
+        //
+        // Solo baja lo que se cuenta por piezas. El vinil y el banner salen de
+        // rollos enteros y ese recuento se lleva a mano: descontarlos solo daría
+        // un número exacto que sería mentira.
+        try {
+            const r = await descontarStockDeOrden(payload.items ?? [], catalogoProductos);
+
+            if (r.enNegativo.length > 0) {
+                // Vender más de lo que decía haber no es un error que tapar: es
+                // la señal de que el conteo físico no cuadra.
+                toast.warning(
+                    `Stock en negativo: ${r.enNegativo.map(m => `${m.productoNombre} (${m.quedan})`).join(', ')}`,
+                    { description: 'Se vendió más de lo que decía el inventario. Hay que cuadrarlo.' }
+                );
+            } else if (r.bajoMinimo.length > 0) {
+                toast.warning(
+                    `Quedan pocos: ${r.bajoMinimo.map(m => `${m.productoNombre} (${m.quedan})`).join(', ')}`,
+                    { description: 'Por debajo del mínimo configurado.' }
+                );
+            }
+        } catch (e) {
+            console.error('No se pudo descontar el stock de la orden:', e);
+            toast.error('La orden se guardó, pero no se pudo descontar el stock.');
+        }
+
         try {
             await notificarNuevaOrden({
                 ordenNumero: payload.ordenNumero ?? '?',
