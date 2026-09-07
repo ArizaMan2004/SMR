@@ -19,7 +19,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { FileText, Printer, Eye, EyeOff } from 'lucide-react'
+import { FileText, Printer, Download, Loader2, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -53,7 +53,7 @@ const BLOQUES: { campo: keyof BloquesDocumento; texto: string }[] = [
 const HOJAS: { valor: TamanoHoja; nombre: string }[] = [
     { valor: 'carta',    nombre: 'Carta · 21,6 × 27,9 cm' },
     { valor: 'oficio',   nombre: 'Oficio · 21,6 × 35,6 cm' },
-    { valor: 'continuo', nombre: 'Continuo · sin cortes' },
+    { valor: 'continuo', nombre: 'Sin límite · una sola hoja' },
 ]
 
 export interface TasaDisponible { id: string; nombre: string; valor: number }
@@ -131,6 +131,79 @@ export function EditorPDFModal({
     }), [bloques, config, cuentas, cuentaId, tamano, tasaElegida, aplicarIva, ivaPct, logoBase64, firmaBase64, selloBase64])
 
     const contenedor = useRef<HTMLDivElement | null>(null)
+    const [guardando, setGuardando] = useState(false)
+
+    const nombreArchivo = () =>
+        [datos?.titulo, datos?.numero != null ? `#${datos.numero}` : '', datos?.clienteNombre]
+            .filter(Boolean).join(' ').replace(/[\\/:*?"<>|]/g, '').trim() || 'documento'
+
+    /**
+     * Descarga el PDF sin pasar por el dialogo de impresora.
+     *
+     * Es lo que se manda por WhatsApp: ahi el dialogo de impresora de por
+     * medio es un paso que no pinta nada.
+     *
+     * El PDF es una foto de la misma hoja que se ve en pantalla, no una
+     * segunda maquetacion. Con dos sitios dibujando el mismo papel, arreglar
+     * un margen en uno lo deja torcido en el otro.
+     *
+     * 'Sin limite' fabrica UNA pagina tan alta como el documento entero, que
+     * es justo lo que pide un presupuesto de cuarenta renglones que no tiene
+     * sentido cortar en hojas sueltas.
+     */
+    const guardarPdf = async () => {
+        const hoja = contenedor.current
+        if (!hoja) return toast.error('No hay nada que guardar')
+
+        setGuardando(true)
+        try {
+            const [{ toPng }, { default: jsPDF }] = await Promise.all([
+                import('html-to-image'),
+                import('jspdf'),
+            ])
+
+            const imagen = await toPng(hoja, { cacheBust: true, pixelRatio: 2, backgroundColor: '#ffffff' })
+            const archivo = `${nombreArchivo()}.pdf`
+
+            if (tamano === 'continuo') {
+                const anchoPt = 612 // 8,5 pulgadas a 72 pt
+                const pdf = new jsPDF({ unit: 'pt', format: [anchoPt, 100] })
+                const props = pdf.getImageProperties(imagen)
+                const altoPt = (props.height * anchoPt) / props.width
+                const largo = new jsPDF({ unit: 'pt', format: [anchoPt, altoPt] })
+                largo.addImage(imagen, 'PNG', 0, 0, anchoPt, altoPt)
+                largo.save(archivo)
+                return
+            }
+
+            const pdf = new jsPDF({ unit: 'pt', format: tamano === 'oficio' ? 'legal' : 'letter' })
+            const anchoPagina = pdf.internal.pageSize.getWidth()
+            const altoPagina = pdf.internal.pageSize.getHeight()
+            const props = pdf.getImageProperties(imagen)
+            const altoImagen = (props.height * anchoPagina) / props.width
+
+            // Se corre la misma imagen hacia arriba en cada pagina, que es como
+            // se reparte un documento largo sin volver a maquetarlo.
+            let restante = altoImagen
+            let y = 0
+            pdf.addImage(imagen, 'PNG', 0, y, anchoPagina, altoImagen)
+            restante -= altoPagina
+
+            while (restante > 0) {
+                y -= altoPagina
+                pdf.addPage()
+                pdf.addImage(imagen, 'PNG', 0, y, anchoPagina, altoImagen)
+                restante -= altoPagina
+            }
+
+            pdf.save(archivo)
+        } catch (e) {
+            console.error(e)
+            toast.error('No se pudo generar el PDF')
+        } finally {
+            setGuardando(false)
+        }
+    }
 
     /**
      * Imprime a PDF con el motor del navegador.
@@ -151,7 +224,12 @@ export function EditorPDFModal({
         if (!doc) { marco.remove(); return toast.error('El navegador no dejó preparar la impresión') }
 
         doc.open()
-        doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${datos?.titulo || 'Documento'}</title><style>${estilosDocumento(tamano)}
+        // "Sin limite" no existe en una impresora de verdad: un papel no sale
+        // infinitamente largo. Para imprimir se usa carta, que es lo comun;
+        // quien quiere el presupuesto largo de una pieza usa "Guardar PDF".
+        const hojaImpresion: TamanoHoja = tamano === 'continuo' ? 'carta' : tamano
+
+        doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${datos?.titulo || 'Documento'}</title><style>${estilosDocumento(hojaImpresion)}
             body { margin: 0; background: #fff; }
             .doc { padding: 0; width: auto; }
         </style></head><body>${html}</body></html>`)
@@ -264,9 +342,17 @@ export function EditorPDFModal({
                         className="flex-1 h-11 rounded-2xl font-black uppercase text-[10px] tracking-widest border-slate-200">
                         Cancelar
                     </Button>
-                    <Button onClick={emitir}
+                    {/* Dos destinos distintos: la impresora del taller y el
+                        archivo que se manda por WhatsApp. */}
+                    <Button variant="outline" onClick={emitir} disabled={guardando}
+                        className="flex-1 h-11 rounded-2xl font-black uppercase text-[10px] tracking-widest gap-2 border-slate-200">
+                        <Printer className="w-4 h-4" /> Imprimir
+                    </Button>
+                    <Button onClick={guardarPdf} disabled={guardando}
                         className="flex-[2] h-11 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black uppercase text-[10px] tracking-widest gap-2 shadow-lg">
-                        <Printer className="w-4 h-4" /> Generar PDF
+                        {guardando
+                            ? <><Loader2 className="w-4 h-4 animate-spin" /> Generando</>
+                            : <><Download className="w-4 h-4" /> Guardar PDF</>}
                     </Button>
                 </div>
             </DialogContent>

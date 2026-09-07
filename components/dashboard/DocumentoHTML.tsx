@@ -134,8 +134,23 @@ tr.doc-total td { background: #eef1f3; font-weight: 700; font-size: 13px; }
 }
 
 export function DocumentoHTML({ datos, op }: { datos: DatosDocumento; op: OpcionesDocumento }) {
-    const iva = op.aplicarIva ? datos.totalUSD * (op.ivaPct / 100) : 0
-    const total = datos.totalUSD + iva
+    /**
+     * El IVA sale de DENTRO del precio, no se suma encima.
+     *
+     * Los precios del taller ya son lo que se cobra: si un trabajo esta en
+     * $115, el papel tiene que seguir diciendo $115 y desglosar cuanto de eso
+     * es impuesto. Sumando 16% encima saldrian $133,40 y el cliente recibiria
+     * un documento que no cuadra con lo que le dijeron.
+     *
+     *     base = total / (1 + alicuota)     impuesto = total - base
+     *
+     * En ese orden, y no calculando el impuesto por su lado: asi
+     * base + impuesto vuelve a dar el total EXACTO. Sacando cada uno aparte,
+     * el redondeo deja un centimo suelto y el desglose impreso no suma.
+     */
+    const total = datos.totalUSD
+    const base = op.aplicarIva ? total / (1 + op.ivaPct / 100) : total
+    const iva = op.aplicarIva ? total - base : 0
 
     // Los renglones se agrupan por sub-cliente solo si de verdad hay varios:
     // un presupuesto normal no debe salir con un encabezado de grupo.
@@ -212,8 +227,8 @@ export function DocumentoHTML({ datos, op }: { datos: DatosDocumento; op: Opcion
                     {op.aplicarIva && (
                         <>
                             <tr>
-                                <td colSpan={3} style={{ textAlign: 'right' }}>Subtotal</td>
-                                <td className="num">{dinero(datos.totalUSD)}</td>
+                                <td colSpan={3} style={{ textAlign: 'right' }}>Base imponible</td>
+                                <td className="num">{dinero(base)}</td>
                             </tr>
                             <tr>
                                 <td colSpan={3} style={{ textAlign: 'right' }}>IVA {op.ivaPct}%</td>
