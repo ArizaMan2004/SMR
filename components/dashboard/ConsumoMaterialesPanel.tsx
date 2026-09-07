@@ -57,6 +57,7 @@ export function ConsumoMaterialesPanel({ datos, cargando, area, embebido }: Prop
     const consumo = datos.materiales
     const totalM2 = datos.m2Totales
     const sinClasificarEnPeriodo = datos.presupuestosSinDesglosar
+    const sinAuditar = datos.ordenesSinAuditar
     const categoriasSinArea = datos.categoriasSinArea
 
     // Mas y menos pedidos. Solo tiene sentido enfrentarlos cuando hay al menos
@@ -121,6 +122,16 @@ export function ConsumoMaterialesPanel({ datos, cargando, area, embebido }: Prop
                             : `${categoriasSinArea.length} categorías no tienen área asignada.`}
                         {' '}Mientras tanto se reparten por el tipo de venta, que es una suposición.
                         Se arregla en Insumos y Materiales → Categorías.
+                    </p>
+                </div>
+            )}
+
+            {sinAuditar > 0 && (
+                <div className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50/70 dark:bg-amber-500/5 p-3 flex items-start gap-2.5">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
+                    <p className="text-[11px] font-bold text-amber-700 dark:text-amber-500 leading-snug">
+                        {sinAuditar} {sinAuditar === 1 ? 'renglón de órdenes no dice' : 'renglones de órdenes no dicen'} qué
+                        material gastaron. Sus metros no están contados aquí.
                     </p>
                 </div>
             )}

@@ -19,7 +19,10 @@ import {
     subscribeToCatalogoProducts, subscribeToCatalogoCategories,
     type ConsumoMaterial, type VentaCatalogo, type CatalogoProducto, type CatalogoCategoria,
 } from "@/lib/services/catalog-service";
-import { consumoDesdePresupuestos, unirConsumos, itemsSinClasificar } from "@/lib/services/subitems-service";
+import {
+    consumoDesdePresupuestos, consumoDesdeOrdenes, unirConsumos,
+    itemsSinClasificar, renglonesSinAuditar,
+} from "@/lib/services/subitems-service";
 import { loadBudgetsFromFirestore, type DbBudgetEntry } from "@/lib/firebase/firestore-budget-service";
 
 export type AreaVista = "IMPRESION" | "CORTE";
@@ -63,11 +66,13 @@ export interface ConsumoDelPeriodo {
     unidadesTotales: number;
     /** Presupuestos del periodo con algún renglón sin desglosar. */
     presupuestosSinDesglosar: number;
+    /** Renglones de órdenes del periodo que aún no dicen qué material gastaron. */
+    ordenesSinAuditar: number;
     /** Categorías en uso a las que no se les ha dicho el área todavía. */
     categoriasSinArea: string[];
 }
 
-export function useConsumoMateriales(ventasCatalogo: any[] = []) {
+export function useConsumoMateriales(ventasCatalogo: any[] = [], ordenes: any[] = []) {
     const [budgets, setBudgets] = useState<DbBudgetEntry[]>([]);
     const [productos, setProductos] = useState<CatalogoProducto[]>([]);
     const [categorias, setCategorias] = useState<CatalogoCategoria[]>([]);
@@ -90,15 +95,25 @@ export function useConsumoMateriales(ventasCatalogo: any[] = []) {
         [ventasCatalogo]
     );
 
+    const ordenesLista = useMemo(() => ordenes || [], [ordenes]);
+
     const consumoDe = useCallback((area: AreaVista, inicio: Date, fin: Date): ConsumoDelPeriodo => {
         const presupuestos = budgets.filter(b => enRango(b.dateCreated, inicio, fin));
         const delMostrador = ventas.filter(v => enRango(v?.fecha, inicio, fin));
+        // Las órdenes ya facturadas son la tercera fuente: es donde está el
+        // grueso de lo que sale del rollo cada mes.
+        const delTaller = ordenesLista.filter(o => enRango(o?.fecha, inicio, fin));
 
         const materiales = unirConsumos(
             consumoPorMaterial(delMostrador),
-            consumoDesdePresupuestos(presupuestos)
+            consumoDesdePresupuestos(presupuestos),
+            consumoDesdeOrdenes(delTaller)
         ).filter(m => {
-            const producto = productos.find(p => p.id === m.productoId);
+            // Los materiales auditados en órdenes pueden no estar dados de alta
+            // en el catálogo: su clave es "nombre:Banner". Para esos se busca el
+            // producto por nombre antes de rendirse.
+            const producto = productos.find(p => p.id === m.productoId)
+                || productos.find(p => p.nombre.toLowerCase() === m.productoNombre.toLowerCase());
             return materialEsDelArea(areaDeProducto(producto, categorias), area);
         });
 
@@ -111,9 +126,10 @@ export function useConsumoMateriales(ventasCatalogo: any[] = []) {
             m2Totales: materiales.reduce((t, m) => t + m.m2Totales, 0),
             unidadesTotales: materiales.reduce((t, m) => t + m.unidadesTotales, 0),
             presupuestosSinDesglosar: presupuestos.filter(b => itemsSinClasificar(b) > 0).length,
+            ordenesSinAuditar: renglonesSinAuditar(delTaller),
             categoriasSinArea: categorias.filter(c => usadas.has(c.id) && !c.area).map(c => c.nombre),
         };
-    }, [budgets, ventas, productos, categorias]);
+    }, [budgets, ventas, ordenesLista, productos, categorias]);
 
     return { consumoDe, cargando };
 }

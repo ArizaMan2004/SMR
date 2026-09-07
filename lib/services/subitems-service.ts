@@ -171,3 +171,65 @@ export const unirConsumos = (...listas: ConsumoMaterial[][]): ConsumoMaterial[] 
     salida.forEach(m => m.porServicio.sort((a, b) => (b.m2 - a.m2) || (b.unidades - a.unidades)));
     return salida.sort((a, b) => (b.m2Totales - a.m2Totales) || (b.ingresosUSD - a.ingresosUSD));
 };
+
+/**
+ * Consumo declarado en las ORDENES ya facturadas, en el mismo formato que las
+ * otras dos fuentes.
+ *
+ * Solo cuenta los renglones auditados. Un renglon sin `materialAuditado` no
+ * suma nada: preferimos un total que se queda corto y lo dice, a uno inflado
+ * con suposiciones. Cuantos faltan lo dice `renglonesSinAuditar`.
+ */
+export const consumoDesdeOrdenes = (ordenes: { items?: any[] }[]): ConsumoMaterial[] => {
+    const mapa = new Map<string, ConsumoMaterial>();
+
+    ordenes.forEach(orden => {
+        (orden?.items || []).forEach((item: any) => {
+            const aud = item?.materialAuditado;
+            if (!aud?.nombre) return;
+
+            // Sin id de catalogo se agrupa por nombre: el material puede no
+            // estar dado de alta todavia y aun asi hay que contarlo.
+            const clave = aud.productoId || `nombre:${aud.nombre}`;
+
+            if (!mapa.has(clave)) {
+                mapa.set(clave, {
+                    productoId: clave,
+                    productoNombre: aud.nombre,
+                    m2Totales: 0,
+                    unidadesTotales: 0,
+                    ingresosUSD: 0,
+                    porServicio: [],
+                });
+            }
+
+            const material = mapa.get(clave)!;
+            const m2 = Number(aud.m2) || 0;
+            const uds = Number(item.cantidad) || 0;
+
+            material.m2Totales += m2;
+            material.unidadesTotales += uds;
+            material.ingresosUSD += Number(item.subtotal) || 0;
+
+            // El laminado se sigue como servicio aparte del material base: son
+            // los mismos metros de vinil, pero gastan ademas rollo de laminado.
+            const nombreServicio = aud.laminado ? "Con laminado" : "Impresion";
+            let servicio = material.porServicio.find(x => x.nombre === nombreServicio);
+            if (!servicio) {
+                servicio = { varianteId: nombreServicio, nombre: nombreServicio, m2: 0, unidades: 0, ingresosUSD: 0 };
+                material.porServicio.push(servicio);
+            }
+            servicio.m2 += m2;
+            servicio.unidades += uds;
+            servicio.ingresosUSD += Number(item.subtotal) || 0;
+        });
+    });
+
+    const salida = Array.from(mapa.values());
+    salida.forEach(m => m.porServicio.sort((a, b) => (b.m2 - a.m2) || (b.unidades - a.unidades)));
+    return salida.sort((a, b) => (b.m2Totales - a.m2Totales) || (b.ingresosUSD - a.ingresosUSD));
+};
+
+/** Renglones de estas ordenes que todavia no dicen que material gastaron. */
+export const renglonesSinAuditar = (ordenes: { items?: any[] }[]): number =>
+    ordenes.reduce((t, o) => t + (o?.items || []).filter((i: any) => !i?.materialAuditado?.nombre).length, 0);

@@ -6,7 +6,7 @@ import {
     FileText, Wallet, ArrowUpRight, ArrowDownLeft,
     Eye, Loader2, ImageIcon, ExternalLink,
     Lock, Unlock, Trash2, Pencil, AlertTriangle, Search, RefreshCw
-} from "lucide-react";
+, ClipboardCheck } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogTitle, DialogHeader, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCurrency } from "@/lib/utils/order-utils";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils"
+import { AuditoriaMaterialesPanel } from '@/components/dashboard/AuditoriaMaterialesPanel';
 import { collection, getDocs, query, orderBy, limit, where, Timestamp, doc, getDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { toast } from "sonner";
@@ -546,7 +547,15 @@ export function PaymentAuditView(_props: PaymentAuditViewProps) {
                         <TabsTrigger value="egresos" className="flex-1 rounded-[1.2rem] h-full text-[10px] sm:text-xs font-black uppercase tracking-widest data-[state=active]:bg-rose-50 dark:data-[state=active]:bg-rose-500/10 data-[state=active]:text-rose-600 transition-all gap-1.5 sm:gap-2">
                             <FileText size={15} className="sm:w-[18px] sm:h-[18px]" /> Salidas
                         </TabsTrigger>
+                        <TabsTrigger value="materiales" className="flex-1 rounded-[1.2rem] h-full text-[10px] sm:text-xs font-black uppercase tracking-widest data-[state=active]:bg-indigo-50 dark:data-[state=active]:bg-indigo-500/10 data-[state=active]:text-indigo-600 transition-all gap-1.5 sm:gap-2">
+                            <ClipboardCheck size={15} className="sm:w-[18px] sm:h-[18px]" /> Materiales
+                        </TabsTrigger>
                     </TabsList>
+
+                    {/* ──────────────── MATERIALES ──────────────── */}
+                    <TabsContent value="materiales" className="mt-0">
+                        <AuditoriaMaterialesPanel />
+                    </TabsContent>
 
                     {/* ──────────────── INGRESOS ──────────────── */}
                     <TabsContent value="ingresos" className="mt-0 space-y-3">

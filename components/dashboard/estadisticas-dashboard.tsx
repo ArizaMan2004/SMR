@@ -240,7 +240,7 @@ export function EstadisticasDashboard({
    * desgloses de las dos areas. Antes cada uno contaba por su cuenta buscando
    * palabras en el nombre de los items, y ninguno coincidia con los otros.
    */
-  const materiales = useConsumoMateriales(ventasCatalogo);
+  const materiales = useConsumoMateriales(ventasCatalogo, localOrdenes);
 
   const fechas = useMemo(() => {
       const year = fechaReferencia.getFullYear();
@@ -1221,9 +1221,12 @@ export function EstadisticasDashboard({
                             {variacionM2Real >= 0 ? <TrendingUp size={14}/> : <TrendingDown size={14}/>}
                             <span className="text-xs font-bold">{Math.abs(variacionM2Real).toFixed(1)}% vs mes ant.</span>
                         </div>
-                        {consumoImpresion.presupuestosSinDesglosar > 0 && (
+                        {(consumoImpresion.ordenesSinAuditar > 0 || consumoImpresion.presupuestosSinDesglosar > 0) && (
                             <p className="text-[10px] font-bold opacity-70 mt-2 leading-snug">
-                                Faltan {consumoImpresion.presupuestosSinDesglosar} presupuestos por desglosar: el volumen real es mayor.
+                                Falta por auditar: {[
+                                    consumoImpresion.ordenesSinAuditar > 0 && `${consumoImpresion.ordenesSinAuditar} renglones de órdenes`,
+                                    consumoImpresion.presupuestosSinDesglosar > 0 && `${consumoImpresion.presupuestosSinDesglosar} presupuestos`,
+                                ].filter(Boolean).join(' y ')}. El volumen real es mayor.
                             </p>
                         )}
                     </div>

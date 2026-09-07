@@ -74,6 +74,16 @@ if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
       const snap = await getDocsFromCache(collection(db, coleccion))
       return snap.docs.map(d => ({ __id: d.id, ...d.data() }))
     },
+    /**
+     * El módulo de Firestore del propio proyecto.
+     *
+     * Hace falta para las migraciones puntuales que se corren desde la consola
+     * (rellenar un campo nuevo en el histórico, por ejemplo). Cargar el SDK
+     * desde un CDN no vale: sería otra instancia y rechaza esta `db`.
+     */
+    async firestore() {
+      return import('firebase/firestore')
+    },
   }
 }
 

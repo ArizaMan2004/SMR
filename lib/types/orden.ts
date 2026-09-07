@@ -106,6 +106,36 @@ export interface ItemOrden {
     precioUnitario: number; 
     subtotal: number;
 
+    /**
+     * MATERIAL AUDITADO.
+     *
+     * Que material se gasto de verdad en este renglon y cuantos metros.
+     *
+     * Hace falta porque los campos de arriba no sirven para contar: el
+     * formulario los rellena con un valor por defecto y casi nadie lo cambia.
+     * En septiembre de 2026, los 94 renglones del mes tenian todos
+     * materialImpresion = "Vinil Brillante" y materialDeCorte = "Acrilico",
+     * cuando la mitad eran banner. El balance contaba banner como vinil.
+     *
+     * Se rellena auditando: leyendo la descripcion y las medidas del propio
+     * renglon. Lo que no se puede afirmar se deja vacio y se revisa a mano;
+     * un dato inventado es peor que ninguno.
+     */
+    materialAuditado?: {
+        /** Nombre del material tal cual sale en el catalogo. */
+        nombre: string;
+        /** Id del catalogo, si el material esta dado de alta. */
+        productoId?: string;
+        /** Metros cuadrados reales. Cero para lo que se cobra por tiempo. */
+        m2: number;
+        /** Lleva laminado ademas del material base. */
+        laminado?: boolean;
+        /** Cuando y como se audito, para poder deshacerlo o repetirlo. */
+        auditadoEn?: string;
+        /** 'auto' = deducido de la descripcion; 'manual' = puesto a mano. */
+        origen?: 'auto' | 'manual';
+    };
+
     // Referencias
     imagenes?: string[]; 
     pruebasImagenes?: string[];

@@ -1,0 +1,238 @@
+// @/components/dashboard/AuditoriaMaterialesPanel.tsx
+//
+// Ponerle a cada renglón de una orden el material que realmente gastó.
+//
+// Primero simula y enseña lo que va a hacer; solo escribe cuando se pulsa el
+// botón. Los renglones cuya descripción no nombra ningún material quedan
+// listados aparte para revisarlos a mano: es preferible una lista de
+// pendientes a un balance que parece completo y no lo está.
+
+"use client"
+
+import React, { useCallback, useEffect, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+
+import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import {
+    ClipboardCheck, Loader2, Ruler, AlertTriangle, Check,
+    ChevronDown, ChevronLeft, ChevronRight, ShieldAlert,
+} from 'lucide-react'
+import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
+
+import { useAuth } from '@/lib/auth-context'
+import { esAdmin } from '@/lib/roles'
+import { planificarAuditoria, aplicarAuditoria, type PlanAuditoria } from '@/lib/services/auditoria-materiales'
+import { olvidarPresupuestosEnCache } from '@/lib/hooks/use-consumo-materiales'
+
+const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+
+const n2 = (v: number) => v.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+export function AuditoriaMaterialesPanel() {
+    const { userData } = useAuth()
+    const puedeAplicar = esAdmin(userData?.rol)
+
+    const [ref, setRef] = useState(() => new Date())
+    const [plan, setPlan] = useState<PlanAuditoria | null>(null)
+    const [calculando, setCalculando] = useState(true)
+    const [aplicando, setAplicando] = useState(false)
+    const [verManuales, setVerManuales] = useState(false)
+
+    const calcular = useCallback(async (fecha: Date) => {
+        setCalculando(true)
+        try {
+            setPlan(await planificarAuditoria(fecha.getFullYear(), fecha.getMonth()))
+        } catch (e) {
+            console.error(e)
+            toast.error('No se pudo leer las órdenes del mes')
+            setPlan(null)
+        } finally {
+            setCalculando(false)
+        }
+    }, [])
+
+    useEffect(() => { calcular(ref) }, [ref, calcular])
+
+    const mover = (n: number) => setRef(f => new Date(f.getFullYear(), f.getMonth() + n, 1))
+
+    const aplicar = async () => {
+        if (!plan) return
+        const pendientes = plan.automaticos.filter(r => !r.yaAuditado).length
+        if (!pendientes) return toast.info('No hay nada nuevo que auditar en este mes')
+
+        const ok = window.confirm(
+            `Se va a escribir el material en ${pendientes} renglones de ${plan.ordenes} órdenes.\n\n` +
+            `No se toca ningún precio ni ningún otro dato.\n\n¿Continuar?`
+        )
+        if (!ok) return
+
+        setAplicando(true)
+        try {
+            const n = await aplicarAuditoria(plan)
+            olvidarPresupuestosEnCache()
+            toast.success(`${n} órdenes auditadas`)
+            await calcular(ref)
+        } catch (e) {
+            console.error(e)
+            toast.error('No se pudo guardar la auditoría')
+        } finally {
+            setAplicando(false)
+        }
+    }
+
+    const pendientes = plan ? plan.automaticos.filter(r => !r.yaAuditado).length : 0
+    const yaHechos = plan ? plan.automaticos.filter(r => r.yaAuditado).length : 0
+
+    return (
+        <Card className="rounded-[2rem] sm:rounded-[2.5rem] border-none shadow-xl bg-white dark:bg-[#1c1c1e] p-5 sm:p-7 space-y-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 flex items-center justify-center shrink-0">
+                        <ClipboardCheck className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                        <h3 className="text-lg sm:text-xl font-black uppercase italic tracking-tight">Auditoría de Materiales</h3>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                            Qué material gastó de verdad cada orden
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-1 rounded-2xl bg-slate-100 dark:bg-white/5 p-1">
+                    <Button variant="ghost" size="icon" onClick={() => mover(-1)} className="h-8 w-8 rounded-xl">
+                        <ChevronLeft className="w-4 h-4" />
+                    </Button>
+                    <span className="px-2 text-[11px] font-black uppercase tracking-widest tabular-nums">
+                        {MESES[ref.getMonth()]} {ref.getFullYear()}
+                    </span>
+                    <Button variant="ghost" size="icon" onClick={() => mover(1)} className="h-8 w-8 rounded-xl">
+                        <ChevronRight className="w-4 h-4" />
+                    </Button>
+                </div>
+            </div>
+
+            <p className="text-[11px] font-bold text-slate-400 leading-snug max-w-2xl">
+                Los campos de material que trae el formulario vienen con un valor por defecto que
+                casi nadie cambia, así que no sirven para contar. Esto lee la descripción y las
+                medidas de cada renglón y escribe el material real. No toca precios.
+            </p>
+
+            {calculando ? (
+                <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div>
+            ) : !plan || plan.renglones === 0 ? (
+                <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 text-center py-10">
+                    No hay órdenes en {MESES[ref.getMonth()]}
+                </p>
+            ) : (
+                <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {[
+                            { v: plan.ordenes, t: 'Órdenes' },
+                            { v: plan.renglones, t: 'Renglones' },
+                            { v: n2(plan.m2Totales), t: 'm² a registrar', destacado: true },
+                            { v: plan.manuales.length, t: 'A revisar a mano', alerta: plan.manuales.length > 0 },
+                        ].map(c => (
+                            <div key={c.t} className="rounded-2xl bg-slate-50 dark:bg-white/5 p-3.5">
+                                <p className={cn(
+                                    "text-xl font-black tracking-tighter tabular-nums leading-none",
+                                    c.destacado && "text-indigo-600",
+                                    c.alerta && "text-amber-600"
+                                )}>{c.v}</p>
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1.5">{c.t}</p>
+                            </div>
+                        ))}
+                    </div>
+
+                    {plan.porMaterial.length > 0 && (
+                        <div className="rounded-2xl border border-slate-100 dark:border-white/5 divide-y divide-slate-100 dark:divide-white/5">
+                            {plan.porMaterial.map(m => (
+                                <div key={m.material} className="flex items-center gap-3 px-4 py-2.5">
+                                    <Ruler className="w-3.5 h-3.5 shrink-0 text-slate-300" />
+                                    <span className="flex-1 min-w-0 truncate text-xs font-black">{m.material}</span>
+                                    <span className="text-[10px] font-bold text-slate-400 tabular-nums shrink-0">
+                                        {m.renglones} {m.renglones === 1 ? 'renglón' : 'renglones'}
+                                    </span>
+                                    <span className="text-sm font-black tabular-nums shrink-0 w-24 text-right">
+                                        {m.m2 > 0 ? `${n2(m.m2)} m²` : <span className="text-slate-300">—</span>}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {yaHechos > 0 && (
+                        <div className="flex items-center gap-2 text-[11px] font-bold text-emerald-600">
+                            <Check className="w-3.5 h-3.5 shrink-0" />
+                            {yaHechos} {yaHechos === 1 ? 'renglón ya auditado' : 'renglones ya auditados'}; se dejan como están.
+                        </div>
+                    )}
+
+                    {plan.manuales.length > 0 && (
+                        <div className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50/60 dark:bg-amber-500/5 overflow-hidden">
+                            <button
+                                type="button"
+                                onClick={() => setVerManuales(v => !v)}
+                                className="w-full flex items-center gap-2.5 p-3.5 text-left"
+                            >
+                                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500" />
+                                <span className="flex-1 min-w-0 text-[11px] font-bold text-amber-700 dark:text-amber-500 leading-snug">
+                                    {plan.manuales.length} renglones no dicen de qué material son
+                                    («corte», «negro», «separadores»). Hay que ponérselo a mano.
+                                </span>
+                                <ChevronDown className={cn("w-4 h-4 shrink-0 text-amber-500 transition-transform", verManuales && "rotate-180")} />
+                            </button>
+
+                            <AnimatePresence initial={false}>
+                                {verManuales && (
+                                    <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        className="overflow-hidden"
+                                    >
+                                        <div className="px-3.5 pb-3.5 max-h-64 overflow-y-auto custom-scrollbar space-y-1">
+                                            {plan.manuales.map((r, i) => (
+                                                <div key={`${r.ordenId}-${r.indice}-${i}`} className="flex items-center gap-2 text-[11px] bg-white/70 dark:bg-black/20 rounded-lg px-2.5 py-1.5">
+                                                    <span className="font-black tabular-nums shrink-0 w-12">#{r.ordenNumero}</span>
+                                                    <span className="flex-1 min-w-0 truncate font-bold text-slate-600 dark:text-slate-300">{r.descripcion}</span>
+                                                    {r.tiempo && <span className="shrink-0 text-slate-400 tabular-nums">{r.tiempo}</span>}
+                                                    <span className="shrink-0 tabular-nums text-slate-500 w-14 text-right">${n2(r.montoUSD)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
+                    )}
+
+                    {!puedeAplicar ? (
+                        <div className="flex items-start gap-3 bg-slate-50 dark:bg-white/5 rounded-2xl p-4">
+                            <ShieldAlert className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                            <p className="text-[11px] font-bold text-slate-400 leading-snug">
+                                Solo el administrador puede aplicar la auditoría. Cambia los datos
+                                de las órdenes de todo el mes.
+                            </p>
+                        </div>
+                    ) : (
+                        <Button
+                            onClick={aplicar}
+                            disabled={aplicando || pendientes === 0}
+                            className="w-full h-12 rounded-2xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-black uppercase tracking-widest text-[11px] gap-2 shadow-lg"
+                        >
+                            {aplicando
+                                ? <><Loader2 className="w-4 h-4 animate-spin" /> Auditando</>
+                                : pendientes === 0
+                                    ? <><Check className="w-4 h-4" /> Mes ya auditado</>
+                                    : <><ClipboardCheck className="w-4 h-4" /> Auditar {pendientes} renglones</>}
+                        </Button>
+                    )}
+                </>
+            )}
+        </Card>
+    )
+}
