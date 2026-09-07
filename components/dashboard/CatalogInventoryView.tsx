@@ -110,7 +110,15 @@ const PROD_DEFAULT: CatalogoProducto = {
     variantes: [], stockSimple: 0, stockMinimo: 0, rollosEnStock: 0, activo: true
 }
 
-const CAT_DEFAULT: CatalogoCategoria = { nombre: '', color: 'blue', descripcion: '', orden: 0 }
+const CAT_DEFAULT: CatalogoCategoria = { nombre: '', color: 'blue', descripcion: '', orden: 0, area: 'IMPRESION' }
+
+// Con esto el balance sabe si los metros de un material son de impresión o de
+// corte sin tener que adivinarlo por el nombre.
+const AREAS_TALLER = [
+    { valor: 'IMPRESION', texto: 'Impresión' },
+    { valor: 'CORTE', texto: 'Corte láser' },
+    { valor: 'AMBAS', texto: 'Ambas' },
+] as const
 
 // ============================================================
 // COMPONENTE PRINCIPAL
@@ -1552,6 +1560,33 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                     onChange={e => setCatForm(p => ({ ...p, descripcion: e.target.value }))}
                                     className="h-10 rounded-2xl bg-white dark:bg-black/20 border-none text-sm" />
                             </div>
+                            <div>
+                                <p className="text-[8px] font-black uppercase text-slate-400 mb-2">Área del taller</p>
+                                <div className="flex gap-1.5 p-1 rounded-xl bg-white dark:bg-black/20">
+                                    {AREAS_TALLER.map(a => {
+                                        const activo = (catForm.area || 'IMPRESION') === a.valor
+                                        return (
+                                            <button
+                                                key={a.valor}
+                                                type="button"
+                                                onClick={() => setCatForm(p => ({ ...p, area: a.valor }))}
+                                                className={cn(
+                                                    'flex-1 h-8 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all',
+                                                    activo
+                                                        ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
+                                                        : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                                                )}
+                                            >
+                                                {a.texto}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                                <p className="text-[8px] font-bold text-slate-400 mt-1.5 leading-snug">
+                                    Decide en qué balance se cuentan los metros de estos materiales.
+                                </p>
+                            </div>
+
                             <div>
                                 <p className="text-[8px] font-black uppercase text-slate-400 mb-2">Color</p>
                                 <div className="flex flex-wrap gap-2">

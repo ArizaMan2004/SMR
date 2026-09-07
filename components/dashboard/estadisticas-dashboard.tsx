@@ -1196,40 +1196,27 @@ export function EstadisticasDashboard({
                     whileHover={hoverEffect}
                     className="bg-white dark:bg-[#1c1c1e] p-4 sm:p-6 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-black/5 flex flex-col"
                 >
-                    <div className="flex items-center gap-3 mb-4">
+                    <div className="flex items-center gap-3 mb-1">
                         <div className="p-2 bg-slate-100 dark:bg-white/5 rounded-xl"><ImageIcon size={20} className="text-slate-500"/></div>
                         <span className="text-xs font-black uppercase text-slate-400 tracking-widest">Desglose Materiales</span>
                     </div>
+                    {/* Este desglose salia de adivinar el material por el nombre del
+                        item ("si dice vinil, es vinil"), asi que un nombre escrito de
+                        otra forma se perdia y los metros no cuadraban. Ahora sale del
+                        catalogo y del desglose interno de los presupuestos: datos, no
+                        suposiciones. Por eso ya no depende del filtro de pago, que es
+                        un estado de la orden y no del material. */}
+                    <p className="text-[9px] font-bold text-slate-400 mb-4 ml-1">
+                        Catálogo + presupuestos desglosados
+                    </p>
 
-                    <Tabs value={filtroPagoMateriales} onValueChange={(v) => setFiltroPagoMateriales(v as any)} className="w-full mb-3">
-                        <TabsList className="w-full bg-slate-100 dark:bg-white/5 p-1 rounded-xl flex h-auto">
-                            <TabsTrigger value="TODOS" className="flex-1 text-[9px] uppercase font-black py-1.5">Todos</TabsTrigger>
-                            <TabsTrigger value="PAGADO" className="flex-1 text-[9px] uppercase font-black py-1.5 text-emerald-600 data-[state=active]:bg-emerald-100">Pagado</TabsTrigger>
-                            <TabsTrigger value="ABONADO" className="flex-1 text-[9px] uppercase font-black py-1.5 text-orange-600 data-[state=active]:bg-orange-100">Abono</TabsTrigger>
-                            <TabsTrigger value="SIN_PAGAR" className="flex-1 text-[9px] uppercase font-black py-1.5 text-rose-600 data-[state=active]:bg-rose-100">Sin Pago</TabsTrigger>
-                        </TabsList>
-                    </Tabs>
-                    
-                    <div className="grid grid-cols-2 gap-3 overflow-y-auto max-h-[160px] custom-scrollbar pr-1">
-                        {productionMetrics.actual.breakdownImpresion.map((mat: any, idx: number) => (
-                            <div 
-                                key={idx} 
-                                onClick={() => setSelectedMaterialDetail(mat)}
-                                className="p-3 rounded-2xl bg-slate-50 dark:bg-black/20 flex flex-col justify-between cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-                            >
-                                <p className="text-[9px] font-black text-slate-400 uppercase truncate" title={mat.label}>{mat.label}</p>
-                                <div>
-                                    <p className="text-lg font-black text-slate-800 dark:text-white leading-none mt-1">
-                                        {mat.m2 > 0 ? mat.m2.toFixed(2) : mat.count} <span className="text-[9px] opacity-50 font-bold">{mat.m2 > 0 ? 'm²' : 'unids'}</span>
-                                    </p>
-                                    <p className="text-xs font-bold text-emerald-600 mt-0.5">${mat.revenue.toFixed(0)}</p>
-                                </div>
-                            </div>
-                        ))}
-                        {productionMetrics.actual.breakdownImpresion.length === 0 && (
-                            <div className="col-span-2 text-center text-xs text-slate-400 py-4">No hay datos de impresión con este filtro</div>
-                        )}
-                    </div>
+                    <ConsumoMaterialesPanel
+                        ventasCatalogo={ventasCatalogo}
+                        inicio={fechas.inicio}
+                        fin={fechas.fin}
+                        area="IMPRESION"
+                        embebido
+                    />
                 </motion.div>
             </motion.div>
         )}
@@ -1292,23 +1279,18 @@ export function EstadisticasDashboard({
                         </TabsList>
 
                         <TabsContent value="materiales" className="flex-1 mt-0">
-                            <div className="grid grid-cols-2 gap-3 overflow-y-auto max-h-[140px] custom-scrollbar pr-1">
-                                {productionMetrics.actual.breakdownCorteMateriales.map((mat: any, idx: number) => (
-                                    <div 
-                                        key={idx} 
-                                        onClick={() => setSelectedMaterialDetail(mat)}
-                                        className="p-3 rounded-2xl bg-slate-50 dark:bg-black/20 flex flex-col justify-between cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-                                    >
-                                        <p className="text-[9px] font-black text-slate-400 uppercase truncate" title={mat.label}>{mat.label}</p>
-                                        <div>
-                                            <p className="text-lg font-black text-slate-800 dark:text-white leading-none mt-1">{mat.count} <span className="text-[9px] opacity-50 font-bold">unids</span></p>
-                                        </div>
-                                    </div>
-                                ))}
-                                {productionMetrics.actual.breakdownCorteMateriales.length === 0 && (
-                                    <div className="col-span-2 text-center text-xs text-slate-400 py-4">No hay datos de materiales con este filtro</div>
-                                )}
-                            </div>
+                            {/* Antes esta lista se armaba adivinando el material por
+                                el nombre del item. Ahora sale del catalogo y del
+                                desglose interno de los presupuestos. Los colores, en
+                                cambio, siguen deduciendose del texto: no hay de donde
+                                sacarlos todavia. */}
+                            <ConsumoMaterialesPanel
+                                ventasCatalogo={ventasCatalogo}
+                                inicio={fechas.inicio}
+                                fin={fechas.fin}
+                                area="CORTE"
+                                embebido
+                            />
                         </TabsContent>
 
                         <TabsContent value="colores" className="flex-1 mt-0">
@@ -1338,17 +1320,6 @@ export function EstadisticasDashboard({
             </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Consumo real de material del periodo. Va fuera de los bloques de
-          IMPRESION y CORTE porque suma las dos areas: el rollo es el mismo
-          venda quien venda. */}
-      <motion.div variants={itemVariants}>
-        <ConsumoMaterialesPanel
-            ventasCatalogo={ventasCatalogo}
-            inicio={fechas.inicio}
-            fin={fechas.fin}
-        />
-      </motion.div>
 
       <motion.div id="financial-kpis" variants={containerVariants} className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
         <StatCard

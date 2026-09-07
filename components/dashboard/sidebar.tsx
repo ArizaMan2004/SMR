@@ -84,7 +84,20 @@ export default function Sidebar({
 
     return (
         <>
-            {/* BACKDROP (solo móvil). z-[55] para quedar por encima del header (z-50). */}
+            {/* ORDEN DE CAPAS DE LA APP
+                ----------------------------------------------------------
+                  z-30  header pegajoso del dashboard
+                  z-40  este menú y su fondo oscuro (por encima del header)
+                  z-50  diálogos, hojas y desplegables de Radix
+                  z-9999 la campana de notificaciones
+                ----------------------------------------------------------
+                El menú estaba en z-[60], por encima de todo, y se montaba
+                encima de los modales: con el asistente de nueva orden abierto,
+                el menú quedaba dibujado sobre el formulario. Sube por encima
+                del header pero se queda por debajo de cualquier diálogo, que
+                es lo que el usuario tiene delante en ese momento.
+
+                BACKDROP (solo móvil). */}
             <AnimatePresence>
                 {isMobileOpen && (
                     <motion.div
@@ -92,18 +105,18 @@ export default function Sidebar({
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         transition={{ duration: 0.2 }}
-                        className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[55] lg:hidden"
+                        className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-40 lg:hidden"
                         onClick={() => setIsMobileOpen(false)}
                     />
                 )}
             </AnimatePresence>
 
-            {/* DRAWER. z-[60] para que el panel (y su botón de cerrar) queden SIEMPRE
-                por encima del header sticky del dashboard en móvil. */}
+            {/* DRAWER. Mismo nivel que su fondo oscuro; va después en el DOM,
+                así que queda dibujado encima de él. */}
             <aside
                 aria-label="Menú principal"
                 className={cn(
-                    "fixed inset-y-0 left-0 z-[60] flex flex-col w-72 max-w-[85vw] bg-white dark:bg-slate-950 border-r border-slate-200/60 dark:border-slate-800/60 transition-transform duration-300 ease-out shadow-2xl lg:shadow-none",
+                    "fixed inset-y-0 left-0 z-40 flex flex-col w-72 max-w-[85vw] bg-white dark:bg-slate-950 border-r border-slate-200/60 dark:border-slate-800/60 transition-transform duration-300 ease-out shadow-2xl lg:shadow-none",
                     isMobileOpen ? 'translate-x-0' : '-translate-x-full'
                 )}
             >

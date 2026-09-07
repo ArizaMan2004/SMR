@@ -32,7 +32,11 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-import { consumoPorMaterial, type ConsumoMaterial, type VentaCatalogo } from '@/lib/services/catalog-service'
+import {
+    consumoPorMaterial, areaDeProducto, materialEsDelArea,
+    subscribeToCatalogoProducts, subscribeToCatalogoCategories,
+    type ConsumoMaterial, type VentaCatalogo, type CatalogoProducto, type CatalogoCategoria,
+} from '@/lib/services/catalog-service'
 import { consumoDesdePresupuestos, unirConsumos, itemsSinClasificar } from '@/lib/services/subitems-service'
 import { loadBudgetsFromFirestore, type DbBudgetEntry } from '@/lib/firebase/firestore-budget-service'
 
@@ -41,6 +45,14 @@ interface Props {
     /** Inicio y fin del periodo que se está mirando en el panel. */
     inicio: Date
     fin: Date
+    /** El panel vive dentro de una vista de área y solo enseña la suya. */
+    area: 'IMPRESION' | 'CORTE'
+    /**
+     * Sin tarjeta ni cabecera propias, para meterlo dentro de un panel que ya
+     * las tiene. Se usa así en Estadísticas: el desglose de materiales que ya
+     * existía se queda donde está y solo cambia de dónde saca los números.
+     */
+    embebido?: boolean
 }
 
 const enRango = (valor: any, inicio: Date, fin: Date): boolean => {
@@ -54,7 +66,15 @@ const enRango = (valor: any, inicio: Date, fin: Date): boolean => {
 const formatoM2 = (n: number) =>
     n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-export function ConsumoMaterialesPanel({ ventasCatalogo = [], inicio, fin }: Props) {
+export function ConsumoMaterialesPanel({ ventasCatalogo = [], inicio, fin, area, embebido }: Props) {
+    // El catálogo dice a qué área pertenece cada material. Antes esto se
+    // adivinaba por el nombre del ítem y bastaba con que alguien escribiera
+    // "vinill" para que los metros se fueran al balance equivocado.
+    const [productos, setProductos] = useState<CatalogoProducto[]>([])
+    const [categorias, setCategorias] = useState<CatalogoCategoria[]>([])
+    useEffect(() => subscribeToCatalogoProducts(setProductos), [])
+    useEffect(() => subscribeToCatalogoCategories(setCategorias), [])
+
     const [budgets, setBudgets] = useState<DbBudgetEntry[]>([])
     const [cargando, setCargando] = useState(true)
     const [abierto, setAbierto] = useState<string | null>(null)
@@ -78,11 +98,25 @@ export function ConsumoMaterialesPanel({ ventasCatalogo = [], inicio, fin }: Pro
 
     const consumo: ConsumoMaterial[] = useMemo(() => {
         const ventas = (ventasCatalogo as VentaCatalogo[]).filter(v => enRango(v?.fecha, inicio, fin))
-        return unirConsumos(
+        const todo = unirConsumos(
             consumoPorMaterial(ventas),
             consumoDesdePresupuestos(presupuestosDelPeriodo)
         )
-    }, [ventasCatalogo, presupuestosDelPeriodo, inicio, fin])
+        return todo.filter(m => {
+            const producto = productos.find(p => p.id === m.productoId)
+            return materialEsDelArea(areaDeProducto(producto, categorias), area)
+        })
+    }, [ventasCatalogo, presupuestosDelPeriodo, inicio, fin, productos, categorias, area])
+
+    // Categorías con material en uso a las que todavía no se les ha dicho el
+    // área. Mientras estén así el reparto lo decide el tipo de venta, que es
+    // una suposición: mejor decirlo que dejar que el numero parezca firme.
+    const categoriasSinArea = useMemo(() => {
+        const usadas = new Set(
+            consumo.map(m => productos.find(p => p.id === m.productoId)?.categoriaId).filter(Boolean)
+        )
+        return categorias.filter(c => usadas.has(c.id) && !c.area).map(c => c.nombre)
+    }, [consumo, productos, categorias])
 
     // Cuántos presupuestos del periodo siguen sin decir qué material gastaron.
     // Sin esto, un total bajo se lee como poca produccion en vez de como un
@@ -105,30 +139,63 @@ export function ConsumoMaterialesPanel({ ventasCatalogo = [], inicio, fin }: Pro
         }
     }, [consumo])
 
-    return (
-        <Card className="rounded-[2rem] sm:rounded-[2.5rem] border-none shadow-xl bg-white dark:bg-[#1c1c1e] p-5 sm:p-7 space-y-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="flex items-start gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 flex items-center justify-center shrink-0">
-                        <Boxes className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                        <h3 className="text-lg sm:text-xl font-black uppercase italic tracking-tight">Consumo de Material</h3>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
-                            Mostrador + presupuestos desglosados
-                        </p>
-                    </div>
-                </div>
+    const Envoltorio: any = embebido ? 'div' : Card
+    const claseEnvoltorio = embebido
+        ? 'space-y-3'
+        : 'rounded-[2rem] sm:rounded-[2.5rem] border-none shadow-xl bg-white dark:bg-[#1c1c1e] p-5 sm:p-7 space-y-5'
 
-                {totalM2 > 0 && (
-                    <div className="text-right shrink-0">
-                        <p className="text-2xl sm:text-3xl font-black tracking-tighter text-indigo-600 leading-none tabular-nums">
-                            {formatoM2(totalM2)}
-                        </p>
-                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1">m² del periodo</p>
+    return (
+        <Envoltorio className={claseEnvoltorio}>
+            {embebido ? (
+                // Dentro de otra tarjeta basta con el total: el titulo ya lo pone
+                // el panel que lo contiene.
+                totalM2 > 0 && (
+                    <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                            Total del periodo
+                        </span>
+                        <span className="text-xl font-black tracking-tighter text-indigo-600 tabular-nums">
+                            {formatoM2(totalM2)} <span className="text-[10px] opacity-60">m²</span>
+                        </span>
                     </div>
-                )}
-            </div>
+                )
+            ) : (
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 flex items-center justify-center shrink-0">
+                            <Boxes className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                            <h3 className="text-lg sm:text-xl font-black uppercase italic tracking-tight">Consumo de Material</h3>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                                {area === 'CORTE' ? 'Corte láser' : 'Impresión'} · mostrador + presupuestos
+                            </p>
+                        </div>
+                    </div>
+
+                    {totalM2 > 0 && (
+                        <div className="text-right shrink-0">
+                            <p className="text-2xl sm:text-3xl font-black tracking-tighter text-indigo-600 leading-none tabular-nums">
+                                {formatoM2(totalM2)}
+                            </p>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1">m² del periodo</p>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {categoriasSinArea.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3 flex items-start gap-2.5">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-slate-400 mt-0.5" />
+                    <p className="text-[11px] font-bold text-slate-500 leading-snug">
+                        {categoriasSinArea.length === 1
+                            ? `La categoría «${categoriasSinArea[0]}» no tiene área asignada.`
+                            : `${categoriasSinArea.length} categorías no tienen área asignada.`}
+                        {' '}Mientras tanto se reparten por el tipo de venta, que es una suposición.
+                        Se arregla en Insumos y Materiales → Categorías.
+                    </p>
+                </div>
+            )}
 
             {sinClasificarEnPeriodo > 0 && (
                 <div className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50/70 dark:bg-amber-500/5 p-3 flex items-start gap-2.5">
@@ -144,7 +211,7 @@ export function ConsumoMaterialesPanel({ ventasCatalogo = [], inicio, fin }: Pro
 
             {/* Más y menos pedidos */}
             {masPedido && menosPedido && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className={cn("grid gap-3", embebido ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2")}>
                     <div className="rounded-2xl bg-emerald-50/70 dark:bg-emerald-500/5 border border-emerald-100 dark:border-emerald-500/15 p-3.5">
                         <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 flex items-center gap-1.5">
                             <TrendingUp className="w-3 h-3" /> Más pedido
@@ -184,7 +251,7 @@ export function ConsumoMaterialesPanel({ ventasCatalogo = [], inicio, fin }: Pro
                 <div className="py-10 text-center space-y-2">
                     <Boxes className="w-10 h-10 mx-auto text-slate-200 dark:text-slate-700" />
                     <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
-                        Sin consumo registrado en este periodo
+                        Sin consumo de {area === 'CORTE' ? 'corte' : 'impresión'} en este periodo
                     </p>
                     <p className="text-[10px] font-bold text-slate-400 max-w-sm mx-auto leading-snug">
                         Aparece aquí lo vendido por el catálogo y lo que se haya desglosado
@@ -192,7 +259,12 @@ export function ConsumoMaterialesPanel({ ventasCatalogo = [], inicio, fin }: Pro
                     </p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className={cn(
+                    "grid gap-3",
+                    embebido
+                        ? "grid-cols-1 max-h-[220px] overflow-y-auto custom-scrollbar pr-1"
+                        : "grid-cols-1 sm:grid-cols-2"
+                )}>
                     {consumo.map(mat => {
                         const desplegado = abierto === mat.productoId
                         const porM2 = mat.m2Totales > 0
@@ -291,6 +363,6 @@ export function ConsumoMaterialesPanel({ ventasCatalogo = [], inicio, fin }: Pro
                     })}
                 </div>
             )}
-        </Card>
+        </Envoltorio>
     )
 }

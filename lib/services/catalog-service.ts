@@ -9,12 +9,28 @@ import {
 // TIPOS
 // ============================================================
 
+/** Las dos áreas del taller. 'AMBAS' para lo que se usa en las dos. */
+export type AreaTaller = 'IMPRESION' | 'CORTE' | 'AMBAS'
+
 export interface CatalogoCategoria {
     id?: string
     nombre: string
     color: string       // "blue" | "emerald" | "orange" | "purple" | "rose" | "amber" | "cyan" | "slate"
     descripcion?: string
     orden: number
+
+    /**
+     * A qué área del taller pertenecen los materiales de esta categoría.
+     *
+     * Antes el balance repartía los materiales entre impresión y corte
+     * adivinando por el nombre del ítem ("si dice vinil es impresión"). Con
+     * nombres escritos a mano eso falla en cuanto alguien escribe algo raro, y
+     * un material mal repartido descuadra los metros de las dos áreas a la vez.
+     *
+     * Aquí se dice y ya está. Sin definir, se decide por el tipo de venta.
+     */
+    area?: AreaTaller
+
     createdAt?: any
 }
 
@@ -375,3 +391,25 @@ export const anularVentaCatalogo = async (ventaId: string) =>
         estado: 'ANULADA',
         anuladoAt: serverTimestamp()
     })
+
+/**
+ * A qué área pertenece un material.
+ *
+ * Manda lo que diga su categoría. Si la categoría no lo tiene puesto todavía,
+ * se decide por el tipo de venta: lo que se mide por m² sale de un rollo y es
+ * impresión; lo que se cuenta por unidades es corte. Es un apaño para que la
+ * pantalla no se quede vacía mientras se configuran las categorías, no un
+ * criterio en el que confiar.
+ */
+export const areaDeProducto = (
+    producto: Pick<CatalogoProducto, "categoriaId" | "tipoVenta"> | undefined,
+    categorias: CatalogoCategoria[]
+): AreaTaller => {
+    const propia = categorias.find(c => c.id === producto?.categoriaId)?.area;
+    if (propia) return propia;
+    return producto?.tipoVenta === "unidad" ? "CORTE" : "IMPRESION";
+};
+
+/** ¿Se muestra este material en la vista de esta área? */
+export const materialEsDelArea = (area: AreaTaller, vista: "IMPRESION" | "CORTE"): boolean =>
+    area === "AMBAS" || area === vista;
