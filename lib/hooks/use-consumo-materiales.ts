@@ -20,7 +20,7 @@ import {
     type ConsumoMaterial, type VentaCatalogo, type CatalogoProducto, type CatalogoCategoria,
 } from "@/lib/services/catalog-service";
 import {
-    consumoDesdePresupuestos, consumoDesdeOrdenes, unirConsumos,
+    consumoDesdeOrdenes, unirConsumos,
     itemsSinClasificar, renglonesSinAuditar,
 } from "@/lib/services/subitems-service";
 import { loadBudgetsFromFirestore, type DbBudgetEntry } from "@/lib/firebase/firestore-budget-service";
@@ -104,9 +104,15 @@ export function useConsumoMateriales(ventasCatalogo: any[] = [], ordenes: any[] 
         // grueso de lo que sale del rollo cada mes.
         const delTaller = ordenesLista.filter(o => enRango(o?.fecha, inicio, fin));
 
+        // Un presupuesto NO entra en el balance mientras siga siendo un
+        // presupuesto: es una oferta que el cliente todavia puede rechazar, y
+        // contar su material seria contar un rollo que nadie ha cortado.
+        //
+        // Al facturarlo se convierte en orden —el presupuesto se borra— y su
+        // desglose viaja con ella. Ahi si cuenta, una sola vez y por el lado
+        // de las ordenes.
         const materiales = unirConsumos(
             consumoPorMaterial(delMostrador),
-            consumoDesdePresupuestos(presupuestos),
             consumoDesdeOrdenes(delTaller)
         ).filter(m => {
             // Los materiales auditados en órdenes pueden no estar dados de alta
@@ -125,6 +131,8 @@ export function useConsumoMateriales(ventasCatalogo: any[] = [], ordenes: any[] 
             materiales,
             m2Totales: materiales.reduce((t, m) => t + m.m2Totales, 0),
             unidadesTotales: materiales.reduce((t, m) => t + m.unidadesTotales, 0),
+            // Se siguen contando para avisar: un presupuesto sin desglosar es
+            // trabajo que costara auditar cuando se facture.
             presupuestosSinDesglosar: presupuestos.filter(b => itemsSinClasificar(b) > 0).length,
             ordenesSinAuditar: renglonesSinAuditar(delTaller),
             categoriasSinArea: categorias.filter(c => usadas.has(c.id) && !c.area).map(c => c.nombre),

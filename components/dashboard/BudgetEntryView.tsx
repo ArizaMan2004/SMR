@@ -389,13 +389,13 @@ export default function BudgetEntryView({
         const items = (data.items || []).map((i: any) => ({
             descripcion: i.descripcion,
             cantidad: i.cantidad,
+            unidad: i.unidad === 'm2' ? 'm²' : i.unidad === 'und' ? 'Und.' : i.unidad,
             precioUnitario: i.precioUnitarioUSD ?? (i.totalUSD / (i.cantidad || 1)),
             total: i.totalUSD,
             subCliente: i.subCliente,
         }));
 
         setPdfEnEdicion({
-            titulo: data.isMaster ? 'Presupuesto Matriz' : 'Presupuesto',
             numero: data.numero,
             fecha: data.dateCreated || new Date().toISOString(),
             clienteNombre: data.clienteNombre,
@@ -663,17 +663,45 @@ export default function BudgetEntryView({
                     correo: "",
                     personaContacto: "N/A"
                 },
-                items: data.items.map((item: any) => ({
-                    subCliente: data.isMaster ? (item.subCliente || '') : '',
-                    nombre: item.descripcion,
-                    cantidad: item.cantidad,
-                    precioUnitario: item.precioUnitarioUSD,
-                    unidad: item.unidad === 'm2' ? 'm2' : 'und',
-                    medidaXCm: item.medidaXCm || 0,
-                    medidaYCm: item.medidaYCm || 0,
-                    tipoServicio: item.unidad === 'm2' ? 'IMPRESION' : 'OTROS',
-                    subtotal: item.totalUSD
-                })),
+                items: data.items.map((item: any) => {
+                    // El desglose interno del presupuesto viaja con el renglon.
+                    //
+                    // Sin esto se perdia al facturar: alguien clasificaba a
+                    // mano que material iba a gastar, y al convertirlo en orden
+                    // el dato desaparecia y habia que volver a auditarlo.
+                    //
+                    // Se toma el material que mas metros aporta: un renglon
+                    // puede tener varios, pero la orden guarda uno, y el que
+                    // manda es el que se lleva el rollo.
+                    const subs = (item.subItems || []) as any[];
+                    const principal = subs.slice().sort(
+                        (a, b) => (Number(b.m2Total) || 0) - (Number(a.m2Total) || 0)
+                    )[0];
+                    const m2Desglosados = subs.reduce((t, x) => t + (Number(x.m2Total) || 0), 0);
+
+                    return {
+                        subCliente: data.isMaster ? (item.subCliente || '') : '',
+                        nombre: item.descripcion,
+                        cantidad: item.cantidad,
+                        precioUnitario: item.precioUnitarioUSD,
+                        unidad: item.unidad === 'm2' ? 'm2' : 'und',
+                        medidaXCm: item.medidaXCm || 0,
+                        medidaYCm: item.medidaYCm || 0,
+                        tipoServicio: item.unidad === 'm2' ? 'IMPRESION' : 'OTROS',
+                        subtotal: item.totalUSD,
+                        ...(principal?.productoId ? {
+                            catalogoProductoId: principal.productoId,
+                            materialAuditado: {
+                                nombre: principal.productoNombre,
+                                productoId: principal.productoId,
+                                m2: m2Desglosados,
+                                laminado: false,
+                                auditadoEn: new Date().toISOString(),
+                                origen: 'manual' as const,
+                            },
+                        } : {}),
+                    };
+                }),
                 totalUSD: data.totalUSD || totalUSD,
                 totalBS: (data.totalUSD || totalUSD) * safeRates.usd,
                 montoPagadoUSD: 0,
@@ -1687,13 +1715,12 @@ export default function BudgetEntryView({
             <EditorPDFModal
                 open={!!pdfEnEdicion}
                 onOpenChange={o => !o && setPdfEnEdicion(null)}
-                tipo="presupuesto"
                 datos={pdfEnEdicion}
+                soloPresupuesto
                 tasas={[
-                    { id: 'usd', nombre: 'Tasa BCV ($)', valor: safeRates.usd },
-                    { id: 'eur', nombre: 'Tasa BCV (€)', valor: safeRates.eur },
-                    { id: 'usdt', nombre: 'Tasa Monitor', valor: safeRates.usdt },
-                    { id: 'solo', nombre: 'Solo dólares', valor: 0 },
+                    { id: 'usd',  nombre: 'Dólar (BCV, hoy)',    valor: safeRates.usd,  esDeHoy: true },
+                    { id: 'eur',  nombre: 'Euro (BCV, hoy)',     valor: safeRates.eur,  esDeHoy: true },
+                    { id: 'usdt', nombre: 'Paralelo / USDT (hoy)', valor: safeRates.usdt, esDeHoy: true },
                 ]}
                 logoBase64={pdfLogoBase64}
                 firmaBase64={firmaBase64}
