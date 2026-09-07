@@ -23,9 +23,12 @@ import {
 } from "lucide-react"
 
 import {
-    subscribeToCatalogoProducts, precioDeServicio, acabadosActivos, opcionesDe,
-    consumoMetroLineal, unidadDe,
+    subscribeToCatalogoProducts, subscribeToCatalogoCategories,
+    precioDeServicio, acabadosActivos, opcionesDe,
+    consumoMetroLineal, unidadDe, tipoEntradaDe,
+    type CatalogoCategoria,
 } from "@/lib/services/catalog-service"
+import { SelectorCatalogo } from "@/components/orden/SelectorCatalogo"
 
 // --- CONSTANTES ---
 const PRECIO_LASER_POR_MINUTO = 0.80;
@@ -119,6 +122,7 @@ export function ItemFormModal({
 
   // --- Catálogo de precios ---
   const [catalogProductos, setCatalogProductos] = useState<any[]>([])
+  const [catalogCategorias, setCatalogCategorias] = useState<CatalogoCategoria[]>([])
   const [showCatalogPicker, setShowCatalogPicker] = useState(false)
   const [catalogSearch, setCatalogSearch] = useState('')
 
@@ -147,6 +151,8 @@ export function ItemFormModal({
       const unsub = subscribeToCatalogoProducts(setCatalogProductos)
       return unsub
   }, [])
+
+  useEffect(() => subscribeToCatalogoCategories(setCatalogCategorias), [])
 
   // Reset selección de material cuando cambia tipoServicio
   useEffect(() => {
@@ -815,42 +821,18 @@ export function ItemFormModal({
                                     ) : (
                                         /* Picker visual del catálogo */
                                         <div className="space-y-3">
-                                            {catalogM2.length === 0 ? (
-                                                <div className="text-center py-4">
-                                                    <p className="text-[10px] text-slate-400 font-bold">No hay materiales en el catálogo.</p>
-                                                    <button type="button" onClick={() => setModoMaterialManual(true)}
-                                                        className="text-[9px] font-black text-blue-600 mt-1 underline">
-                                                        Usar lista manual
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                                    {catalogM2.map(prod => {
-                                                        const isSelected = catalogMaterialId === prod.id
-                                                        return (
-                                                            <button key={prod.id} type="button"
-                                                                onClick={() => seleccionarMaterialCatalogo(prod)}
-                                                                className={cn(
-                                                                    'text-left p-3 rounded-2xl border-2 transition-all',
-                                                                    isSelected
-                                                                        ? esAliado ? 'bg-purple-600 border-purple-600 text-white shadow-lg shadow-purple-500/30' : 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/30'
-                                                                        : 'bg-white dark:bg-slate-800 border-transparent hover:border-blue-300'
-                                                                )}>
-                                                                <p className={cn('text-[10px] font-black uppercase leading-tight', isSelected ? 'text-white' : 'dark:text-white')}>{prod.nombre}</p>
-                                                                {esAliado && prod.precioPublicista ? (
-                                                                    <p className={cn('text-[8px] font-bold mt-0.5', isSelected ? 'text-purple-100' : 'text-purple-500')}>
-                                                                        €{prod.precioPublicista}/m² <span className="opacity-60">(${prod.precioBase} general)</span>
-                                                                    </p>
-                                                                ) : (
-                                                                    <p className={cn('text-[8px] font-bold mt-0.5', isSelected ? 'text-blue-100' : 'text-slate-400')}>
-                                                                        ${prod.precioBase}/m²
-                                                                    </p>
-                                                                )}
-                                                            </button>
-                                                        )
-                                                    })}
-                                                </div>
-                                            )}
+                                            {/* Buscador, filtros y fotos: con el catálogo
+                                                creciendo, una rejilla sin filtro deja de
+                                                servir en cuanto pasa de diez materiales. */}
+                                            <SelectorCatalogo
+                                                productos={catalogProductos}
+                                                categorias={catalogCategorias}
+                                                seleccionadoId={catalogMaterialId}
+                                                onElegir={(prod: any) => seleccionarMaterialCatalogo(prod)}
+                                                esAliado={esAliado}
+                                                pestanaInicial="material"
+                                                soloTipos={['material']}
+                                            />
 
                                             {/* Acabado: de qué rollo sale. No cambia el precio;
                                                 sirve para saber cuál se está gastando. */}
