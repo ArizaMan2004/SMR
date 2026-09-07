@@ -9,12 +9,93 @@ import {
 // TIPOS
 // ============================================================
 
+/**
+ * Cómo se mide lo que se vende.
+ *
+ * `tipoVenta` solo distinguía unidad de metro cuadrado, y eso deja fuera cosas
+ * que el taller vende de verdad: el laminado va por metro lineal de rollo, la
+ * resina por kilo, la tinta por litro. Cada unidad pide datos distintos al
+ * facturar, así que el formulario cambia según esta.
+ */
+export type UnidadVenta =
+    | "unidad"
+    | "metro_cuadrado"
+    | "metro_lineal"
+    | "kilo"
+    | "litro"
+
+/** Qué es esta entrada del catálogo, para separarla en pestañas. */
+export type TipoEntrada =
+    /** Sale de un rollo o una lámina: vinil, banner, acrílico. */
+    | "material"
+    /** Mano de obra o acabado: diseño, instalación, laminado. */
+    | "servicio"
+    /** Mercancía que se compra hecha y se cuenta: llaveros, tazas. */
+    | "producto"
+
+export const UNIDADES: { valor: UnidadVenta; etiqueta: string; abrev: string; ayuda: string }[] = [
+    { valor: "unidad",         etiqueta: "Unidad",        abrev: "und",  ayuda: "Se cuenta por piezas" },
+    { valor: "metro_cuadrado", etiqueta: "Metro cuadrado", abrev: "m²",  ayuda: "Se cobra por área: ancho × alto" },
+    { valor: "metro_lineal",   etiqueta: "Metro lineal",   abrev: "m.l.", ayuda: "Sale de un rollo de ancho fijo; se cobra el largo" },
+    { valor: "kilo",           etiqueta: "Kilo",           abrev: "kg",  ayuda: "Se pesa" },
+    { valor: "litro",          etiqueta: "Litro",          abrev: "L",   ayuda: "Se mide en volumen" },
+]
+
+/**
+ * Lo que costó traer la mercancía, para saber a cómo sale cada unidad.
+ *
+ * Es la cuenta que se hacía a mano y de cabeza: llegó una caja de doce a
+ * cuarenta dólares, salen a tres treinta y tres, ¿a cómo lo vendo? El sistema
+ * la hace y propone un precio, pero el que manda es el que se escriba: hay
+ * razones para cobrar distinto que ninguna fórmula conoce.
+ */
+export interface CostoCompra {
+    /** Lo que costó el lote entero. */
+    montoLoteUSD: number
+    /** Cuántas unidades trae el lote. */
+    unidadesLote: number
+    /** Margen que se quiere ganar, en porcentaje. */
+    margenPct?: number
+    /** Cuándo se actualizó, porque los costos envejecen. */
+    actualizadoEn?: string
+}
+
+/** A cómo sale cada unidad del lote. */
+export const costoUnitario = (c?: CostoCompra): number => {
+    const monto = Number(c?.montoLoteUSD) || 0
+    const uds = Number(c?.unidadesLote) || 0
+    if (monto <= 0 || uds <= 0) return 0
+    return Math.round((monto / uds) * 10000) / 10000
+}
+
+/**
+ * Precio que se sugiere cobrar. Solo es una propuesta: el precio de venta es
+ * el que esté escrito en la ficha, no este.
+ */
+export const precioRecomendado = (c?: CostoCompra): number => {
+    const unitario = costoUnitario(c)
+    if (unitario <= 0) return 0
+    const margen = Number(c?.margenPct) || 0
+    // Se redondea a cinco céntimos: nadie cobra 3,3267.
+    return Math.round((unitario * (1 + margen / 100)) * 20) / 20
+}
+
 /** Las dos áreas del taller. 'AMBAS' para lo que se usa en las dos. */
 export type AreaTaller = 'IMPRESION' | 'CORTE' | 'AMBAS'
 
 export interface CatalogoCategoria {
     id?: string
     nombre: string
+    /**
+     * Categoría padre, para poder anidar.
+     *
+     * Con una sola lista plana todo acababa mezclado: los rollos de impresión
+     * junto a las láminas de corte y junto a la mercancía que se vende por
+     * unidad. Una subcategoría es una categoría normal que apunta a otra; se
+     * anida un nivel, que es lo que hace falta y lo que se sigue entendiendo
+     * de un vistazo en el mostrador.
+     */
+    padreId?: string
     color: string       // "blue" | "emerald" | "orange" | "purple" | "rose" | "amber" | "cyan" | "slate"
     descripcion?: string
     orden: number
@@ -131,6 +212,26 @@ export interface CatalogoProducto {
     acabados?: CatalogoAcabado[]
     /** Qué extras admite este material al crear una orden. */
     opcionesImpresion?: OpcionesImpresion
+
+    /** Material, servicio o producto de stock. Sin definir se deduce. */
+    tipoEntrada?: TipoEntrada
+    /**
+     * Cómo se mide al venderlo. Convive con `tipoVenta`, que solo sabía de
+     * unidades y metros cuadrados: cuando falta, se deduce de aquel.
+     */
+    unidadVenta?: UnidadVenta
+    /**
+     * Ancho del rollo en centímetros, para lo que se vende por metro lineal.
+     *
+     * El rollo se corta a lo largo y la tira que sobra a lo ancho no se
+     * reaprovecha, así que el consumo real es el ancho entero por el largo
+     * usado, aunque la pieza sea estrecha.
+     */
+    anchoBaseCm?: number
+    /** Foto para reconocerlo de un vistazo al facturar. */
+    fotoUrl?: string
+    /** Lo que costó traerlo, para calcular el precio sugerido. */
+    costo?: CostoCompra
     // Solo aplica para tipoVenta === 'unidad':
     stockSimple: number
     stockMinimo: number
@@ -506,4 +607,91 @@ export const opcionesDe = (producto?: CatalogoProducto): Required<OpcionesImpres
         corteObligatorio: o.corteObligatorio ?? false,
         corteOpcional: o.corteOpcional ?? true,
     };
+};
+
+// ============================================================
+// UNIDADES Y TIPOS — lectura tolerante de lo ya guardado
+// ============================================================
+
+/** La unidad de un producto, deduciéndola de `tipoVenta` si aún no la tiene. */
+export const unidadDe = (p?: Pick<CatalogoProducto, "unidadVenta" | "tipoVenta">): UnidadVenta =>
+    p?.unidadVenta || (p?.tipoVenta === "metro_cuadrado" ? "metro_cuadrado" : "unidad");
+
+export const abrevUnidad = (u: UnidadVenta): string =>
+    UNIDADES.find(x => x.valor === u)?.abrev || "und";
+
+/**
+ * Qué es una entrada del catálogo cuando nadie se lo ha dicho todavía.
+ *
+ * Lo que se mide por área o por metro de rollo sale de un rollo: es material.
+ * Lo demás se cuenta, y eso es mercancía. Es una suposición para no dejar la
+ * pantalla vacía mientras se clasifica; en cuanto se marca a mano, manda eso.
+ */
+export const tipoEntradaDe = (p?: CatalogoProducto): TipoEntrada => {
+    if (p?.tipoEntrada) return p.tipoEntrada;
+    const u = unidadDe(p);
+    return u === "metro_cuadrado" || u === "metro_lineal" ? "material" : "producto";
+};
+
+/** Las categorías de primer nivel. */
+export const categoriasRaiz = (cats: CatalogoCategoria[]): CatalogoCategoria[] =>
+    cats.filter(c => !c.padreId).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+
+/** Las subcategorías de una categoría. */
+export const subcategoriasDe = (cats: CatalogoCategoria[], padreId?: string): CatalogoCategoria[] =>
+    cats.filter(c => c.padreId === padreId).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+
+/**
+ * El área de una subcategoría la hereda de su padre si no la tiene propia.
+ *
+ * Así basta con decir una vez que "Impresión" es del área de impresión para
+ * que todo lo que cuelgue de ella cuente en el balance correcto.
+ */
+export const areaDeCategoria = (
+    categoria: CatalogoCategoria | undefined,
+    todas: CatalogoCategoria[]
+): AreaTaller | undefined => {
+    if (!categoria) return undefined;
+    if (categoria.area) return categoria.area;
+    const padre = todas.find(c => c.id === categoria.padreId);
+    return padre?.area;
+};
+
+/**
+ * Metros lineales que consume una pieza, contando el ancho entero del rollo.
+ *
+ * El rollo tiene un ancho fijo y se corta a lo largo. La pieza se gira para
+ * que su lado menor quepa en ese ancho, y lo que se gasta es el largo — la
+ * tira que sobra al lado no se reaprovecha. Por eso una pieza estrecha y larga
+ * consume igual que una que ocupe todo el ancho.
+ *
+ * Devuelve también los metros cuadrados de rollo que se van de verdad, que es
+ * lo que hay que descontar del stock aunque al cliente se le cobre el largo.
+ */
+export const consumoMetroLineal = (
+    anchoRolloCm: number,
+    piezaAnchoCm: number,
+    piezaAltoCm: number,
+    cantidad = 1
+): { metrosLineales: number; m2Rollo: number; cabe: boolean; pasadas: number } => {
+    const rollo = Number(anchoRolloCm) || 0;
+    const a = Number(piezaAnchoCm) || 0;
+    const b = Number(piezaAltoCm) || 0;
+    const uds = Number(cantidad) || 0;
+    if (rollo <= 0 || a <= 0 || b <= 0 || uds <= 0) {
+        return { metrosLineales: 0, m2Rollo: 0, cabe: false, pasadas: 0 };
+    }
+
+    // Se gira la pieza para que el lado corto vaya a lo ancho del rollo.
+    const corto = Math.min(a, b);
+    const largo = Math.max(a, b);
+
+    // Si ni girada cabe, hay que partirla en varias pasadas.
+    const cabe = corto <= rollo;
+    const pasadas = cabe ? 1 : Math.ceil(corto / rollo);
+
+    const metrosLineales = Math.round((largo / 100) * pasadas * uds * 10000) / 10000;
+    const m2Rollo = Math.round((rollo / 100) * metrosLineales * 10000) / 10000;
+
+    return { metrosLineales, m2Rollo, cabe, pasadas };
 };
