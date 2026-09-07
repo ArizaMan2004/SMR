@@ -5,7 +5,6 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from "framer-motion"
 
 // --- SERVICIOS ---
-import { generateBudgetPDF } from "@/lib/services/pdf-generator";
 import { 
     saveBudgetToFirestore, 
     loadBudgetsFromFirestore, 
@@ -44,7 +43,7 @@ import {
     Plus, Trash2, FileText, Save, Clock, Download, 
     User, Calculator, TrendingUp, Sparkles, Layers, Zap, Wallet, X,
     DollarSign, CheckCircle2, Calendar, Pencil, RotateCcw, Check, 
-    AlertCircle, Hourglass, Banknote, ChevronDown, Building2, Users,
+    AlertCircle, Hourglass, Building2, Users,
     Search, Filter, ArrowUp, ArrowDown, Ruler, Package, History, AlertTriangle
 } from "lucide-react";
 
@@ -380,12 +379,14 @@ export default function BudgetEntryView({
 
     // --- LÓGICA DE PDF ---
     /**
-     * Prepara el presupuesto para el editor.
+     * Abre el editor del documento.
      *
-     * Ya no genera el PDF: abre el editor con la vista previa, donde se decide
-     * que lleva y en que hoja va antes de mandarselo al cliente.
+     * Antes preguntaba la tasa en un menu y recien despues abria el editor,
+     * que trae su propia lista de tasas: se elegia dos veces lo mismo y la
+     * primera eleccion no se veia por ningun lado. Ahora el boton abre y ya;
+     * la tasa —y el resto— se decide viendo la hoja.
      */
-    const handleDownloadPDF = async (data: any, _rateType?: 'USD' | 'EUR' | 'USDT' | 'USD_ONLY') => {
+    const handleDownloadPDF = async (data: any) => {
         const items = (data.items || []).map((i: any) => ({
             descripcion: i.descripcion,
             cantidad: i.cantidad,
@@ -400,6 +401,7 @@ export default function BudgetEntryView({
             fecha: data.dateCreated || new Date().toISOString(),
             clienteNombre: data.clienteNombre,
             clienteDocumento: data.clienteCedula || data.clienteRif,
+            esMatriz: !!data.isMaster,
             items,
             totalUSD: data.totalUSD || totalUSD,
         });
@@ -1353,37 +1355,14 @@ export default function BudgetEntryView({
                                     <Save className="w-4 h-4 sm:w-5 sm:h-5" /> {budgetData.id ? "Actualizar" : "Guardar Borrador"}
                                 </Button>
 
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <Button
-                                            disabled={budgetData.items.length === 0}
-                                            className="h-12 sm:h-16 rounded-xl sm:rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-[10px] sm:text-xs gap-2 sm:gap-3 active:scale-95 transition-all flex items-center justify-center"
-                                        >
-                                            <Download className="w-4 h-4 sm:w-5 sm:h-5" /> PDF <ChevronDown className="w-3 h-3 opacity-50"/>
-                                        </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="rounded-2xl min-w-[200px] p-2">
-                                        <DropdownMenuLabel className="text-[10px] uppercase font-black text-slate-400 px-2 py-1.5">Seleccionar Tasa</DropdownMenuLabel>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => handleDownloadPDF(budgetData, 'USD')} className="gap-3 cursor-pointer text-xs font-bold p-2 rounded-xl focus:bg-emerald-50 text-emerald-700">
-                                            <Badge variant="outline" className="bg-emerald-100 text-emerald-600 border-emerald-200">BCV $</Badge>
-                                            {safeRates.usd.toFixed(2)}
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleDownloadPDF(budgetData, 'EUR')} className="gap-3 cursor-pointer text-xs font-bold p-2 rounded-xl focus:bg-blue-50 text-blue-700">
-                                            <Badge variant="outline" className="bg-blue-100 text-blue-600 border-blue-200">BCV €</Badge>
-                                            {safeRates.eur.toFixed(2)}
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleDownloadPDF(budgetData, 'USDT')} className="gap-3 cursor-pointer text-xs font-bold p-2 rounded-xl focus:bg-orange-50 text-orange-700">
-                                            <Badge variant="outline" className="bg-orange-100 text-orange-600 border-orange-200">Monitor</Badge>
-                                            {safeRates.usdt.toFixed(2)}
-                                        </DropdownMenuItem>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => handleDownloadPDF(budgetData, 'USD_ONLY')} className="gap-3 cursor-pointer text-xs font-bold p-2 rounded-xl focus:bg-slate-100 text-slate-600">
-                                            <Banknote className="w-4 h-4 text-slate-500" />
-                                            Solo Dólares (Sin Bs)
-                                        </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
+                                <Button
+                                    onClick={() => handleDownloadPDF(budgetData)}
+                                    disabled={budgetData.items.length === 0}
+                                    title="Abrir el editor del documento"
+                                    className="h-12 sm:h-16 rounded-xl sm:rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-[10px] sm:text-xs gap-2 sm:gap-3 active:scale-95 transition-all flex items-center justify-center"
+                                >
+                                    <Download className="w-4 h-4 sm:w-5 sm:h-5" /> PDF
+                                </Button>
                             </div>
                         </div>
                     </Card>
@@ -1671,28 +1650,14 @@ export default function BudgetEntryView({
                                                     <Pencil className="w-4 h-4" />
                                                 </Button>
 
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button size="icon" className="h-10 w-10 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-colors shadow-sm">
-                                                            <Download className="w-4 h-4" />
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end" className="rounded-2xl min-w-[200px] p-2">
-                                                        <DropdownMenuLabel className="text-[10px] uppercase font-black text-slate-400 px-2 py-1.5">Tasa PDF</DropdownMenuLabel>
-                                                        <DropdownMenuItem onClick={() => handleDownloadPDF(entry, 'USD')} className="gap-2 cursor-pointer text-xs font-bold p-2 rounded-xl text-emerald-700">
-                                                            BCV $ ({safeRates.usd.toFixed(2)})
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => handleDownloadPDF(entry, 'EUR')} className="gap-2 cursor-pointer text-xs font-bold p-2 rounded-xl text-blue-700">
-                                                            BCV € ({safeRates.eur.toFixed(2)})
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => handleDownloadPDF(entry, 'USDT')} className="gap-2 cursor-pointer text-xs font-bold p-2 rounded-xl text-orange-700">
-                                                            Monitor ({safeRates.usdt.toFixed(2)})
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => handleDownloadPDF(entry, 'USD_ONLY')} className="gap-2 cursor-pointer text-xs font-bold p-2 rounded-xl text-slate-600">
-                                                            Solo USD
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
+                                                <Button
+                                                    size="icon"
+                                                    onClick={() => handleDownloadPDF(entry)}
+                                                    title="Abrir el editor del documento"
+                                                    className="h-10 w-10 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-colors shadow-sm"
+                                                >
+                                                    <Download className="w-4 h-4" />
+                                                </Button>
 
                                                 <Button size="icon" onClick={() => handleConvertToOrder(entry)} className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors shadow-sm" title="Facturar">
                                                     <Zap className="w-4 h-4" />

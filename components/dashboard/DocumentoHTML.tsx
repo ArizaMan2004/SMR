@@ -31,8 +31,23 @@ export interface DatosDocumento {
     fechaEntrega?: string
     clienteNombre: string
     clienteDocumento?: string
+    /**
+     * Presupuesto matriz: una empresa pide el trabajo de varias sedes y lo
+     * paga junto. Lo marca quien lo hace, no se adivina del renglon: si un
+     * presupuesto dejo de ser matriz, a sus renglones viejos les puede
+     * quedar el nombre de la sede pegado y no por eso hay que separarlos.
+     */
+    esMatriz?: boolean
     clienteTelefono?: string
-    items: { descripcion: string; cantidad: number; unidad?: string; precioUnitario: number; total: number }[]
+    items: {
+        descripcion: string
+        cantidad: number
+        unidad?: string
+        precioUnitario: number
+        total: number
+        /** La sede o sucursal a la que se le carga, en los presupuestos matriz. */
+        subCliente?: string
+    }[]
     totalUSD: number
     /** Lo ya cobrado, para las notas de entrega y las facturas. */
     cobradoUSD?: number
@@ -131,6 +146,12 @@ table.h-items th.d { text-align: right; }
 table.h-items td { border-bottom: 1px solid #eee; padding: 6px 0; vertical-align: top; white-space: pre-wrap; }
 table.h-items td.c { text-align: center; padding-right: 12px; }
 table.h-items td.d { text-align: right; font-variant-numeric: tabular-nums; }
+table.h-items tr.h-sub td { border-bottom: none; padding: 14px 0 4px; font-size: 10px;
+    font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+table.h-items tr.h-subtot td { border-bottom: 1px solid #111; padding: 4px 0 8px;
+    text-align: right; font-size: 10px; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; color: #555; }
+table.h-items tr.h-subtot td.d { color: #111; font-variant-numeric: tabular-nums; }
 
 /* totales */
 .h-totales { display: flex; justify-content: flex-end; margin-top: 16px; }
@@ -211,6 +232,37 @@ export function DocumentoHTML({ datos, op }: { datos: DatosDocumento; op: Opcion
 
     const numero = datos.numero != null ? String(datos.numero).padStart(5, '0') : ''
 
+    /**
+     * Un presupuesto matriz le cobra a una empresa el trabajo de varias sedes,
+     * y quien lo recibe necesita ver cuanto le toca a cada una. Sin separarlos
+     * la matriz recibe una lista corrida de renglones sin saber cual es de
+     * quien, y el papel no le sirve para repartir el gasto.
+     *
+     * Cuando ningun renglon trae sede esto no cambia nada: queda un solo grupo
+     * sin titulo y la tabla sale igual que siempre.
+     */
+    const conSedes = !!datos.esMatriz && datos.items.some(it => it.subCliente?.trim())
+
+    const grupos = (() => {
+        if (!conSedes) return [{ nombre: '', items: datos.items, total: datos.totalUSD }]
+
+        const orden: string[] = []
+        const porSede = new Map<string, typeof datos.items>()
+
+        for (const it of datos.items) {
+            // El renglon suelto de un presupuesto matriz cae en 'General': es
+            // trabajo de la empresa, no de ninguna de sus sedes.
+            const sede = it.subCliente?.trim() || 'General'
+            if (!porSede.has(sede)) { porSede.set(sede, []); orden.push(sede) }
+            porSede.get(sede)!.push(it)
+        }
+
+        return orden.map(nombre => {
+            const items = porSede.get(nombre)!
+            return { nombre, items, total: items.reduce((t, x) => t + x.total, 0) }
+        })
+    })()
+
     return (
         <div className="hoja">
             {/* ------------------------------------------------- cabecera */}
@@ -237,7 +289,7 @@ export function DocumentoHTML({ datos, op }: { datos: DatosDocumento; op: Opcion
             {/* -------------------------------------------------- cliente */}
             <section className="h-cliente">
                 <div>
-                    <p className="et">{reglas.etiquetaCliente}</p>
+                    <p className="et">{datos.esMatriz ? 'Empresa matriz' : reglas.etiquetaCliente}</p>
                     <p className="nombre">{datos.clienteNombre || 'Consumidor final'}</p>
                     {op.bloques.datosFiscalesCliente && datos.clienteDocumento && (
                         <p>RIF/CI: {datos.clienteDocumento}</p>
@@ -274,13 +326,30 @@ export function DocumentoHTML({ datos, op }: { datos: DatosDocumento; op: Opcion
                     </tr>
                 </thead>
                 <tbody>
-                    {datos.items.map((it, i) => (
-                        <tr key={i}>
-                            <td className="c">{it.cantidad}{it.unidad ? ` ${it.unidad}` : ''}</td>
-                            <td>{it.descripcion || '—'}</td>
-                            <td className="d">{usd(sinIva(it.precioUnitario))}</td>
-                            <td className="d">{usd(sinIva(it.total))}</td>
-                        </tr>
+                    {grupos.map((g, gi) => (
+                        <React.Fragment key={gi}>
+                            {g.nombre && (
+                                <tr className="h-sub">
+                                    <td colSpan={4}>{g.nombre}</td>
+                                </tr>
+                            )}
+
+                            {g.items.map((it, i) => (
+                                <tr key={i}>
+                                    <td className="c">{it.cantidad}{it.unidad ? ` ${it.unidad}` : ''}</td>
+                                    <td>{it.descripcion || '—'}</td>
+                                    <td className="d">{usd(sinIva(it.precioUnitario))}</td>
+                                    <td className="d">{usd(sinIva(it.total))}</td>
+                                </tr>
+                            ))}
+
+                            {g.nombre && (
+                                <tr className="h-subtot">
+                                    <td colSpan={3}>Subtotal {g.nombre}</td>
+                                    <td className="d">{usd(sinIva(g.total))}</td>
+                                </tr>
+                            )}
+                        </React.Fragment>
                     ))}
                 </tbody>
             </table>
@@ -295,7 +364,10 @@ export function DocumentoHTML({ datos, op }: { datos: DatosDocumento; op: Opcion
                         </>
                     )}
 
-                    <div className="total"><dt>TOTAL</dt><dd>{usd(total)}</dd></div>
+                    <div className="total">
+                        <dt>{conSedes ? 'TOTAL GENERAL MATRIZ' : 'TOTAL'}</dt>
+                        <dd>{usd(total)}</dd>
+                    </div>
 
                     {op.mostrarTasa && op.tasa > 0 && (
                         <div className="enbs">
