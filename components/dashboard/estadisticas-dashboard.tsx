@@ -32,6 +32,7 @@ import { type OrdenServicio } from "@/lib/types/orden"
 import { cn } from "@/lib/utils"
 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
+import { ConsumoMaterialesPanel } from "@/components/dashboard/ConsumoMaterialesPanel"
 
 const MATERIALES_CORTE_KEYS: any = {
     'Acrilico': ['acrilico', 'acr', 'acrylic', 'plastico'],
@@ -1337,6 +1338,17 @@ export function EstadisticasDashboard({
             </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Consumo real de material del periodo. Va fuera de los bloques de
+          IMPRESION y CORTE porque suma las dos areas: el rollo es el mismo
+          venda quien venda. */}
+      <motion.div variants={itemVariants}>
+        <ConsumoMaterialesPanel
+            ventasCatalogo={ventasCatalogo}
+            inicio={fechas.inicio}
+            fin={fechas.fin}
+        />
+      </motion.div>
 
       <motion.div id="financial-kpis" variants={containerVariants} className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
         <StatCard
