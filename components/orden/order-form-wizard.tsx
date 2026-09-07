@@ -2,6 +2,10 @@
 "use client"
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
+import {
+    subscribeToBilleteras, cuentasActivas, nombreBilletera,
+    type ConfigBilleteras,
+} from "@/lib/services/billeteras-service"
 import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input" 
@@ -70,6 +74,32 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
     const [clientSearchTerm, setClientSearchTerm] = useState("");
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [shouldRoundTotal, setShouldRoundTotal] = useState(false);
+
+    /**
+     * Cobrar sin salir del asistente.
+     *
+     * Antes habia que crear la orden, buscarla en la tabla y abrir el modal de
+     * pagos para registrar lo que el cliente estaba pagando ahi mismo, con el
+     * delante. Tres pasos para lo mas habitual del mostrador.
+     *
+     * 'nada' deja la orden pendiente, que es como funcionaba hasta ahora.
+     */
+    const [modoCobro, setModoCobro] = useState<'nada' | 'total' | 'abono'>('nada');
+    const [montoAbono, setMontoAbono] = useState('');
+    const [billeteraCobro, setBilleteraCobro] = useState('cash_usd');
+    const [cuentaCobroId, setCuentaCobroId] = useState('');
+    const [configBilleteras, setConfigBilleteras] = useState<ConfigBilleteras>({});
+
+    useEffect(() => subscribeToBilleteras(setConfigBilleteras), []);
+
+    const cuentasDeCobro = cuentasActivas(billeteraCobro, configBilleteras);
+
+    // Al cambiar de billetera la cuenta anterior deja de valer; si la nueva
+    // tiene una sola, se elige sola.
+    useEffect(() => {
+        const propias = cuentasActivas(billeteraCobro, configBilleteras);
+        setCuentaCobroId(prev => propias.some(c => c.id === prev) ? prev : (propias.length === 1 ? propias[0].id : ''));
+    }, [billeteraCobro, configBilleteras]);
 
     // Estados para la edición de precio manual (override)
     const [editingPriceIndex, setEditingPriceIndex] = useState<number | null>(null);
@@ -278,10 +308,46 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                     .forEach(([k, v]) => { if (v !== undefined) clean[k] = v; });
                 return clean;
             });
-            const finalPayload = { 
-                ...formData, items: processedItems, totalUSD: parseFloat(currentTotal.toFixed(2)), 
-                userId: currentUserId, updatedAt: new Date().toISOString(), 
-                cliente: { ...clienteRest, telefono: `${prefijoTelefono}${numeroTelefono}`, rifCedula: `${prefijoRif}-${numeroRif}` } 
+            const total = parseFloat(currentTotal.toFixed(2));
+
+            // Lo que el cliente paga ahora mismo, si es que paga algo.
+            const abono = modoCobro === 'total'
+                ? total
+                : modoCobro === 'abono'
+                    ? Math.min(parseFloat(montoAbono) || 0, total)
+                    : 0;
+
+            if (modoCobro === 'abono' && abono <= 0) {
+                setIsLoading(false);
+                return toast.error('Escribe cuanto esta abonando');
+            }
+
+            const cuentaCobro = cuentasDeCobro.find(c => c.id === cuentaCobroId);
+            const etiquetaMetodo = ({
+                cash_usd: 'Efectivo USD', bank_bs: 'Pago Movil / Bs', zelle: 'Zelle', usdt: 'Binance USDT',
+            } as Record<string, string>)[billeteraCobro] || 'Efectivo USD';
+
+            const cobro = abono > 0 ? {
+                montoPagadoUSD: abono,
+                // Se compara contra un centimo: sin ese margen un pago completo
+                // deja un saldo de 0.0000001 y la orden nunca sale de ABONADO.
+                estadoPago: (total - abono) <= 0.01 ? 'PAGADO' : 'ABONADO',
+                registroPagos: [{
+                    montoUSD: abono,
+                    fecha: new Date().toISOString(),
+                    nota: modoCobro === 'total' ? 'Pago completo al crear la orden' : 'Abono al crear la orden',
+                    imagenUrl: '',
+                    tasaBCV: bcvRate || 0,
+                    metodo: cuentaCobro ? etiquetaMetodo + ' - ' + cuentaCobro.nombre : etiquetaMetodo,
+                    cuentaId: cuentaCobroId || '',
+                }],
+            } : {};
+
+            const finalPayload = {
+                ...formData, items: processedItems, totalUSD: total,
+                userId: currentUserId, updatedAt: new Date().toISOString(),
+                cliente: { ...clienteRest, telefono: `${prefijoTelefono}${numeroTelefono}`, rifCedula: `${prefijoRif}-${numeroRif}` },
+                ...cobro,
             };
             if (initialData?.id) await onUpdate(initialData.id, finalPayload);
             else await onCreate(finalPayload);
@@ -558,7 +624,74 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                                 )}
                             </div>
                         </div>
-                        <Button disabled={isLoading} onClick={handleSaveOrder} className={cn("w-full h-11 rounded-xl text-white font-black text-[11px] shadow-lg transition-all", formData.cliente.tipoCliente === 'ALIADO' ? "bg-purple-600" : "bg-slate-900 dark:bg-blue-600")}>{isLoading ? <Loader2 className="animate-spin" /> : <span className="flex items-center gap-2 uppercase tracking-widest">Generar Orden <ChevronRight className="w-4 h-4" /></span>}</Button>
+                        {/* COBRAR AL CREAR.
+                            Lo normal en el mostrador es que el cliente pague en el
+                            acto o deje un abono. Antes habia que crear la orden,
+                            buscarla en la tabla y abrir el modal de pagos: tres pasos
+                            con el cliente delante esperando. */}
+                        {!initialData?.id && currentTotal > 0 && (
+                            <div className="mb-3 space-y-2">
+                                <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-800">
+                                    {([
+                                        { v: 'nada',  t: 'Sin pago' },
+                                        { v: 'abono', t: 'Abona' },
+                                        { v: 'total', t: 'Paga todo' },
+                                    ] as const).map(op => (
+                                        <button key={op.v} type="button" onClick={() => setModoCobro(op.v)}
+                                            className={cn('h-8 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all',
+                                                modoCobro === op.v ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-400')}>
+                                            {op.t}
+                                        </button>
+                                    ))}
+                                </div>
+                        
+                                {modoCobro !== 'nada' && (
+                                    <div className="space-y-2 rounded-xl bg-emerald-50/70 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/20 p-2.5">
+                                        {modoCobro === 'abono' && (
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[11px] font-black text-emerald-600">$</span>
+                                                <input type="number" step="0.01" value={montoAbono}
+                                                    onChange={e => setMontoAbono(e.target.value)}
+                                                    placeholder={currentTotal.toFixed(2)}
+                                                    className="w-full h-9 pl-7 pr-3 rounded-lg bg-white dark:bg-slate-800 border-none text-sm font-black outline-none" />
+                                            </div>
+                                        )}
+                        
+                                        <div className="grid grid-cols-4 gap-1">
+                                            {(['cash_usd', 'bank_bs', 'zelle', 'usdt'] as const).map(b => (
+                                                <button key={b} type="button" onClick={() => setBilleteraCobro(b)}
+                                                    title={nombreBilletera(b, configBilleteras)}
+                                                    className={cn('h-8 rounded-lg text-[8px] font-black uppercase truncate px-1 transition-all',
+                                                        billeteraCobro === b ? 'bg-slate-900 dark:bg-white dark:text-slate-900 text-white' : 'bg-white dark:bg-slate-800 text-slate-400')}>
+                                                    {nombreBilletera(b, configBilleteras).split(' ')[0]}
+                                                </button>
+                                            ))}
+                                        </div>
+                        
+                                        {cuentasDeCobro.length > 0 && (
+                                            <div className="flex flex-wrap gap-1">
+                                                {cuentasDeCobro.map(c => (
+                                                    <button key={c.id} type="button"
+                                                        onClick={() => setCuentaCobroId(cuentaCobroId === c.id ? '' : c.id)}
+                                                        className={cn('px-2 h-7 rounded-lg text-[8px] font-black uppercase transition-all',
+                                                            cuentaCobroId === c.id ? 'bg-slate-900 dark:bg-white dark:text-slate-900 text-white' : 'bg-white dark:bg-slate-800 text-slate-400')}>
+                                                        {c.nombre}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                        
+                                        <p className="text-[9px] font-bold text-emerald-700 dark:text-emerald-500 tabular-nums">
+                                            {modoCobro === 'total'
+                                                ? `Queda pagada · $${currentTotal.toFixed(2)}`
+                                                : `Quedaria debiendo $${Math.max(0, currentTotal - (parseFloat(montoAbono) || 0)).toFixed(2)}`}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        <Button disabled={isLoading} onClick={handleSaveOrder} className={cn("w-full h-11 rounded-xl text-white font-black text-[11px] shadow-lg transition-all", formData.cliente.tipoCliente === 'ALIADO' ? "bg-purple-600" : "bg-slate-900 dark:bg-blue-600")}>{isLoading ? <Loader2 className="animate-spin" /> : <span className="flex items-center gap-2 uppercase tracking-widest">{modoCobro === 'total' ? 'Generar y Cobrar' : modoCobro === 'abono' ? 'Generar y Abonar' : 'Generar Orden'} <ChevronRight className="w-4 h-4" /></span>}</Button>
                     </div>
                 </aside>
             </main>
