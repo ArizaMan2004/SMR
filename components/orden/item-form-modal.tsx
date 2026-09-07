@@ -146,6 +146,8 @@ export function ItemFormModal({
    * material, se deja vacío y sale en la lista de pendientes de Auditoría.
    */
   const [manualMaterialId, setManualMaterialId] = useState<string | null>(null)
+  /** El producto o servicio elegido en la sección de venta por unidad. */
+  const [ventaProductoId, setVentaProductoId] = useState<string | null>(null)
 
   useEffect(() => {
       const unsub = subscribeToCatalogoProducts(setCatalogProductos)
@@ -243,6 +245,31 @@ export function ItemFormModal({
           m2Impresos: Math.round((state.medidaXCm / 100) * (state.medidaYCm / 100) * (state.cantidad || 1) * 100) / 100,
       }
   }, [catalogProductos, state.medidaXCm, state.medidaYCm, state.cantidad, esAliado])
+
+  /**
+   * Elegir del catálogo en la venta por unidad.
+   *
+   * Aquí se vende una pieza a un precio, sin medidas: llaveros, trofeos,
+   * diseño, instalación. Se apunta el producto para que descuente del stock y
+   * cuente en las estadísticas, cosa que el buscador anterior no hacía —
+   * copiaba el precio y se olvidaba de qué se había vendido.
+   */
+  const seleccionarProductoVenta = (prod: any) => {
+      const usarPublicista = esAliado && (prod.precioPublicista ?? 0) > 0
+      const precio = usarPublicista ? prod.precioPublicista : prod.precioBase
+      setVentaProductoId(prod.id)
+      setState((s: any) => ({
+          ...s,
+          precioUnitario: precio,
+          nombre: s.nombre || prod.nombre,
+          monedaItem: usarPublicista ? 'EUR' : 'USD',
+          unidad: unidadDe(prod) === 'metro_lineal' ? 'ml' : 'und',
+          catalogoProductoId: prod.id,
+          _catalogPrecioBase: prod.precioBase || 0,
+          _catalogPrecioPublicista: prod.precioPublicista || 0,
+          _catalogVarianteAjuste: 0,
+      }))
+  }
 
   const seleccionarMaterialCatalogo = (prod: any, varianteId?: string | null, acabadoId?: string | null) => {
       const variante = varianteId ? prod.variantes?.find((v: any) => v.id === varianteId) : null
@@ -484,9 +511,11 @@ export function ItemFormModal({
     // De donde sale el material que se apunta: del catalogo si se eligio ahi,
     // del selector de respaldo si se escribio a mano. Si no hay ninguno no se
     // inventa: el renglon sale en la lista de pendientes, que es lo honesto.
-    const materialParaAuditoria = modoMaterialManual
-        ? catalogProductos.find((p: any) => p.id === manualMaterialId)
-        : materialSeleccionado
+    const materialParaAuditoria = state.tipoServicio === 'VENTA'
+        ? catalogProductos.find((p: any) => p.id === ventaProductoId)
+        : modoMaterialManual
+            ? catalogProductos.find((p: any) => p.id === manualMaterialId)
+            : materialSeleccionado
 
     onAddItem({ 
         ...state, 
@@ -704,40 +733,22 @@ export function ItemFormModal({
                                 <div className="space-y-2">
                                     <Label className="text-[9px] font-black uppercase text-emerald-600 ml-1">Precio por Unidad (USD)</Label>
 
-                                    {/* Picker rápido del catálogo de unidades */}
-                                    {catalogProductos.filter(p => p.activo !== false && p.tipoVenta !== 'metro_cuadrado').length > 0 && (
-                                        <div className="space-y-1.5 mb-2">
-                                            <p className="text-[8px] font-black uppercase text-slate-400 ml-1">Del catálogo</p>
-                                            <input
-                                                type="text"
-                                                placeholder="Buscar producto..."
-                                                value={catalogSearch}
-                                                onChange={e => setCatalogSearch(e.target.value)}
-                                                className="w-full h-8 px-3 rounded-xl bg-white dark:bg-slate-800 border-none text-xs font-bold outline-none"
+                                    {/* Antes esto era una caja de búsqueda que no enseñaba
+                                        nada hasta acertar las primeras letras, y que al
+                                        elegir solo copiaba el precio: la orden no guardaba
+                                        qué se había vendido, así que no descontaba stock ni
+                                        salía en las estadísticas. */}
+                                    {catalogProductos.some((p: any) => p.activo !== false && tipoEntradaDe(p) !== 'material') && (
+                                        <div className="mb-3">
+                                            <SelectorCatalogo
+                                                productos={catalogProductos}
+                                                categorias={catalogCategorias}
+                                                seleccionadoId={ventaProductoId}
+                                                onElegir={seleccionarProductoVenta}
+                                                esAliado={esAliado}
+                                                pestanaInicial="producto"
+                                                soloTipos={['producto', 'servicio']}
                                             />
-                                            {catalogSearch.trim() && (
-                                                <div className="space-y-1 max-h-32 overflow-y-auto bg-white dark:bg-slate-800 rounded-2xl p-1">
-                                                    {catalogUnidad.length === 0
-                                                        ? <p className="text-[9px] text-slate-400 text-center py-2">Sin resultados</p>
-                                                        : catalogUnidad.map(prod => (
-                                                            <button key={prod.id} type="button"
-                                                                onClick={() => {
-                                                                    const _usarPublicista = esAliado && (prod.precioPublicista ?? 0) > 0;
-                                                                    const _precio = _usarPublicista ? prod.precioPublicista : prod.precioBase;
-                                                                    const _moneda: 'USD' | 'EUR' = _usarPublicista ? 'EUR' : 'USD';
-                                                                    setState((s: any) => ({ ...s, precioUnitario: _precio, nombre: s.nombre || prod.nombre, monedaItem: _moneda, _catalogPrecioBase: prod.precioBase || 0, _catalogPrecioPublicista: prod.precioPublicista || 0, _catalogVarianteAjuste: 0 }));
-                                                                    setCatalogSearch('');
-                                                                }}
-                                                                className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors text-left">
-                                                                <p className="text-[10px] font-black uppercase">{prod.nombre}</p>
-                                                                <span className="text-xs font-black text-emerald-600">
-                                                                    {esAliado && (prod.precioPublicista ?? 0) > 0 ? `€${prod.precioPublicista}` : `$${prod.precioBase}`}
-                                                                </span>
-                                                            </button>
-                                                        ))
-                                                    }
-                                                </div>
-                                            )}
                                         </div>
                                     )}
 
