@@ -15,10 +15,11 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge' // <--- ¡AQUÍ ESTÁ LA CORRECCIÓN!
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from 'sonner'
-import { UserCircle, Shield, Key, Mail, User, Loader2, Save, Eye, EyeOff, AlertTriangle, Building2, Landmark } from 'lucide-react'
+import { UserCircle, Shield, Key, Mail, User, Loader2, Save, Eye, EyeOff, AlertTriangle, Building2, Landmark, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { IdentidadEmpresaPanel } from '@/components/dashboard/IdentidadEmpresaPanel'
 import { CuentasBancariasPanel, CuentasBancariasHeader } from '@/components/dashboard/CuentasBancariasPanel'
+import { DocumentosPDFPanel } from '@/components/dashboard/DocumentosPDFPanel'
 import { subscribeToBilleteras, type ConfigBilleteras } from '@/lib/services/billeteras-service'
 
 export function ProfileSettingsView() {
@@ -175,7 +176,29 @@ export function ProfileSettingsView() {
                     <TabsTrigger value="identidad" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                         <Building2 className="w-4 h-4 mr-2 inline-block"/> Identidad de Empresa
                     </TabsTrigger>
+                    <TabsTrigger value="documentos" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
+                        <FileText className="w-4 h-4 mr-2 inline-block"/> Documentos PDF
+                    </TabsTrigger>
                 </TabsList>
+
+                {/* --- PESTAÑA 5: LO QUE LLEVAN LOS DOCUMENTOS --- */}
+                <TabsContent value="documentos" className="mt-0">
+                    <Card className="rounded-[2.5rem] border-0 shadow-xl bg-white dark:bg-[#1c1c1e] p-6 md:p-10 space-y-8">
+                        <div className="flex items-start gap-3">
+                            <div className="w-10 h-10 rounded-2xl bg-blue-50 dark:bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
+                                <FileText className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-black uppercase italic tracking-tight">Documentos PDF</h3>
+                                <p className="text-xs font-bold text-slate-400 mt-1">
+                                    El pie con los datos de la empresa, quién firma, las condiciones y qué
+                                    lleva cada tipo de documento. Se cambia aquí, no en el código.
+                                </p>
+                            </div>
+                        </div>
+                        <DocumentosPDFPanel />
+                    </Card>
+                </TabsContent>
 
                 {/* --- PESTAÑA 4: CUENTAS BANCARIAS Y QR DE COBRO --- */}
                 <TabsContent value="cuentas" className="mt-0">

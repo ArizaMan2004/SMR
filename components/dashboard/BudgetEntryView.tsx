@@ -109,7 +109,8 @@ const matchesQuery = (haystack: string, query: string) => {
 };
 
 import { SubItemsModal } from '@/components/dashboard/SubItemsModal'
-import { EditorPDFModal, type AjustesPDF } from '@/components/dashboard/EditorPDFModal'
+import { EditorPDFModal } from '@/components/dashboard/EditorPDFModal'
+import type { DatosDocumento } from '@/components/dashboard/DocumentoHTML'
 import {
     m2DeSubItems, sinClasificar, itemsSinClasificar,
     type SubItemInterno,
@@ -158,7 +159,7 @@ export default function BudgetEntryView({
      * si lleva las condiciones, que cuenta bancaria sale y en que hoja va,
      * viendolo antes de mandarselo al cliente.
      */
-    const [pdfEnEdicion, setPdfEnEdicion] = useState<{ data: any; currency: any } | null>(null);
+    const [pdfEnEdicion, setPdfEnEdicion] = useState<DatosDocumento | null>(null);
 
     const [isLoading, setIsLoading] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -378,37 +379,31 @@ export default function BudgetEntryView({
 
 
     // --- LÓGICA DE PDF ---
-    const handleDownloadPDF = async (data: any, rateType: 'USD' | 'EUR' | 'USDT' | 'USD_ONLY') => {
-        const dataToPrint = {
-            ...data,
+    /**
+     * Prepara el presupuesto para el editor.
+     *
+     * Ya no genera el PDF: abre el editor con la vista previa, donde se decide
+     * que lleva y en que hoja va antes de mandarselo al cliente.
+     */
+    const handleDownloadPDF = async (data: any, _rateType?: 'USD' | 'EUR' | 'USDT' | 'USD_ONLY') => {
+        const items = (data.items || []).map((i: any) => ({
+            descripcion: i.descripcion,
+            cantidad: i.cantidad,
+            precioUnitario: i.precioUnitarioUSD ?? (i.totalUSD / (i.cantidad || 1)),
+            total: i.totalUSD,
+            subCliente: i.subCliente,
+        }));
+
+        setPdfEnEdicion({
+            titulo: data.isMaster ? 'Presupuesto Matriz' : 'Presupuesto',
+            numero: data.numero,
+            fecha: data.dateCreated || new Date().toISOString(),
+            clienteNombre: data.clienteNombre,
+            clienteDocumento: data.clienteCedula || data.clienteRif,
+            items,
             totalUSD: data.totalUSD || totalUSD,
-            dateCreated: data.dateCreated || new Date().toISOString()
-        };
-
-        let selectedCurrency = { rate: safeRates.usd, label: "Tasa BCV ($)", symbol: "Bs." };
-        if (rateType === 'EUR') selectedCurrency = { rate: safeRates.eur, label: "Tasa BCV (€)", symbol: "Bs." };
-        if (rateType === 'USDT') selectedCurrency = { rate: safeRates.usdt, label: "Tasa Monitor", symbol: "Bs." };
-        if (rateType === 'USD_ONLY') selectedCurrency = { rate: 1, label: "", symbol: "" };
-
-        // No se genera todavia: se abre el editor con la vista previa.
-        setPdfEnEdicion({ data: dataToPrint, currency: selectedCurrency });
+        });
     };
-
-    /** Monta el presupuesto con los ajustes que se esten tocando en el editor. */
-    const construirPresupuesto = useCallback(async (ajustes: AjustesPDF) => {
-        if (!pdfEnEdicion) return null;
-        return generateBudgetPDF(
-            pdfEnEdicion.data,
-            pdfLogoBase64,
-            {
-                firmaBase64,
-                selloBase64,
-                currency: pdfEnEdicion.currency,
-                ajustes,
-                soloDefinicion: true,
-            }
-        );
-    }, [pdfEnEdicion, pdfLogoBase64, firmaBase64, selloBase64]);
 
     // --- LÓGICA DE CATÁLOGO / INVENTARIO (coherente con el Order Wizard) ---
     const handleSelectCatalogProduct = (prod: CatalogoProducto, varianteId?: string | null) => {
@@ -1693,8 +1688,16 @@ export default function BudgetEntryView({
                 open={!!pdfEnEdicion}
                 onOpenChange={o => !o && setPdfEnEdicion(null)}
                 tipo="presupuesto"
-                titulo={pdfEnEdicion?.data?.numero ? `Presupuesto #${pdfEnEdicion.data.numero}` : 'Presupuesto'}
-                construir={construirPresupuesto}
+                datos={pdfEnEdicion}
+                tasas={[
+                    { id: 'usd', nombre: 'Tasa BCV ($)', valor: safeRates.usd },
+                    { id: 'eur', nombre: 'Tasa BCV (€)', valor: safeRates.eur },
+                    { id: 'usdt', nombre: 'Tasa Monitor', valor: safeRates.usdt },
+                    { id: 'solo', nombre: 'Solo dólares', valor: 0 },
+                ]}
+                logoBase64={pdfLogoBase64}
+                firmaBase64={firmaBase64}
+                selloBase64={selloBase64}
             />
 
             <SubItemsModal

@@ -2,26 +2,24 @@
 //
 // Ajustar el documento antes de emitirlo, viéndolo.
 //
-// Antes el PDF salía como saliera: si el presupuesto tenía que ir sin las
-// condiciones, o con una cuenta bancaria en vez de las tres, o en carta en vez
-// de en hoja continua, no había manera. Se generaba, se miraba, y si no servía
-// no quedaba más que pedirlo distinto en el código.
+// El documento se arma en HTML, no con pdfmake. Eso cambia dos cosas: la
+// vista previa ES el documento, así que se ve al instante en vez de esperar
+// medio segundo a que se maquete un PDF; y el papel lo pone el navegador al
+// imprimir, que sabe de saltos de página y tamaños de hoja sin que haya que
+// calcular alturas a mano.
 //
-// Aquí se toca y se ve al momento. Lo que se cambia vale solo para este
-// documento: lo guardado en Ajustes no se toca, porque el ajuste de hoy para
-// un cliente concreto no debería cambiar cómo salen los de mañana.
+// Lo que se toca aquí vale solo para este documento. Lo guardado en Ajustes
+// no se altera: el ajuste de hoy para un cliente concreto no debería cambiar
+// cómo salen los de mañana.
 
 "use client"
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-    FileText, Loader2, Download, Eye, EyeOff, Landmark, Settings2, Percent,
-} from 'lucide-react'
+import { FileText, Printer, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -33,233 +31,232 @@ import {
     subscribeToBilleteras, cuentasActivas, BILLETERAS,
     type ConfigBilleteras, type CuentaBilletera,
 } from '@/lib/services/billeteras-service'
-import { definicionAPreview, abrirDefinicion, TAMANOS_HOJA, type TamanoHoja } from '@/lib/services/pdf-generator'
-import { LogoBanco } from '@/components/dashboard/LogoBanco'
+import {
+    DocumentoHTML, estilosDocumento,
+    type DatosDocumento, type TamanoHoja,
+} from '@/components/dashboard/DocumentoHTML'
 
-/** Los bloques que se pueden encender y apagar, con un nombre que se entiende. */
 const BLOQUES: { campo: keyof BloquesDocumento; texto: string }[] = [
     { campo: 'logo',                 texto: 'Logo' },
-    { campo: 'datosFiscalesCliente', texto: 'Datos fiscales del cliente' },
-    { campo: 'tasaBcv',              texto: 'Tasa BCV' },
-    { campo: 'totalEnBs',            texto: 'Total en bolívares' },
-    { campo: 'datosPago',            texto: 'Datos para pagar' },
+    { campo: 'datosFiscalesCliente', texto: 'Datos del cliente' },
+    { campo: 'tasaBcv',              texto: 'Tasa' },
+    { campo: 'totalEnBs',            texto: 'Total en Bs' },
+    { campo: 'datosPago',            texto: 'Datos de pago' },
     { campo: 'notasLegales',         texto: 'Condiciones' },
     { campo: 'despedida',            texto: 'Despedida' },
     { campo: 'firma',                texto: 'Firma' },
     { campo: 'sello',                texto: 'Sello' },
-    { campo: 'datosFirmante',        texto: 'Nombre de quien firma' },
-    { campo: 'pieEmpresa',           texto: 'Pie con datos de la empresa' },
+    { campo: 'datosFirmante',        texto: 'Firmante' },
+    { campo: 'pieEmpresa',           texto: 'Pie' },
 ]
 
-export interface AjustesPDF {
-    bloques?: Partial<BloquesDocumento>
-    empresa?: any
-    firmante?: any
-    notasLegales?: string[]
-    cuentas?: string[]
-    tamanoHoja?: TamanoHoja
-    aplicarIva?: boolean
-    ivaPct?: number
-}
+const HOJAS: { valor: TamanoHoja; nombre: string }[] = [
+    { valor: 'carta',    nombre: 'Carta · 21,6 × 27,9 cm' },
+    { valor: 'oficio',   nombre: 'Oficio · 21,6 × 35,6 cm' },
+    { valor: 'continuo', nombre: 'Continuo · sin cortes' },
+]
+
+export interface TasaDisponible { id: string; nombre: string; valor: number }
 
 interface Props {
     open: boolean
     onOpenChange: (o: boolean) => void
     tipo: TipoDocumento
-    titulo?: string
-    /** Monta el documento con los ajustes dados y devuelve su definición. */
-    construir: (ajustes: AjustesPDF) => Promise<any>
+    datos: DatosDocumento | null
+    tasas: TasaDisponible[]
+    logoBase64?: string
+    firmaBase64?: string
+    selloBase64?: string
 }
 
-export function EditorPDFModal({ open, onOpenChange, tipo, titulo, construir }: Props) {
+/** El desplegable estándar del editor: lo configurable va en listas. */
+const Lista = ({ etiqueta, valor, onChange, children }: any) => (
+    <label className="flex items-center gap-2">
+        <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 shrink-0">{etiqueta}</span>
+        <select
+            value={valor}
+            onChange={onChange}
+            className="h-8 px-2 rounded-lg text-[10px] font-bold shadow-sm outline-none cursor-pointer bg-white text-slate-900 dark:bg-slate-800 dark:text-white [color-scheme:light] dark:[color-scheme:dark]"
+        >
+            {children}
+        </select>
+    </label>
+)
+
+export function EditorPDFModal({
+    open, onOpenChange, tipo, datos, tasas,
+    logoBase64, firmaBase64, selloBase64,
+}: Props) {
     const [config, setConfig] = useState<ConfigPDF>({})
     const [billeteras, setBilleteras] = useState<ConfigBilleteras>({})
     useEffect(() => subscribeToConfigPDF(setConfig), [])
     useEffect(() => subscribeToBilleteras(setBilleteras), [])
 
     const [bloques, setBloques] = useState<BloquesDocumento>({})
-    const [cuentas, setCuentas] = useState<string[]>([])
     const [tamano, setTamano] = useState<TamanoHoja>('continuo')
+    const [tasaId, setTasaId] = useState('')
+    const [cuentaId, setCuentaId] = useState<string>('TODAS')
     const [aplicarIva, setAplicarIva] = useState(false)
     const [ivaPct, setIvaPct] = useState('16')
-    const [notas, setNotas] = useState<string[]>([])
 
-    const [preview, setPreview] = useState<string | null>(null)
-    const [pintando, setPintando] = useState(false)
-
-    const todasLasCuentas: CuentaBilletera[] = useMemo(
+    const cuentas: CuentaBilletera[] = useMemo(
         () => BILLETERAS.flatMap(b => cuentasActivas(b, billeteras))
             .filter(c => c.numeroCuenta || c.telefono || c.correo),
         [billeteras]
     )
 
-    // Al abrir se parte de lo configurado; los cambios de aquí no se guardan.
     useEffect(() => {
         if (!open) return
         setBloques(bloquesDe(config, tipo))
-        setCuentas(config.cuentasEnPDF?.length ? config.cuentasEnPDF : todasLasCuentas.map(c => c.id))
-        setNotas(notasDe(config))
         setTamano('continuo')
         setAplicarIva(false)
-    }, [open, config, tipo, todasLasCuentas])
+        setCuentaId('TODAS')
+        setTasaId(prev => prev || tasas[0]?.id || '')
+    }, [open, config, tipo, tasas])
 
-    const ajustes: AjustesPDF = useMemo(() => ({
+    const tasaElegida = tasas.find(t => t.id === tasaId) || tasas[0]
+
+    const opciones = useMemo(() => ({
         bloques,
-        cuentas,
-        notasLegales: notas,
-        tamanoHoja: tamano,
+        empresa: empresaDe(config),
+        firmante: firmanteDe(config),
+        notas: notasDe(config),
+        cuentas: cuentaId === 'TODAS' ? cuentas : cuentas.filter(c => c.id === cuentaId),
+        tamano,
+        tasa: tasaElegida?.valor ?? 0,
+        tasaEtiqueta: tasaElegida?.nombre ?? '',
         aplicarIva,
         ivaPct: parseFloat(ivaPct) || 16,
-    }), [bloques, cuentas, notas, tamano, aplicarIva, ivaPct])
+        logoBase64, firmaBase64, selloBase64,
+    }), [bloques, config, cuentas, cuentaId, tamano, tasaElegida, aplicarIva, ivaPct, logoBase64, firmaBase64, selloBase64])
+
+    const contenedor = useRef<HTMLDivElement | null>(null)
 
     /**
-     * Repinta la vista previa.
+     * Imprime a PDF con el motor del navegador.
      *
-     * Va con un respiro de medio segundo: cada casilla vuelve a maquetar el PDF
-     * entero, y sin la espera marcar cinco casillas seguidas lanza cinco
-     * maquetaciones de las que solo importa la última.
+     * Se copia el documento a un iframe aislado con sus propios estilos: sin
+     * eso, imprimir arrastraría toda la hoja de estilos de la aplicación y el
+     * papel saldría con el fondo y los colores de la pantalla.
      */
-    const temporizador = useRef<any>(null)
-    const repintar = useCallback(() => {
-        clearTimeout(temporizador.current)
-        temporizador.current = setTimeout(async () => {
-            setPintando(true)
-            try {
-                const def = await construir(ajustes)
-                setPreview(await definicionAPreview(def))
-            } catch (e) {
-                console.error('No se pudo pintar la vista previa:', e)
-                setPreview(null)
-            } finally {
-                setPintando(false)
-            }
-        }, 500)
-    }, [ajustes, construir])
+    const emitir = () => {
+        const html = contenedor.current?.innerHTML
+        if (!html) return toast.error('No hay nada que imprimir')
 
-    useEffect(() => {
-        if (!open) return
-        repintar()
-        return () => clearTimeout(temporizador.current)
-    }, [open, repintar])
+        const marco = document.createElement('iframe')
+        marco.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;'
+        document.body.appendChild(marco)
 
-    const emitir = async () => {
-        try {
-            await abrirDefinicion(await construir(ajustes))
-            onOpenChange(false)
-        } catch (e) {
-            console.error(e)
-            toast.error('No se pudo generar el documento')
+        const doc = marco.contentDocument
+        if (!doc) { marco.remove(); return toast.error('El navegador no dejó preparar la impresión') }
+
+        doc.open()
+        doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${datos?.titulo || 'Documento'}</title><style>${estilosDocumento(tamano)}
+            body { margin: 0; background: #fff; }
+            .doc { padding: 0; width: auto; }
+        </style></head><body>${html}</body></html>`)
+        doc.close()
+
+        // Se espera a que carguen el logo, la firma y el sello: imprimir antes
+        // saca el documento con los huecos en blanco.
+        const imprimir = () => {
+            marco.contentWindow?.focus()
+            marco.contentWindow?.print()
+            setTimeout(() => marco.remove(), 1000)
+        }
+        const imgs = Array.from(doc.images)
+        if (imgs.every(i => i.complete)) setTimeout(imprimir, 150)
+        else {
+            let faltan = imgs.filter(i => !i.complete).length
+            imgs.filter(i => !i.complete).forEach(i => {
+                const listo = () => { if (--faltan <= 0) setTimeout(imprimir, 100) }
+                i.addEventListener('load', listo, { once: true })
+                i.addEventListener('error', listo, { once: true })
+            })
+            // Por si alguna imagen nunca responde.
+            setTimeout(() => { if (faltan > 0) { faltan = 0; imprimir() } }, 3000)
         }
     }
 
-    const alternar = (campo: keyof BloquesDocumento) =>
-        setBloques(p => ({ ...p, [campo]: !p[campo] }))
+    if (!datos) return null
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="w-[97vw] max-w-6xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[94vh]">
+            <DialogContent className="w-[97vw] max-w-5xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[94vh]">
                 <DialogHeader className="px-5 sm:px-7 py-4 border-b border-slate-100 dark:border-white/5 shrink-0">
                     <DialogTitle className="text-lg sm:text-xl font-black uppercase italic tracking-tighter flex items-center gap-2.5">
                         <FileText className="w-5 h-5 text-blue-600 shrink-0" />
-                        {titulo || 'Documento'}
+                        {datos.titulo}{datos.numero != null ? ` #${datos.numero}` : ''}
                     </DialogTitle>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
-                        Los cambios valen solo para este PDF
+                        Los cambios valen solo para este documento
                     </p>
                 </DialogHeader>
 
                 {/* BARRA DE HERRAMIENTAS */}
                 <div className="px-5 sm:px-7 py-3 border-b border-slate-100 dark:border-white/5 shrink-0 space-y-3 bg-slate-50/60 dark:bg-white/[0.02]">
-                    <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-                        {/* Tamaño de hoja */}
-                        <div className="flex items-center gap-2">
-                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Hoja</span>
-                            <div className="flex gap-1 p-1 rounded-xl bg-white dark:bg-slate-800">
-                                {TAMANOS_HOJA.map(t => (
-                                    <button key={t.valor} type="button" onClick={() => setTamano(t.valor)}
-                                        title={t.ayuda}
-                                        className={cn('px-2.5 h-7 rounded-lg text-[9px] font-black uppercase transition-all',
-                                            tamano === t.valor ? 'bg-slate-900 dark:bg-white dark:text-slate-900 text-white' : 'text-slate-400')}>
-                                        {t.nombre}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                        <Lista etiqueta="Hoja" valor={tamano} onChange={(e: any) => setTamano(e.target.value)}>
+                            {HOJAS.map(h => <option key={h.valor} value={h.valor}>{h.nombre}</option>)}
+                        </Lista>
 
-                        {/* IVA */}
-                        <div className="flex items-center gap-2">
-                            <button type="button" onClick={() => setAplicarIva(v => !v)}
-                                className={cn('flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[9px] font-black uppercase transition-all',
-                                    aplicarIva ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-400')}>
-                                <Percent className="w-3 h-3" /> IVA
-                            </button>
+                        {tasas.length > 0 && (
+                            <Lista etiqueta="Tasa" valor={tasaId} onChange={(e: any) => setTasaId(e.target.value)}>
+                                {tasas.map(t => (
+                                    <option key={t.id} value={t.id}>
+                                        {t.nombre}{t.valor > 1 ? ` · ${t.valor.toFixed(2)}` : ''}
+                                    </option>
+                                ))}
+                            </Lista>
+                        )}
+
+                        {bloques.datosPago && cuentas.length > 0 && (
+                            <Lista etiqueta="Cuenta" valor={cuentaId} onChange={(e: any) => setCuentaId(e.target.value)}>
+                                <option value="TODAS">Todas ({cuentas.length})</option>
+                                {cuentas.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                            </Lista>
+                        )}
+
+                        <label className="flex items-center gap-2">
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">IVA</span>
+                            <select
+                                value={aplicarIva ? 'si' : 'no'}
+                                onChange={e => setAplicarIva(e.target.value === 'si')}
+                                className="h-8 px-2 rounded-lg text-[10px] font-bold shadow-sm outline-none cursor-pointer bg-white text-slate-900 dark:bg-slate-800 dark:text-white [color-scheme:light] dark:[color-scheme:dark]"
+                            >
+                                <option value="no">Sin IVA</option>
+                                <option value="si">Con IVA</option>
+                            </select>
                             {aplicarIva && (
                                 <Input type="number" value={ivaPct} onChange={e => setIvaPct(e.target.value)}
-                                    className="h-7 w-16 rounded-lg bg-white dark:bg-slate-800 border-none text-xs font-black text-center" />
+                                    className="h-8 w-14 rounded-lg bg-white dark:bg-slate-800 border-none text-[11px] font-black text-center" />
                             )}
-                        </div>
+                        </label>
                     </div>
 
-                    {/* Bloques */}
-                    <div className="flex flex-wrap gap-1.5">
+                    {/* Mostrar u ocultar: esto sí son interruptores, uno por bloque. */}
+                    <div className="flex flex-wrap gap-1">
                         {BLOQUES.map(b => {
                             const activo = !!bloques[b.campo]
                             return (
-                                <button key={b.campo} type="button" onClick={() => alternar(b.campo)}
-                                    className={cn('flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[9px] font-black uppercase tracking-wide transition-all',
-                                        activo
-                                            ? 'bg-blue-600 text-white'
-                                            : 'bg-white dark:bg-slate-800 text-slate-400 line-through decoration-slate-300')}>
-                                    {activo ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                                <button key={b.campo} type="button"
+                                    onClick={() => setBloques(p => ({ ...p, [b.campo]: !p[b.campo] }))}
+                                    className={cn('flex items-center gap-1 px-2 h-7 rounded-lg text-[9px] font-black uppercase transition-all',
+                                        activo ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-400')}>
+                                    {activo ? <Eye className="w-2.5 h-2.5" /> : <EyeOff className="w-2.5 h-2.5" />}
                                     {b.texto}
                                 </button>
                             )
                         })}
                     </div>
-
-                    {/* Cuentas que salen */}
-                    {bloques.datosPago && todasLasCuentas.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1">
-                                <Landmark className="w-3 h-3" /> Cuentas
-                            </span>
-                            {todasLasCuentas.map(c => {
-                                const activa = cuentas.includes(c.id)
-                                return (
-                                    <button key={c.id} type="button"
-                                        onClick={() => setCuentas(p => activa ? p.filter(x => x !== c.id) : [...p, c.id])}
-                                        className={cn('flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[9px] font-black uppercase transition-all',
-                                            activa ? 'bg-slate-900 dark:bg-white dark:text-slate-900 text-white' : 'bg-white dark:bg-slate-800 text-slate-400')}>
-                                        <LogoBanco codigo={c.bancoCodigo} texto={c.banco} size={12} />
-                                        {c.nombre}
-                                    </button>
-                                )
-                            })}
-                        </div>
-                    )}
                 </div>
 
-                {/* VISTA PREVIA */}
-                <div className="flex-1 min-h-0 bg-slate-200/60 dark:bg-black/40 relative">
-                    {pintando && (
-                        <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/50 dark:bg-black/50 backdrop-blur-sm">
-                            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-                        </div>
-                    )}
-                    {preview ? (
-                        <iframe
-                            src={preview}
-                            title="Vista previa del documento"
-                            className="w-full h-full min-h-[45vh] border-none"
-                        />
-                    ) : (
-                        <div className="h-full min-h-[45vh] flex flex-col items-center justify-center gap-2 text-slate-400">
-                            <FileText className="w-10 h-10 opacity-30" />
-                            <p className="text-[10px] font-black uppercase tracking-widest">
-                                {pintando ? 'Montando el documento…' : 'No se pudo pintar la vista previa'}
-                            </p>
-                        </div>
-                    )}
+                {/* VISTA PREVIA — es el documento, no una imitación */}
+                <div className="flex-1 min-h-0 overflow-auto custom-scrollbar bg-slate-300/50 dark:bg-black/50 p-4 sm:p-6">
+                    <style>{estilosDocumento(tamano)}</style>
+                    <div ref={contenedor} className="mx-auto shadow-2xl" style={{ width: 'fit-content', background: '#fff' }}>
+                        <DocumentoHTML datos={datos} op={opciones} />
+                    </div>
                 </div>
 
                 <div className="px-5 sm:px-7 py-4 border-t border-slate-100 dark:border-white/5 shrink-0 flex gap-2">
@@ -269,7 +266,7 @@ export function EditorPDFModal({ open, onOpenChange, tipo, titulo, construir }: 
                     </Button>
                     <Button onClick={emitir}
                         className="flex-[2] h-11 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black uppercase text-[10px] tracking-widest gap-2 shadow-lg">
-                        <Download className="w-4 h-4" /> Generar documento
+                        <Printer className="w-4 h-4" /> Generar PDF
                     </Button>
                 </div>
             </DialogContent>
