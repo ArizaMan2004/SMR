@@ -4,12 +4,52 @@
 import type { OrdenServicio } from "@/lib/types/orden";
 import { formatCurrency, formatDate, formatBsCurrency } from "@/lib/utils/order-utils";
 
-// --- DATOS FISCALES DE LA EMPRESA ---
-const COMPANY_DATA = {
-    name: "EMPRENDIMIENTO JOSUE LEAL",
-    rif: "J-50650878-8",
-    address: "AV. ROMULO GALLEGOS CON CALLE CRISTAL, LOCAL MERCADO MINORISTA NRO 011-012, SECTOR LOS CLARITOS. SANTA ANA DE CORO, FALCÓN. ZONA POSTAL 4101"
-};
+import {
+    cargarConfigPDF, empresaDe, firmanteDe, notasDe, bloquesDe,
+    type ConfigPDF, type TipoDocumento, type BloquesDocumento,
+} from "@/lib/services/pdf-config-service";
+import { cargarBilleteras, cuentasActivas, BILLETERAS } from "@/lib/services/billeteras-service";
+import { bancoPorCodigo } from "@/lib/services/bancos-venezuela";
+
+/**
+ * Todo lo que un PDF necesita saber de la empresa, leído una sola vez.
+ *
+ * Antes esto estaba escrito en el codigo: nombre fiscal, RIF, direccion, quien
+ * firma y hasta el numero de cuenta. Mudarse o cambiar de banco obligaba a
+ * tocar el generador.
+ */
+async function cargarContexto(tipo: TipoDocumento, ajustes?: PDFOptions["ajustes"]) {
+    const [config, billeteras] = await Promise.all([
+        cargarConfigPDF().catch(() => ({} as ConfigPDF)),
+        cargarBilleteras().catch(() => ({})),
+    ]);
+
+    // Las cuentas que se enseñan salen del catalogo de billeteras: se cambian
+    // en un sitio y se actualizan en todos los documentos.
+    const todasLasCuentas = BILLETERAS.flatMap(b => cuentasActivas(b, billeteras));
+    // Lo elegido en el momento manda sobre lo configurado, y lo configurado
+    // sobre "todas": asi se puede sacar un presupuesto con una sola cuenta sin
+    // cambiar como salen los demas.
+    const idsCuentas = ajustes?.cuentas?.length
+        ? ajustes.cuentas
+        : (config.cuentasEnPDF?.length ? config.cuentasEnPDF : null);
+
+    const elegidas = idsCuentas
+        ? todasLasCuentas.filter(c => idsCuentas.includes(c.id))
+        : todasLasCuentas;
+
+    return {
+        empresa: { ...empresaDe(config), ...(ajustes?.empresa || {}) },
+        firmante: { ...firmanteDe(config), ...(ajustes?.firmante || {}) },
+        notas: ajustes?.notasLegales ?? notasDe(config),
+        bloques: { ...bloquesDe(config, tipo), ...(ajustes?.bloques || {}) },
+        // Solo las que tienen algo que dictar: una cuenta vacia en un PDF es
+        // peor que no poner el bloque.
+        cuentas: elegidas.filter(c => c.numeroCuenta || c.telefono || c.correo),
+    };
+}
+
+type Contexto = Awaited<ReturnType<typeof cargarContexto>>;
 
 // --- CONFIGURACIÓN DE PÁGINA ---
 const LETTER_WIDTH = 612; 
@@ -81,6 +121,21 @@ export interface PDFOptions {
   firmaBase64?: string;
   selloBase64?: string;
   currency?: { rate: number; label: string; symbol: string; };
+  /**
+   * Ajustes para ESTE documento, sin tocar la configuracion guardada.
+   *
+   * Es lo que permite decidir en el momento que cuenta bancaria sale o quitar
+   * las notas legales de un presupuesto concreto, sin que eso cambie como
+   * saldran los demas. Lo que no venga aqui se toma de la configuracion.
+   */
+  ajustes?: {
+    bloques?: Partial<BloquesDocumento>;
+    empresa?: Partial<import("@/lib/services/pdf-config-service").DatosEmpresa>;
+    firmante?: Partial<import("@/lib/services/pdf-config-service").DatosFirmante>;
+    notasLegales?: string[];
+    /** Ids de las cuentas que salen. Vacio o sin definir: las configuradas. */
+    cuentas?: string[];
+  };
 }
 
 interface BudgetItem { subCliente?: string; descripcion: string; cantidad: number; precioUnitarioUSD: number; totalUSD: number; }
@@ -116,17 +171,19 @@ const customTableLayout = {
     paddingLeft: () => 8, paddingRight: () => 8, paddingTop: () => 6, paddingBottom: () => 6,
 };
 
-const getCompanyFooter = () => ({
+const getCompanyFooter = (ctx: Contexto) => ({
     stack: [
-        { text: COMPANY_DATA.name, style: "watermarkTitle" },
-        { text: `RIF: ${COMPANY_DATA.rif}`, style: "watermarkText" },
-        { text: COMPANY_DATA.address, style: "watermarkText" }
+        { text: ctx.empresa.nombre, style: "watermarkTitle" },
+        { text: `RIF: ${ctx.empresa.rif}`, style: "watermarkText" },
+        { text: ctx.empresa.direccion, style: "watermarkText" },
+        ...(ctx.empresa.telefono ? [{ text: `Tel. ${ctx.empresa.telefono}`, style: "watermarkText" }] : []),
+        ...(ctx.empresa.correo ? [{ text: ctx.empresa.correo, style: "watermarkText" }] : []),
     ],
     alignment: "right",
-    margin: [150, 10, 0, 0] 
+    margin: [150, 10, 0, 0]
 });
 
-const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: string | undefined) => ({
+const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: string | undefined, ctx: Contexto) => ({
     columns: [
         { width: "*", text: "" },
         { width: "*", text: "" },
@@ -137,16 +194,19 @@ const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: 
                 {
                     width: 150, 
                     stack: [
-                        firmaBase64 ? { image: firmaBase64, width: 120, height: 40, alignment: "center" } : { text: " " },
+                        (ctx.bloques.firma && firmaBase64) ? { image: firmaBase64, width: 120, height: 40, alignment: "center" } : { text: " " },
                         { canvas: [{ type: "line", x1: 0, y1: 0, x2: 120, y2: 0, lineWidth: 1 }], margin: [0, 2, 0, 0] },
-                        { text: "JOSUE LEAL", style: "contactName", margin: [0, 5, 0, 0] },
-                        { text: `C.I: 19448046`, style: "contactInfo" },
-                        { text: `Cel. 04246118494`, style: "contactInfo" },
+                        ...(ctx.bloques.datosFirmante ? [
+                            { text: ctx.firmante.nombre, style: "contactName", margin: [0, 5, 0, 0] },
+                            ...(ctx.firmante.cargo ? [{ text: ctx.firmante.cargo, style: "contactInfo" }] : []),
+                            ...(ctx.firmante.cedula ? [{ text: `C.I: ${ctx.firmante.cedula}`, style: "contactInfo" }] : []),
+                            ...(ctx.firmante.telefono ? [{ text: `Cel. ${ctx.firmante.telefono}`, style: "contactInfo" }] : []),
+                        ] : []),
                     ],
                 },
                 {
                     width: "*",
-                    stack: selloBase64 ? [{ image: selloBase64, width: 150, height: 150, alignment: "right" }] : [],
+                    stack: (ctx.bloques.sello && selloBase64) ? [{ image: selloBase64, width: 150, height: 150, alignment: "right" }] : [],
                 },
             ],
             columnGap: 10,
@@ -155,48 +215,80 @@ const getSignatureBlockContent = (firmaBase64: string | undefined, selloBase64: 
     ],
 });
 
-const getPaymentBlock = () => ({
-    stack: [
-        { text: "DATOS PARA PAGOS / TRANSFERENCIAS:", style: "contactName", margin: [0, 10, 0, 5] },
-        {
-            table: {
-                widths: ["auto", "*"],
-                body: [
-                    [{ text: "Banco:", style: "contactName" }, { text: "Banesco Banco Universal", style: "contactInfo" }],
-                    [{ text: "Tipo:", style: "contactName" }, { text: "Cuenta Corriente (VES)", style: "contactInfo" }],
-                    [{ text: "Cuenta:", style: "contactName" }, { text: "0134-0409-77-4091052723", style: "contactInfo" }],
-                    [{ text: "C.I:", style: "contactName" }, { text: "V-19448046", style: "contactInfo" }],
-                    [{ text: "Titular:", style: "contactName" }, { text: "JOSUE SAMUEL LEAL LOPEZ", style: "contactInfo" }]
-                ]
-            },
-            layout: {
-                defaultBorder: false,
-                paddingLeft: () => 0,
-                paddingTop: () => 2,
-                paddingBottom: () => 2
-            }
+/**
+ * Como pagar. Sale del catalogo de cuentas bancarias, no de una copia pegada
+ * aqui: se cambia el banco en Ajustes y todos los documentos lo reflejan.
+ */
+const getPaymentBlock = (ctx: Contexto) => {
+    const filas: any[] = [];
+
+    ctx.cuentas.forEach((c, i) => {
+        if (i > 0) filas.push([{ text: " ", style: "contactInfo" }, { text: " ", style: "contactInfo" }]);
+
+        const banco = bancoPorCodigo(c.bancoCodigo);
+        if (banco) filas.push([{ text: "Banco:", style: "contactName" }, { text: banco.nombre, style: "contactInfo" }]);
+        if (c.titular) filas.push([{ text: "Titular:", style: "contactName" }, { text: c.titular, style: "contactInfo" }]);
+        if (c.documento) filas.push([{ text: "RIF / C.I:", style: "contactName" }, { text: c.documento, style: "contactInfo" }]);
+
+        // En pago movil el numero de cuenta no se usa: se dicta el telefono.
+        if (c.modo === "pago_movil") {
+            if (c.telefono) filas.push([{ text: "Pago Móvil:", style: "contactName" }, { text: c.telefono, style: "contactInfo" }]);
+        } else {
+            if (c.numeroCuenta) filas.push([{ text: "Cuenta:", style: "contactName" }, { text: c.numeroCuenta, style: "contactInfo" }]);
+            if (c.tipoCuenta) filas.push([{ text: "Tipo:", style: "contactName" }, { text: c.tipoCuenta, style: "contactInfo" }]);
         }
-    ],
-    margin: [0, 10, 0, 5]
-});
+        if (c.correo) filas.push([{ text: "Correo:", style: "contactName" }, { text: c.correo, style: "contactInfo" }]);
+    });
 
-const getUnifiedFooterBlock = (firmaBase64: string | undefined, selloBase64: string | undefined, currencyRate: number) => {
-    const stackElements: any[] = [];
-    
-    if (currencyRate > 1) {
-        stackElements.push(getPaymentBlock());
-    }
-
-    stackElements.push(
-        { text: "SIN MAS QUE HACER REFERENCIA...", style: "farewellText", alignment: "center", margin: [0, 20, 0, 20] },
-        getSignatureBlockContent(firmaBase64, selloBase64),
-        getCompanyFooter()
-    );
+    if (filas.length === 0) return { text: "" };
 
     return {
-        stack: stackElements,
-        unbreakable: true 
+        stack: [
+            { text: "DATOS PARA PAGOS / TRANSFERENCIAS:", style: "contactName", margin: [0, 10, 0, 5] },
+            {
+                table: { widths: ["auto", "*"], body: filas },
+                layout: { defaultBorder: false, paddingLeft: () => 0, paddingTop: () => 2, paddingBottom: () => 2 },
+            },
+        ],
+        margin: [0, 10, 0, 5],
     };
+};
+
+const getUnifiedFooterBlock = (
+    firmaBase64: string | undefined,
+    selloBase64: string | undefined,
+    currencyRate: number,
+    ctx: Contexto
+) => {
+    const stackElements: any[] = [];
+
+    // Los datos de pago solo cuando el documento los pide Y hay cuentas que
+    // ensenar. Antes salian siempre que el total fuera en bolivares, aunque el
+    // documento no fuera de los que se pagan.
+    if (ctx.bloques.datosPago && ctx.cuentas.length > 0) {
+        stackElements.push(getPaymentBlock(ctx));
+    }
+
+    if (ctx.bloques.notasLegales && ctx.notas.length > 0) {
+        stackElements.push({
+            stack: ctx.notas.map(n => ({ text: "• " + n, style: "contactInfo" })),
+            margin: [0, 8, 0, 0],
+        });
+    }
+
+    if (ctx.bloques.despedida) {
+        stackElements.push({ text: "SIN MAS QUE HACER REFERENCIA...", style: "farewellText", alignment: "center", margin: [0, 20, 0, 20] });
+    }
+
+    if (ctx.bloques.firma || ctx.bloques.sello || ctx.bloques.datosFirmante) {
+        stackElements.push(getSignatureBlockContent(firmaBase64, selloBase64, ctx));
+    }
+
+    if (ctx.bloques.pieEmpresa) {
+        stackElements.push(getCompanyFooter(ctx));
+    }
+
+    return { stack: stackElements, unbreakable: true };
 };
 
 const COMMON_STYLES = {
@@ -221,6 +313,7 @@ const COMMON_STYLES = {
 
 // 1. ORDEN DE SERVICIO
 export async function generateOrderPDF(orden: any, SMRLogoBase64: string, options: PDFOptions = {}) {
+  const ctx = await cargarContexto('orden', options.ajustes);
   const pdfMake = await loadPdfDependencies();
   if (!pdfMake) return;
 
@@ -305,7 +398,7 @@ export async function generateOrderPDF(orden: any, SMRLogoBase64: string, option
       },
       { stack: [{ text: "NOTA:", bold: true, fontSize: 10 }, { ul: NOTAS_LEGALES, fontSize: 9 }] },
       
-      getUnifiedFooterBlock(firmaBase64, selloBase64, currency.rate)
+      getUnifiedFooterBlock(firmaBase64, selloBase64, currency.rate, ctx)
     ],
     styles: COMMON_STYLES,
     defaultStyle: { font: "Roboto" }
@@ -315,6 +408,7 @@ export async function generateOrderPDF(orden: any, SMRLogoBase64: string, option
 
 // 2. PRESUPUESTO
 export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: string, options: PDFOptions = {}) {
+    const ctx = await cargarContexto('presupuesto', options.ajustes);
     const pdfMake = await loadPdfDependencies();
     if (!pdfMake) return; 
     
@@ -388,7 +482,7 @@ export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: s
                 margin: [0, 0, 0, 15]
             },
             
-            getUnifiedFooterBlock(firmaBase64, selloBase64, currency.rate)
+            getUnifiedFooterBlock(firmaBase64, selloBase64, currency.rate, ctx)
         ],
         styles: COMMON_STYLES,
         defaultStyle: { font: "Roboto" }
@@ -398,6 +492,7 @@ export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: s
 
 // 3. RECIBO GENERAL
 export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatusData, SMRLogoBase64: string, options: PDFOptions = {}) {
+    const ctx = await cargarContexto('estadoCuenta', options.ajustes);
     const pdfMake = await loadPdfDependencies();
     if (!pdfMake) return;
 
@@ -446,7 +541,7 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
                 margin: [0, 0, 0, 20]
             },
             
-            getUnifiedFooterBlock(firmaBase64, selloBase64, currency.rate)
+            getUnifiedFooterBlock(firmaBase64, selloBase64, currency.rate, ctx)
         ],
         styles: COMMON_STYLES,
         defaultStyle: { font: "Roboto" }
@@ -457,6 +552,7 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
 
 // 4. NOTA DE ENTREGA — VENTAS DE CATÁLOGO
 export async function generateCatalogSalePDF(venta: any, SMRLogoBase64: string, options: PDFOptions = {}) {
+    const ctx = await cargarContexto('ventaCatalogo', options.ajustes);
     const pdfMake = await loadPdfDependencies();
     if (!pdfMake) return;
 
@@ -545,7 +641,7 @@ export async function generateCatalogSalePDF(venta: any, SMRLogoBase64: string, 
                 }
                 : { text: " ", margin: [0, 0, 0, 10] },
             { stack: [{ text: "NOTA:", bold: true, fontSize: 10 }, { ul: NOTAS_LEGALES, fontSize: 9 }] },
-            getUnifiedFooterBlock(firmaBase64, selloBase64, currency.rate)
+            getUnifiedFooterBlock(firmaBase64, selloBase64, currency.rate, ctx)
         ],
         styles: COMMON_STYLES,
         defaultStyle: { font: "Roboto" }
