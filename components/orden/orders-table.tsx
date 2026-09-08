@@ -24,6 +24,7 @@ import {
 
 import { formatCurrency } from "@/lib/utils/order-utils"
 import { EditorPDFModal } from "@/components/dashboard/EditorPDFModal"
+import { EnviarAlTallerModal } from "@/components/orden/EnviarAlTallerModal"
 import type { DatosDocumento } from "@/components/dashboard/DocumentoHTML"
 import { toast } from "sonner"
 import {
@@ -105,6 +106,15 @@ export function OrdersTable({
    * decide en el momento, viendo la hoja.
    */
   const [pdfEnEdicion, setPdfEnEdicion] = useState<DatosDocumento | null>(null)
+
+  /**
+   * La orden que se esta mandando a producir.
+   *
+   * Facturacion y taller vivian separados: se cobraba y despues alguien
+   * volvia a escribir a mano, en otra pantalla, lo mismo que ya estaba
+   * escrito. Se copiaba mal, o no se copiaba.
+   */
+  const [ordenAlTaller, setOrdenAlTaller] = useState<OrdenServicio | null>(null)
 
   const [isSyncing, setIsSyncing] = useState(false)
   const [isFixing, setIsFixing] = useState(false) 
@@ -269,6 +279,7 @@ export function OrdersTable({
                                         setIsPaymentModalOpen(true);
                                     },
                                     handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); },
+                                    handleEnviarAlTaller: (o:any)=>setOrdenAlTaller(o),
                                     handleDownloadPDF
                                 }}
                                 rates={rates}
@@ -308,6 +319,7 @@ export function OrdersTable({
                                         setIsPaymentModalOpen(true);
                                     }, 
                                     handleOpenHistory: (o:any)=>{setOrderForHistory(o); setIsHistoryModalOpen(true); }, 
+                                    handleEnviarAlTaller: (o:any)=>setOrdenAlTaller(o),
                                     handleDownloadPDF 
                                 }} 
                                 rates={rates} 
@@ -347,6 +359,12 @@ export function OrdersTable({
               </div>
           </DialogContent>
       </Dialog>
+
+      <EnviarAlTallerModal
+          open={!!ordenAlTaller}
+          onOpenChange={o => !o && setOrdenAlTaller(null)}
+          orden={ordenAlTaller}
+      />
 
       <EditorPDFModal
           open={!!pdfEnEdicion}
@@ -530,6 +548,17 @@ function OrdersSubTable({ data, actions, rates }: any) {
                                     <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <ActionButton icon={<Eye />} color="blue" onClick={() => actions.handleOpenDetail(o)} label="Ver Factura" />
                                         
+                                        {/* A la mesa de trabajo. Va al lado del
+                                            documento porque son las dos cosas que
+                                            se hacen despues de cobrar. */}
+                                        <button
+                                            onClick={() => actions.handleEnviarAlTaller(o)}
+                                            title="Mandar a producir en el taller"
+                                            className="w-10 h-10 rounded-xl flex items-center justify-center transition-all border active:scale-95 shadow-sm text-amber-600 bg-amber-50 border-amber-100 hover:bg-amber-500 hover:text-white dark:bg-amber-500/10 dark:border-amber-500/20 dark:hover:bg-amber-500"
+                                        >
+                                            <Hammer className="w-5 h-5" />
+                                        </button>
+
                                         <button
                                             onClick={() => actions.handleDownloadPDF(o)}
                                             title="Abrir el editor del documento"
@@ -595,6 +624,14 @@ function OrdersSubTable({ data, actions, rates }: any) {
 
                             <div className="flex items-center gap-2 flex-wrap pt-1">
                                 <ActionButton icon={<Eye />} color="blue" onClick={() => actions.handleOpenDetail(o)} label="Ver Factura" />
+
+                                <button
+                                    onClick={() => actions.handleEnviarAlTaller(o)}
+                                    title="Mandar a producir en el taller"
+                                    className="w-10 h-10 rounded-xl flex items-center justify-center transition-all border active:scale-95 shadow-sm text-amber-600 bg-amber-50 border-amber-100 hover:bg-amber-500 hover:text-white dark:bg-amber-500/10 dark:border-amber-500/20 dark:hover:bg-amber-500"
+                                >
+                                    <Hammer className="w-5 h-5" />
+                                </button>
 
                                 <button
                                     onClick={() => actions.handleDownloadPDF(o)}

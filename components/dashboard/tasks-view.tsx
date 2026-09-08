@@ -1,7 +1,7 @@
 // @/components/dashboard/tasks-view.tsx
 "use client"
 
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useAuth } from "@/lib/auth-context"
 import { db } from "@/lib/firebase"
@@ -23,7 +23,7 @@ import { toast } from "sonner"
 import { 
   ClipboardList, Plus, User, Phone, PenTool, 
   Ruler, Printer, Scissors, Eye,
-  CheckCircle2, Clock, Trash2, Layers
+  CheckCircle2, Clock, Trash2, Layers, Search, X, Filter
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -45,6 +45,14 @@ const AREAS_TALLER = [
 
 interface ServiceOrder {
     id?: string;
+    /**
+     * El número de la orden facturada de la que salió este trabajo.
+     *
+     * Es el idioma que se habla en el taller: nadie pregunta por «la orden de
+     * trabajo de Wilmar», preguntan por «la 1816». Sin esto no había forma de
+     * buscar un trabajo por el número que el cliente tiene en su recibo.
+     */
+    ordenNumero?: string | number;
     cliente: string;
     telefono: string;
     responsable: string;
@@ -75,6 +83,12 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
     const [formData, setFormData] = useState<ServiceOrder>(emptyOrder)
     const [activeTab, setActiveTab] = useState(areaPriorizada || "DISENO")
     const [isLoading, setIsLoading] = useState(true)
+
+    // Filtros. Vacíos = no filtran: la pantalla arranca enseñando todo.
+    const [busqueda, setBusqueda] = useState("")
+    const [filtroMaterial, setFiltroMaterial] = useState("")
+    const [desde, setDesde] = useState("")
+    const [hasta, setHasta] = useState("")
 
     useEffect(() => {
         const unsub = onSnapshot(collection(db, "ordenes_servicio"), (snap) => {
@@ -166,8 +180,57 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
         }
     }, [userData, isAdmin]);
 
-    const activeOrders = ordenesServicio.filter(o => o.estado === "PENDIENTE" && o.areaActual === activeTab);
-    const completedOrders = ordenesServicio.filter(o => o.estado === "COMPLETADO");
+    /**
+     * Lo que pasa los filtros.
+     *
+     * El buscador mira por donde de verdad se busca en el taller: el numero de
+     * orden, el cliente, lo que hay que hacer y quien lo hace. Sin tildes y
+     * sin mayusculas, porque nadie las teclea al buscar con prisa.
+     *
+     * Las fechas miran la de ENTREGA, no la de creacion: en el taller la
+     * pregunta siempre es que sale esta semana.
+     */
+    const sinTildes = (t: any) => String(t ?? '')
+        .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+    const pasaFiltros = useCallback((o: ServiceOrder) => {
+        if (filtroMaterial && !(o.materiales || []).includes(filtroMaterial)) return false
+
+        if (desde || hasta) {
+            const f = o.fechaEntrega || ''
+            if (!f) return false
+            if (desde && f < desde) return false
+            if (hasta && f > hasta) return false
+        }
+
+        const q = sinTildes(busqueda).trim()
+        if (!q) return true
+
+        const heno = sinTildes([
+            o.ordenNumero, o.cliente, o.descripcion, o.responsable,
+            o.observaciones, o.notaMaterial, (o.materiales || []).join(' '),
+            (o.adicionales || []).join(' '),
+        ].join(' '))
+
+        // Todas las palabras, en cualquier orden: "banner wilmar" encuentra el
+        // banner de Wilmar aunque el nombre vaya antes en el texto.
+        return q.split(/\s+/).every(palabra => heno.includes(palabra))
+    }, [busqueda, filtroMaterial, desde, hasta])
+
+    const filtrando = !!(busqueda.trim() || filtroMaterial || desde || hasta)
+
+    const activeOrders = ordenesServicio.filter(o =>
+        o.estado === "PENDIENTE" && o.areaActual === activeTab && pasaFiltros(o));
+
+    const completedOrders = ordenesServicio.filter(o =>
+        o.estado === "COMPLETADO" && pasaFiltros(o));
+
+    /** Los materiales que de verdad aparecen, para no ofrecer filtros vacios. */
+    const materialesEnUso = useMemo(() => {
+        const vistos = new Set<string>()
+        ordenesServicio.forEach(o => (o.materiales || []).forEach(m => vistos.add(m)))
+        return MATERIALES.filter(m => vistos.has(m))
+    }, [ordenesServicio])
 
     return (
         <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6 md:space-y-8 pb-24">
@@ -190,6 +253,80 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                     >
                         <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" /> Crear Orden de Trabajo
                     </Button>
+                )}
+            </div>
+
+            {/* BUSCADOR Y FILTROS.
+
+                En el taller se busca por el numero que el cliente tiene en el
+                recibo, por el nombre, o por que material toca hoy. Sin esto
+                habia que recorrer las tarjetas a ojo. */}
+            <div className="bg-white dark:bg-[#1c1c1e] p-3 sm:p-4 rounded-[1.5rem] sm:rounded-[2rem] border border-black/5 shadow-sm space-y-3">
+                <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="relative flex-1 min-w-0">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input
+                            value={busqueda}
+                            onChange={e => setBusqueda(e.target.value)}
+                            placeholder="Buscar por N° de orden, cliente, trabajo o responsable..."
+                            className="w-full h-11 pl-10 pr-9 rounded-xl bg-slate-50 dark:bg-white/5 border-none text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/30"
+                        />
+                        {busqueda && (
+                            <button onClick={() => setBusqueda('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                <X className="w-4 h-4" />
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Por fecha de ENTREGA, no de creacion: en el taller la
+                        pregunta siempre es que sale esta semana. */}
+                    <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Entrega</span>
+                        <input type="date" value={desde} onChange={e => setDesde(e.target.value)}
+                            className="h-11 px-2.5 rounded-xl bg-slate-50 dark:bg-white/5 border-none text-[11px] font-bold outline-none" />
+                        <span className="text-slate-300">—</span>
+                        <input type="date" value={hasta} onChange={e => setHasta(e.target.value)}
+                            className="h-11 px-2.5 rounded-xl bg-slate-50 dark:bg-white/5 border-none text-[11px] font-bold outline-none" />
+                    </div>
+                </div>
+
+                {materialesEnUso.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        <Filter className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                        {materialesEnUso.map(m => (
+                            <button
+                                key={m}
+                                onClick={() => setFiltroMaterial(prev => prev === m ? '' : m)}
+                                className={cn(
+                                    'h-7 px-3 rounded-full text-[10px] font-black uppercase tracking-wide transition-colors',
+                                    filtroMaterial === m
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-slate-100 dark:bg-white/5 text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10'
+                                )}
+                            >
+                                {m}
+                            </button>
+                        ))}
+
+                        {filtrando && (
+                            <button
+                                onClick={() => { setBusqueda(''); setFiltroMaterial(''); setDesde(''); setHasta('') }}
+                                className="h-7 px-3 rounded-full text-[10px] font-black uppercase tracking-wide text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 ml-auto"
+                            >
+                                Quitar filtros
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                {/* Cuantos quedan de cada lado con los filtros puestos: sin esto
+                    un filtro que no encuentra nada se confunde con un taller
+                    vacio. */}
+                {filtrando && (
+                    <p className="text-[10px] font-bold text-slate-400">
+                        {activeOrders.length} {activeOrders.length === 1 ? 'pendiente' : 'pendientes'} en esta área
+                        {' · '}{completedOrders.length} {completedOrders.length === 1 ? 'finalizada' : 'finalizadas'} en total
+                    </p>
                 )}
             </div>
 
@@ -235,8 +372,14 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                             {activeOrders.length === 0 && (
                                 <div className="col-span-full py-20 flex flex-col items-center justify-center opacity-40">
                                     <area.icon className="w-20 h-20 mb-4" />
-                                    <p className="text-xl font-black uppercase italic">Área Despejada</p>
-                                    <p className="text-xs font-bold uppercase tracking-widest">No hay trabajos pendientes en {area.label}</p>
+                                    <p className="text-xl font-black uppercase italic">
+                                        {filtrando ? 'Nada con esos filtros' : 'Área Despejada'}
+                                    </p>
+                                    <p className="text-xs font-bold uppercase tracking-widest">
+                                        {filtrando
+                                            ? 'Hay trabajos, pero ninguno cuadra con lo que buscas'
+                                            : `No hay trabajos pendientes en ${area.label}`}
+                                    </p>
                                 </div>
                             )}
                         </div>
@@ -436,6 +579,14 @@ function OrderCard({ orden, onView, onEdit, onMove, onComplete, onDelete, isAdmi
         <Card className="rounded-[1.5rem] sm:rounded-[2rem] border border-slate-200 dark:border-white/10 shadow-sm hover:shadow-xl transition-all overflow-hidden flex flex-col bg-white dark:bg-[#1c1c1e]">
             <div className="p-4 sm:p-5 flex justify-between items-start border-b border-black/5 bg-slate-50/50 dark:bg-white/5">
                 <div className="min-w-0 flex-1 pr-2">
+                    {/* El número primero: es por donde se pregunta en el taller
+                        —«la 1816», no «la de Wilmar»— y es lo que el cliente
+                        tiene en su recibo. */}
+                    {orden.ordenNumero && (
+                        <span className="inline-block text-[10px] font-black text-blue-600 bg-blue-50 dark:bg-blue-500/15 rounded-lg px-1.5 py-0.5 mb-1">
+                            #{orden.ordenNumero}
+                        </span>
+                    )}
                     <h3 className="font-black text-base sm:text-lg uppercase italic leading-tight text-slate-900 dark:text-white truncate">{orden.cliente}</h3>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1 mt-1">
                         <Clock size={10} /> {orden.fechaEntrega ? new Date(orden.fechaEntrega).toLocaleDateString('es-VE', {day:'2-digit',month:'2-digit',year:'2-digit'}) : "Sin fecha"}
