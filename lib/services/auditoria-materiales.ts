@@ -83,6 +83,16 @@ export interface RenglonAuditado {
     material: string | null;
     /** El producto del catálogo, cuando el material está dado de alta. */
     productoId: string | null;
+    /**
+     * En qué se usó el material: la variante del catálogo.
+     *
+     * El mismo rollo de banner sale como aviso, como pendón, como backing o
+     * como afiche, y todos valen igual. Sin esto el balance sabe cuánto banner
+     * se gastó pero no en qué, que es justo lo que hace falta para decidir qué
+     * comprar. La máquina no la puede adivinar: la pone quien audita.
+     */
+    varianteId?: string | null;
+    varianteNombre?: string | null;
     m2: number;
     laminado: boolean;
     unidad?: string;
@@ -118,7 +128,12 @@ export interface PlanAuditoria {
      * para que quien resuelva a mano no tenga que escribir el nombre y
      * arriesgarse a inventar uno que no cuadre con nada.
      */
-    opciones: { nombre: string; productoId: string | null }[];
+    opciones: {
+        nombre: string;
+        productoId: string | null;
+        /** Los usos que admite ese material, si está dado de alta. */
+        variantes: { id: string; nombre: string }[];
+    }[];
 }
 
 const m2De = (item: any): number => {
@@ -209,20 +224,29 @@ export async function planificarAuditoria(anio: number, mes: number): Promise<Pl
     // Lo que se puede elegir a mano: primero el catálogo —es lo que de verdad
     // se compra— y detrás los materiales que las reglas nombran pero que
     // todavía no están dados de alta.
-    const opciones: { nombre: string; productoId: string | null }[] = [];
+    const opciones: PlanAuditoria["opciones"] = [];
     const vistos = new Set<string>();
 
-    const anotar = (nombre: string, productoId: string | null) => {
+    const anotar = (nombre: string, productoId: string | null, prod?: any) => {
         const clave = nombre.trim().toLowerCase();
         if (!clave || vistos.has(clave)) return;
         vistos.add(clave);
-        opciones.push({ nombre: nombre.trim(), productoId });
+
+        const variantes = (prod?.variantes || [])
+            .filter((v: any) => v?.id && v?.nombre)
+            .map((v: any) => ({ id: String(v.id), nombre: String(v.nombre) }));
+
+        opciones.push({ nombre: nombre.trim(), productoId, variantes });
     };
 
     catalogo
         .filter((c: any) => c.activo !== false)
-        .forEach((c: any) => anotar(String(c.nombre || ""), c.__id));
-    REGLAS.forEach(r => anotar(r.material, idDeCatalogo(r.material, catalogo)));
+        .forEach((c: any) => anotar(String(c.nombre || ""), c.__id, c));
+
+    REGLAS.forEach(r => {
+        const id = idDeCatalogo(r.material, catalogo);
+        anotar(r.material, id, catalogo.find((c: any) => c.__id === id));
+    });
 
     const ordenesTocadas = new Set([...automaticos, ...manuales].map(r => r.ordenId));
 
@@ -282,6 +306,8 @@ export async function aplicarAuditoria(plan: PlanAuditoria): Promise<number> {
                     materialAuditado: {
                         nombre: r.material,
                         productoId: r.productoId,
+                        varianteId: r.varianteId ?? null,
+                        varianteNombre: r.varianteNombre ?? null,
                         m2: r.m2,
                         laminado: r.laminado,
                         auditadoEn: marca,

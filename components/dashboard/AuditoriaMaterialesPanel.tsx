@@ -49,6 +49,60 @@ interface Props {
     onCambiarMes?: (anio: number, mes: number) => void
 }
 
+
+/**
+ * LOS DOS SELECTORES DE UN RENGLON.
+ *
+ * Listas y no texto libre: un nombre escrito a mano no cuadra con el catalogo
+ * y ensucia el balance sin que se note.
+ *
+ * El uso solo aparece cuando el material elegido tiene usos dados de alta. Un
+ * desplegable vacio se lee como "falta algo", y no falta nada.
+ */
+function SelectoresRenglon({ material, varianteId, opciones, onMaterial, onVariante, compacto }: {
+    material: string
+    varianteId?: string
+    opciones: PlanAuditoria['opciones']
+    onMaterial: (v: string) => void
+    onVariante: (v: string) => void
+    compacto?: boolean
+}) {
+    const op = opciones.find(o => o.nombre === material)
+    const usos = op?.variantes || []
+
+    const base = "shrink-0 h-7 rounded-lg px-2 text-[10px] font-black uppercase border outline-none"
+
+    return (
+        <>
+            <select
+                value={material}
+                onChange={e => onMaterial(e.target.value)}
+                className={cn(base, compacto ? "w-32" : "w-40",
+                    material
+                        ? "border-emerald-300 bg-white dark:bg-black/30 text-emerald-700 dark:text-emerald-400"
+                        : "border-amber-300 bg-white/80 dark:bg-black/30 text-amber-700 dark:text-amber-500")}
+            >
+                <option value="">¿Qué material?</option>
+                {opciones.map(o => (
+                    <option key={o.nombre} value={o.nombre}>{o.nombre}</option>
+                ))}
+            </select>
+
+            {usos.length > 0 && (
+                <select
+                    value={varianteId || ''}
+                    onChange={e => onVariante(e.target.value)}
+                    className={cn(base, compacto ? "w-32" : "w-36",
+                        "border-indigo-200 bg-white dark:bg-black/30 text-indigo-700 dark:text-indigo-400")}
+                >
+                    <option value="">¿En qué se usó?</option>
+                    {usos.map(v => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+                </select>
+            )}
+        </>
+    )
+}
+
 export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}) {
     const { userData } = useAuth()
     const puedeAplicar = esAdmin(userData?.rol)
@@ -64,15 +118,30 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
     const [verOrdenes, setVerOrdenes] = useState(false)
 
     /**
-     * Lo que una persona decidio para los renglones que la maquina no supo
-     * leer, mientras no se guarda.
+     * Lo que una persona corrigio, mientras no se guarda.
+     *
+     * Vale para cualquier renglon, no solo para los que la maquina no supo
+     * leer: lo deducido de una descripcion se equivoca, y quien audita tiene
+     * que poder decir "esto no era vinil, era clear" sin salir de aqui.
      *
      * La clave lleva la orden y la posicion del renglon dentro de ella: es lo
      * mismo con lo que se escribe despues, asi que no se pueden cruzar.
      */
-    const [aMano, setAMano] = useState<Record<string, string>>({})
+    const [aMano, setAMano] = useState<Record<string, { material: string; varianteId?: string }>>({})
 
     const clave = (r: RenglonAuditado) => `${r.ordenId}:${r.indice}`
+
+    /** Cambia el material de un renglon; al cambiarlo, el uso anterior deja de valer. */
+    const ponerMaterial = (k: string, material: string) =>
+        setAMano(prev => {
+            const copia = { ...prev }
+            if (material) copia[k] = { material }
+            else delete copia[k]
+            return copia
+        })
+
+    const ponerVariante = (k: string, varianteId: string) =>
+        setAMano(prev => prev[k] ? { ...prev, [k]: { ...prev[k], varianteId: varianteId || undefined } } : prev)
 
     const calcular = useCallback(async (fecha: Date) => {
         setCalculando(true)
@@ -113,15 +182,34 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
     const planFinal = useMemo(() => {
         if (!plan) return null
 
-        const resueltos: RenglonAuditado[] = plan.manuales
-            .filter(r => aMano[clave(r)])
-            .map(r => {
-                const nombre = aMano[clave(r)]
-                const op = plan.opciones.find(o => o.nombre === nombre)
-                return { ...r, material: nombre, productoId: op?.productoId ?? null, origen: 'manual' as const }
-            })
+        const corregir = (r: RenglonAuditado): RenglonAuditado => {
+            const puesto = aMano[clave(r)]
+            if (!puesto) return r
 
-        return { ...plan, automaticos: [...plan.automaticos, ...resueltos] }
+            const op = plan.opciones.find(o => o.nombre === puesto.material)
+            const va = op?.variantes.find(v => v.id === puesto.varianteId)
+
+            return {
+                ...r,
+                material: puesto.material,
+                productoId: op?.productoId ?? null,
+                varianteId: va?.id ?? null,
+                varianteNombre: va?.nombre ?? null,
+                origen: 'manual' as const,
+            }
+        }
+
+        // Los corregidos entran aunque ya estuvieran auditados: corregir un
+        // material equivocado es justo lo que hay que poder volver a escribir.
+        const tocados = new Set(Object.keys(aMano))
+        const esTocado = (r: RenglonAuditado) => tocados.has(clave(r))
+
+        const automaticos = [
+            ...plan.automaticos.map(r => esTocado(r) ? { ...corregir(r), yaAuditado: false } : r),
+            ...plan.manuales.filter(esTocado).map(corregir),
+        ]
+
+        return { ...plan, automaticos }
     }, [plan, aMano])
 
     const aplicar = async () => {
@@ -327,14 +415,24 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
                                                                     </span>
                                                                 )}
 
-                                                                <span className={cn(
-                                                                    "shrink-0 text-[9px] font-black uppercase rounded-full px-2 py-0.5 w-32 text-center truncate",
-                                                                    r.yaAuditado ? "text-emerald-600 bg-emerald-100 dark:bg-emerald-500/15"
-                                                                        : r.auto ? "text-indigo-600 bg-indigo-100 dark:bg-indigo-500/15"
-                                                                        : "text-amber-600 bg-amber-100 dark:bg-amber-500/15"
-                                                                )}>
-                                                                    {r.yaAuditado ? 'ya auditado' : (r.material || 'a mano')}
-                                                                </span>
+                                                                {/* Editable, no una etiqueta.
+                                                                    Lo que la maquina dedujo se equivoca, y quien
+                                                                    audita tiene que poder decir "esto no era vinil,
+                                                                    era clear" aqui mismo, viendo la orden entera. */}
+                                                                <SelectoresRenglon
+                                                                    compacto
+                                                                    material={aMano[clave(r)]?.material ?? (r.material || '')}
+                                                                    varianteId={aMano[clave(r)]?.varianteId ?? (r.varianteId || undefined)}
+                                                                    opciones={plan.opciones}
+                                                                    onMaterial={v => ponerMaterial(clave(r), v)}
+                                                                    onVariante={v => ponerVariante(clave(r), v)}
+                                                                />
+
+                                                                {r.yaAuditado && !aMano[clave(r)] && (
+                                                                    <span className="shrink-0 text-[8px] font-black uppercase text-emerald-600 bg-emerald-100 dark:bg-emerald-500/15 rounded-full px-1.5">
+                                                                        guardado
+                                                                    </span>
+                                                                )}
 
                                                                 <span className="shrink-0 tabular-nums text-slate-400 w-16 text-right">
                                                                     {r.m2 > 0 ? `${n2(r.m2)} m²` : (r.tiempo || '—')}
@@ -387,39 +485,24 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
                                         <div className="px-3.5 pb-3.5 max-h-96 overflow-y-auto custom-scrollbar space-y-1">
                                             {plan.manuales.map((r, i) => {
                                                 const k = clave(r)
-                                                const elegido = aMano[k] || ''
+                                                const puesto = aMano[k]
                                                 return (
                                                     <div key={`${r.ordenId}-${r.indice}-${i}`} className={cn(
                                                         "flex flex-wrap items-center gap-2 text-[11px] rounded-lg px-2.5 py-1.5 transition-colors",
-                                                        elegido ? "bg-emerald-50 dark:bg-emerald-500/10" : "bg-white/70 dark:bg-black/20"
+                                                        puesto ? "bg-emerald-50 dark:bg-emerald-500/10" : "bg-white/70 dark:bg-black/20"
                                                     )}>
                                                         <span className="font-black tabular-nums shrink-0 w-12">#{r.ordenNumero}</span>
                                                         <span className="flex-1 min-w-[8rem] truncate font-bold text-slate-600 dark:text-slate-300">
                                                             {r.descripcion || <span className="italic text-slate-400">sin descripción</span>}
                                                         </span>
 
-                                                        {/* Lista y no texto libre: un nombre inventado no cuadra
-                                                            con nada y ensucia el balance sin que se note. */}
-                                                        <select
-                                                            value={elegido}
-                                                            onChange={e => setAMano(prev => {
-                                                                const copia = { ...prev }
-                                                                if (e.target.value) copia[k] = e.target.value
-                                                                else delete copia[k]
-                                                                return copia
-                                                            })}
-                                                            className={cn(
-                                                                "shrink-0 h-7 rounded-lg px-2 text-[10px] font-black uppercase border outline-none w-40",
-                                                                elegido
-                                                                    ? "border-emerald-300 bg-white dark:bg-black/30 text-emerald-700 dark:text-emerald-400"
-                                                                    : "border-amber-200 bg-white/80 dark:bg-black/30 text-amber-700 dark:text-amber-500"
-                                                            )}
-                                                        >
-                                                            <option value="">¿Qué material?</option>
-                                                            {plan.opciones.map(o => (
-                                                                <option key={o.nombre} value={o.nombre}>{o.nombre}</option>
-                                                            ))}
-                                                        </select>
+                                                        <SelectoresRenglon
+                                                            material={puesto?.material || ''}
+                                                            varianteId={puesto?.varianteId}
+                                                            opciones={plan.opciones}
+                                                            onMaterial={v => ponerMaterial(k, v)}
+                                                            onVariante={v => ponerVariante(k, v)}
+                                                        />
 
                                                         {r.tiempo && <span className="shrink-0 text-slate-400 tabular-nums">{r.tiempo}</span>}
                                                         <span className="shrink-0 tabular-nums text-slate-500 w-14 text-right">${n2(r.montoUSD)}</span>

@@ -249,12 +249,22 @@ export const consumoDesdeOrdenes = (ordenes: { items?: any[] }[]): ConsumoMateri
                 material.renglonesEstimados = (material.renglonesEstimados || 0) + 1;
             }
 
-            // El laminado se sigue como servicio aparte del material base: son
-            // los mismos metros de vinil, pero gastan ademas rollo de laminado.
-            const nombreServicio = aud?.laminado ? "Con laminado" : "Impresion";
+            /**
+             * EN QUE SE USO EL MATERIAL.
+             *
+             * Lo primero es la variante que se audito: "Aviso", "Pendon",
+             * "Stickers". Es lo que contesta la pregunta util —de este rollo,
+             * que sale mas— y por eso manda.
+             *
+             * Sin variante quedan los dos cajones de siempre. El laminado se
+             * sigue aparte del material base: son los mismos metros de vinil,
+             * pero gastan ademas rollo de laminado.
+             */
+            const nombreServicio = aud?.varianteNombre
+                || (aud?.laminado ? "Con laminado" : estimado ? "Sin clasificar" : "Impresion");
             let servicio = material.porServicio.find(x => x.nombre === nombreServicio);
             if (!servicio) {
-                servicio = { varianteId: nombreServicio, nombre: nombreServicio, m2: 0, unidades: 0, ingresosUSD: 0 };
+                servicio = { varianteId: aud?.varianteId || nombreServicio, nombre: nombreServicio, m2: 0, unidades: 0, ingresosUSD: 0 };
                 material.porServicio.push(servicio);
             }
             servicio.m2 += m2;
