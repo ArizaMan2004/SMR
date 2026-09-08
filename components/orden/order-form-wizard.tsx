@@ -388,7 +388,7 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
             </header>
 
             <main className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden min-h-0">
-                <section className="flex-none lg:flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-950 lg:border-r">
+                <section className="flex-none lg:flex-1 flex flex-col min-h-0 lg:h-full bg-white dark:bg-slate-950 lg:border-r">
                     <div className="p-4 px-6 flex justify-between items-center border-b bg-slate-50/50">
                         <h3 className="font-black text-[10px] uppercase text-slate-500 tracking-widest flex items-center gap-2">
                             <Layers className="w-4 h-4" /> Estructura de la Orden
@@ -403,7 +403,7 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                         )}
                     </div>
                     
-                    <ScrollArea className="flex-1">
+                    <ScrollArea className="flex-1 min-h-0">
                         <div className="p-6 space-y-8 pb-20">
                             {Object.entries(groupedItems).map(([subC, items]) => (
                                 <div key={subC} className="space-y-3">
@@ -543,8 +543,11 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                 </section>
 
                 <aside className="w-full lg:w-[350px] shrink-0 bg-[#f1f5f9] dark:bg-black border-t lg:border-t-0 lg:border-l flex flex-col min-h-0">
-                    <ScrollArea className="flex-1">
-                        <div className="p-5 space-y-6">
+                    <ScrollArea className="flex-1 min-h-0">
+                        {/* Hueco al final para que el pie pegado no tape el
+                            ultimo campo: sin esto, escribir en Instrucciones y
+                            no ver lo que se escribe. */}
+                        <div className="p-5 pb-32 space-y-6">
                             <section className="space-y-3 relative">
                                 <div className="flex justify-between items-center mb-1">
                                     <Label className="text-[9px] font-black uppercase text-slate-400">Entidad Cliente</Label>
@@ -593,7 +596,17 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                         </div>
                     </ScrollArea>
 
-                    <div className="p-4 bg-white dark:bg-slate-900 border-t space-y-3 shrink-0">
+                    {/* EL TOTAL Y EL BOTON, SIEMPRE A LA VISTA.
+
+                        En pantallas estrechas el panel se apila debajo del
+                        listado y esto quedaba al final de una columna larguisima:
+                        "Generar Orden" caia en el pixel 1194 con la pantalla
+                        acabando en 922. Habia que adivinar que existia y bajar a
+                        buscarlo con el cliente delante.
+
+                        Pegado al fondo se ve siempre, que es lo que se espera de
+                        un total: es la respuesta a lo que se esta haciendo. */}
+                    <div className="p-4 bg-white dark:bg-slate-900 border-t space-y-3 shrink-0 sticky bottom-0 z-20 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.25)]">
                         <div className="flex justify-between items-end px-1 pb-1">
                             <div>
                                 <div className="flex items-center gap-2 mb-1.5">
