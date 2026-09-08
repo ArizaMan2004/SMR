@@ -64,6 +64,8 @@ import {
     type TipoCliente,
 } from '@/lib/services/catalog-service'
 import { puedeGestionarInventario } from '@/lib/roles'
+import { MaterialesTallerPanel } from '@/components/dashboard/MaterialesTallerPanel'
+import { Dialog as DlgMat, DialogContent as DlgMatContent } from '@/components/ui/dialog'
 
 // ============================================================
 // TIPOS LOCALES
@@ -181,6 +183,7 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     const [isCatModalOpen, setIsCatModalOpen] = useState(false)
     const [isCartItemModalOpen, setIsCartItemModalOpen] = useState(false)
     const [isReceiptOpen, setIsReceiptOpen] = useState(false)
+    const [isMaterialesOpen, setIsMaterialesOpen] = useState(false)
 
     /** La venta que se esta preparando para entregar. */
     const [pdfEnEdicion, setPdfEnEdicion] = useState<DatosDocumento | null>(null)
@@ -690,6 +693,13 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                         <Button variant="outline" onClick={() => { setEditingCat(null); setCatForm({ ...CAT_DEFAULT }); setIsCatModalOpen(true) }}
                             className="h-12 rounded-2xl border-black/10 dark:border-white/10 font-black uppercase text-xs px-4">
                             <Tag className="w-4 h-4 mr-2" /> Categorías
+                        </Button>
+                        {/* Los materiales del taller viven aquí, al lado de las
+                            categorías: es donde ya se configura qué se vende y a
+                            cómo. Buscarlos en otra pantalla sería una adivinanza. */}
+                        <Button variant="outline" onClick={() => setIsMaterialesOpen(true)}
+                            className="h-12 rounded-2xl border-black/10 dark:border-white/10 font-black uppercase text-xs px-4">
+                            <Layers className="w-4 h-4 mr-2" /> Materiales de taller
                         </Button>
                         <Button onClick={openNewProduct}
                             className="bg-blue-600 hover:bg-blue-700 text-white h-12 rounded-2xl px-5 font-black uppercase tracking-widest text-xs shadow-lg shadow-blue-500/20">
@@ -2081,6 +2091,12 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                 firmaBase64={firmaBase64}
                 selloBase64={selloBase64}
             />
+
+            <DlgMat open={isMaterialesOpen} onOpenChange={setIsMaterialesOpen}>
+                <DlgMatContent className="max-w-3xl p-0 border-none bg-transparent shadow-none max-h-[90vh] overflow-y-auto custom-scrollbar">
+                    <MaterialesTallerPanel />
+                </DlgMatContent>
+            </DlgMat>
 
             <Dialog open={isReceiptOpen} onOpenChange={setIsReceiptOpen}>
                 <DialogContent className="sm:max-w-md rounded-[2.5rem] bg-white dark:bg-[#1c1c1e] border-0 shadow-2xl p-0 overflow-hidden max-h-[90vh]">

@@ -66,6 +66,14 @@ export interface MaterialTaller {
 
 export interface ConfigMaterialesTaller {
     materiales?: MaterialTaller[];
+    /**
+     * Precio por m² del vinil blanco que se pega DETRÁS de una impresión.
+     *
+     * Un clear sobre acrílico no se ve si no lleva fondo: el blanco es lo que
+     * hace que el color se lea. Es material aparte del sustrato y se cobra
+     * aparte, así que tiene su propio precio.
+     */
+    fondoBlancoM2?: number;
     actualizadoEn?: string;
 }
 
@@ -227,10 +235,41 @@ export const precioPegadoM2 = (
 
 // ============================================================ escritura
 
-export const guardarMaterialesTaller = async (materiales: MaterialTaller[]) => {
+/** Lo que cuesta el m² de fondo blanco. Cero: no configurado. */
+export const precioFondoBlancoM2 = (cfg: ConfigMaterialesTaller): number =>
+    Number(cfg?.fondoBlancoM2) || 0;
+
+/**
+ * Lo que se cobra por montar una impresión sobre un sólido.
+ *
+ * Se calcula sobre los metros de la pieza: el sustrato se corta a la medida de
+ * lo que se pega, así que si la impresión mide 2 m² el PVC mide 2 m².
+ *
+ * Devuelve cero cuando falta el precio del sustrato. El formulario lo trata
+ * como "no sé" y deja escribirlo a mano, en vez de proponer un cero que
+ * alguien acepte sin mirar.
+ */
+export const costoPegado = (
+    cfg: ConfigMaterialesTaller,
+    opciones: { material?: string; grosor?: string; m2: number; fondoBlanco?: boolean }
+): { sustrato: number; fondo: number; total: number } => {
+    const m2 = Math.max(0, Number(opciones.m2) || 0);
+    const sustrato = precioPegadoM2(cfg, opciones.material, opciones.grosor) * m2;
+    const fondo = opciones.fondoBlanco ? precioFondoBlancoM2(cfg) * m2 : 0;
+    return {
+        sustrato: Math.round(sustrato * 100) / 100,
+        fondo: Math.round(fondo * 100) / 100,
+        total: Math.round((sustrato + fondo) * 100) / 100,
+    };
+};
+
+export const guardarMaterialesTaller = async (
+    materiales: MaterialTaller[],
+    extras?: { fondoBlancoM2?: number }
+) => {
     await setDoc(
         REF(),
-        { materiales, actualizadoEn: new Date().toISOString() },
+        { materiales, ...(extras || {}), actualizadoEn: new Date().toISOString() },
         { merge: true }
     );
 };

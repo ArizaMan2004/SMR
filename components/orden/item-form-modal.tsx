@@ -29,6 +29,11 @@ import {
     type CatalogoCategoria,
 } from "@/lib/services/catalog-service"
 import { SelectorCatalogo } from "@/components/orden/SelectorCatalogo"
+import {
+    subscribeToMaterialesTaller, materialesDePegado, materialesDeCorte,
+    buscarMaterial, grosoresDe, coloresDe, costoPegado, precioFondoBlancoM2,
+    type ConfigMaterialesTaller,
+} from "@/lib/services/materiales-taller"
 
 // --- CONSTANTES ---
 const PRECIO_LASER_POR_MINUTO = 0.80;
@@ -83,7 +88,11 @@ const getInitialState = () => ({
   
   // --- ESTADOS PEGADO (PVC / Acrilico) ---
   impresionPegado: false,
-  tipoPegado: "PVC", // 'PVC' | 'Acrilico'
+  tipoPegado: "PVC", // el sustrato rigido: PVC, PVC Rigido, Acrilico...
+  grosorPegado: "",
+  // Un clear sobre acrilico no se ve si no lleva fondo: el blanco es lo que
+  // hace que el color se lea. Es material aparte y se cobra aparte.
+  fondoBlancoPegado: false,
   proveedorPegado: "taller", // 'taller' o 'cliente'
   precioPegado: 0,
   
@@ -122,6 +131,9 @@ export function ItemFormModal({
 
   // --- Catálogo de precios ---
   const [catalogProductos, setCatalogProductos] = useState<any[]>([])
+
+  /** Los materiales del taller: que se corta, que se pega y a como. */
+  const [matTaller, setMatTaller] = useState<ConfigMaterialesTaller>({})
   const [catalogCategorias, setCatalogCategorias] = useState<CatalogoCategoria[]>([])
   const [showCatalogPicker, setShowCatalogPicker] = useState(false)
   const [catalogSearch, setCatalogSearch] = useState('')
@@ -155,6 +167,35 @@ export function ItemFormModal({
   }, [])
 
   useEffect(() => subscribeToCatalogoCategories(setCatalogCategorias), [])
+  useEffect(() => subscribeToMaterialesTaller(setMatTaller), [])
+
+  // Los sustratos y sus grosores salen de la configuración, no de una lista
+  // escrita aquí: así se puede añadir uno nuevo sin tocar código.
+  const sustratosPegado = useMemo(() => materialesDePegado(matTaller), [matTaller])
+  const grosoresPegado = useMemo(
+      () => grosoresDe(buscarMaterial(matTaller, state.tipoPegado)),
+      [matTaller, state.tipoPegado]
+  )
+
+  /**
+   * Lo que costaría el montaje según lo configurado.
+   *
+   * Se propone, no se impone: quien factura puede escribir otro precio y ese
+   * manda. Sin precio configurado da cero y no se propone nada, en vez de
+   * sugerir un cero que alguien acepte sin mirar.
+   */
+  const pegadoSugerido = useMemo(() => {
+      const x = parseFloat(state.medidaXCm) || 0
+      const y = parseFloat(state.medidaYCm) || 0
+      const c = parseFloat(state.cantidad) || 1
+      const m2 = (x > 0 && y > 0) ? (x / 100) * (y / 100) * c : 0
+      return costoPegado(matTaller, {
+          material: state.tipoPegado,
+          grosor: state.grosorPegado,
+          m2,
+          fondoBlanco: !!state.fondoBlancoPegado,
+      })
+  }, [matTaller, state.tipoPegado, state.grosorPegado, state.fondoBlancoPegado, state.medidaXCm, state.medidaYCm, state.cantidad])
 
   // Reset selección de material cuando cambia tipoServicio
   useEffect(() => {
@@ -513,7 +554,12 @@ export function ItemFormModal({
         // Pegado detallado
         if (state.impresionPegado) {
             const prov = state.proveedorPegado === 'taller' ? "(Taller)" : "(Cliente)";
-            detallesExtras.push(`Pegado en ${state.tipoPegado} ${prov}`);
+            // El grosor va en el texto: "pegado en PVC" no dice nada al que
+            // tiene que cortar la lámina, y en producción no hay desplegables
+            // que consultar.
+            const grosor = state.grosorPegado ? ` ${state.grosorPegado}` : '';
+            detallesExtras.push(`Pegado en ${state.tipoPegado}${grosor} ${prov}`);
+            if (state.fondoBlancoPegado) detallesExtras.push("Fondo de vinil blanco");
         }
         
         if (state.impresionOjales) detallesExtras.push("Ojales");
@@ -536,6 +582,8 @@ export function ItemFormModal({
         ...state, 
         cantidad: state.cantidad || 1, 
         colorAcrilico: colorFinal,
+        grosorPegado: state.impresionPegado ? (state.grosorPegado || null) : null,
+        fondoBlancoPegado: state.impresionPegado ? !!state.fondoBlancoPegado : false,
         materialDetalleCorte: state.tipoServicio === 'CORTE' 
             ? `${state.materialDeCorte} ${state.materialDeCorte === 'Cartulina' ? 'N/A' : state.grosorMaterial} ${colorFinal}`
             : state.tipoServicio === 'IMPRESION' 
@@ -1034,17 +1082,55 @@ export function ItemFormModal({
                                             {opcionesActivas.pegado && state.impresionPegado && (
                                                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="bg-slate-100 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 overflow-hidden">
                                                     <Label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase flex items-center gap-2"><Box className="w-3 h-3"/> Configuración de Pegado</Label>
+
+                                                    {/* SOBRE QUE SE PEGA Y A COMO.
+
+                                                        El sustrato se corta a la medida de lo que se
+                                                        pega, asi que se cobra por los m2 de la pieza.
+                                                        Un PVC de 5mm no vale lo mismo que uno de 3mm,
+                                                        por eso el precio vive en el grosor.
+
+                                                        La lista sale de Materiales de taller: aqui
+                                                        estaban PVC y Acrilico escritos a mano, y no
+                                                        habia forma de anadir uno nuevo ni de saber
+                                                        cuanto costaba. */}
                                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                                         <div className="space-y-1.5">
-                                                            <Label className="text-[9px] font-bold text-slate-500 uppercase">Sustrato Rígido</Label>
-                                                            <Select value={state.tipoPegado} onValueChange={v => setState({...state, tipoPegado: v})} disabled={isClear(state.materialImpresion)}>
-                                                                <SelectTrigger className="bg-white dark:bg-slate-900 border-none h-11 rounded-lg text-xs font-bold"><SelectValue /></SelectTrigger>
+                                                            <Label className="text-[9px] font-bold text-slate-500 uppercase">Sustrato rígido</Label>
+                                                            <Select
+                                                                value={state.tipoPegado}
+                                                                onValueChange={v => setState({ ...state, tipoPegado: v, grosorPegado: '' })}
+                                                                disabled={isClear(state.materialImpresion) && sustratosPegado.length === 0}
+                                                            >
+                                                                <SelectTrigger className="bg-white dark:bg-slate-900 border-none h-11 rounded-lg text-xs font-bold"><SelectValue placeholder="Elegir..." /></SelectTrigger>
                                                                 <SelectContent>
-                                                                    {!isClear(state.materialImpresion) && <SelectItem value="PVC">Lámina PVC</SelectItem>}
-                                                                    <SelectItem value="Acrilico">Acrílico</SelectItem>
+                                                                    {sustratosPegado.map(m => (
+                                                                        <SelectItem key={m.id} value={m.nombre}>{m.nombre}</SelectItem>
+                                                                    ))}
                                                                 </SelectContent>
                                                             </Select>
                                                         </div>
+
+                                                        <div className="space-y-1.5">
+                                                            <Label className="text-[9px] font-bold text-slate-500 uppercase">Grosor</Label>
+                                                            <Select
+                                                                value={state.grosorPegado || ''}
+                                                                onValueChange={v => setState({ ...state, grosorPegado: v })}
+                                                                disabled={grosoresPegado.length === 0}
+                                                            >
+                                                                <SelectTrigger className="bg-white dark:bg-slate-900 border-none h-11 rounded-lg text-xs font-bold">
+                                                                    <SelectValue placeholder={grosoresPegado.length ? 'Elegir...' : 'Sin grosores'} />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {grosoresPegado.map(g => (
+                                                                        <SelectItem key={g.id} value={g.nombre}>
+                                                                            {g.nombre}{g.precioPegadoM2 ? ` · $${g.precioPegadoM2}/m²` : ''}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+
                                                         <div className="space-y-1.5">
                                                             <Label className="text-[9px] font-bold text-slate-500 uppercase">¿Quién lo pone?</Label>
                                                             <Select value={state.proveedorPegado} onValueChange={v => setState({...state, proveedorPegado: v})}>
@@ -1055,21 +1141,65 @@ export function ItemFormModal({
                                                                 </SelectContent>
                                                             </Select>
                                                         </div>
-                                                        {state.proveedorPegado === 'taller' && (
+                                                    </div>
+
+                                                    {state.proveedorPegado === 'taller' && (
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                            {/* EL FONDO BLANCO.
+                                                                Un clear sobre acrilico no se ve si no
+                                                                lleva blanco detras. Es material aparte
+                                                                del sustrato y se cobra aparte. */}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setState({ ...state, fondoBlancoPegado: !state.fondoBlancoPegado })}
+                                                                className={cn(
+                                                                    'h-11 px-3 rounded-lg border text-left transition-colors flex items-center justify-between gap-2',
+                                                                    state.fondoBlancoPegado
+                                                                        ? 'border-blue-300 bg-blue-50 dark:bg-blue-500/10'
+                                                                        : 'border-black/10 dark:border-white/10 bg-white dark:bg-slate-900'
+                                                                )}
+                                                            >
+                                                                <span className={cn('text-[10px] font-black uppercase', state.fondoBlancoPegado ? 'text-blue-600' : 'text-slate-400')}>
+                                                                    Fondo de vinil blanco
+                                                                </span>
+                                                                <span className="text-[9px] font-bold text-slate-400 shrink-0">
+                                                                    {precioFondoBlancoM2(matTaller) > 0 ? `$${precioFondoBlancoM2(matTaller)}/m²` : 'sin precio'}
+                                                                </span>
+                                                            </button>
+
                                                             <div className="space-y-1.5">
-                                                                <Label className="text-[9px] font-bold text-slate-500 uppercase">Costo Rígido (USD)</Label>
+                                                                <Label className="text-[9px] font-bold text-slate-500 uppercase">
+                                                                    Costo del montaje (USD)
+                                                                    {pegadoSugerido.total > 0 && (
+                                                                        <span className="text-blue-500 normal-case font-black">
+                                                                            {' · '}sugerido ${pegadoSugerido.total.toFixed(2)}
+                                                                        </span>
+                                                                    )}
+                                                                </Label>
                                                                 <div className="relative">
                                                                     <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"/>
-                                                                    <Input 
-                                                                        type="number" step="0.01" 
+                                                                    <Input
+                                                                        type="number" step="0.01"
                                                                         value={state.precioPegado === 0 ? '' : state.precioPegado}
-                                                                        onChange={e => setState({...state, precioPegado: parseFloat(e.target.value) || 0})} 
-                                                                        className="h-11 pl-9 border-none bg-white dark:bg-slate-900 font-black text-slate-700 dark:text-slate-300 rounded-lg shadow-sm" 
+                                                                        onChange={e => setState({...state, precioPegado: parseFloat(e.target.value) || 0})}
+                                                                        placeholder={pegadoSugerido.total > 0 ? pegadoSugerido.total.toFixed(2) : '0.00'}
+                                                                        className="h-11 pl-9 border-none bg-white dark:bg-slate-900 font-black text-slate-700 dark:text-slate-300 rounded-lg shadow-sm"
                                                                     />
                                                                 </div>
+                                                                {/* Se propone, no se impone: lo tecleado manda. */}
+                                                                {pegadoSugerido.total > 0 && Math.abs(pegadoSugerido.total - (Number(state.precioPegado) || 0)) > 0.01 && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setState({ ...state, precioPegado: pegadoSugerido.total })}
+                                                                        className="text-[9px] font-black uppercase text-blue-600 hover:underline"
+                                                                    >
+                                                                        Usar ${pegadoSugerido.total.toFixed(2)}
+                                                                        {pegadoSugerido.fondo > 0 && ` (${pegadoSugerido.sustrato.toFixed(2)} sustrato + ${pegadoSugerido.fondo.toFixed(2)} fondo)`}
+                                                                    </button>
+                                                                )}
                                                             </div>
-                                                        )}
-                                                    </div>
+                                                        </div>
+                                                    )}
                                                 </motion.div>
                                             )}
                                         </AnimatePresence>
