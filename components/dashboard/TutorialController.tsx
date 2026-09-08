@@ -8,6 +8,7 @@ import "driver.js/dist/driver.css"
 import { X, Play, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { usePermisos } from '@/lib/contexts/permisos-context'
+import { MARCA_CORTA } from "@/lib/marca"
 
 // ============================================================
 // DATOS DEL SISTEMA — cada sección explicada
@@ -413,7 +414,7 @@ export function HelpModal({ open, onClose, activeView, onNavigate }: HelpModalPr
                         {/* Footer */}
                         <div className="px-8 py-4 border-t border-black/5 dark:border-white/5 flex items-center justify-between shrink-0">
                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
-                                SMR Sistema — {FEATURES.length} módulos disponibles
+                                {MARCA_CORTA} Sistema — {FEATURES.length} módulos disponibles
                             </p>
                             <p className="text-[9px] font-bold text-slate-400">
                                 Selecciona una tarjeta para ver los detalles · Usa el Tour para guía paso a paso

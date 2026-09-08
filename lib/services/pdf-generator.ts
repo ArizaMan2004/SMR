@@ -348,7 +348,7 @@ const COMMON_STYLES = {
 
 
 // 1. ORDEN DE SERVICIO
-export async function generateOrderPDF(orden: any, SMRLogoBase64: string, options: PDFOptions = {}) {
+export async function generateOrderPDF(orden: any, logoBase64: string, options: PDFOptions = {}) {
   const ctx = await cargarContexto('orden', options.ajustes);
   const pdfMake = await loadPdfDependencies();
   if (!pdfMake) return;
@@ -417,7 +417,7 @@ export async function generateOrderPDF(orden: any, SMRLogoBase64: string, option
     pageMargins: [40, 40, 40, 40],
     content: [
       { text: `${orden.cliente.ciudad || "Coro"}, ${formatDate(orden.fecha)}`, alignment: "right", style: "dateInfo" },
-      { image: SMRLogoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
+      { image: logoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
       { text: "PRESUPUESTO", style: "title", alignment: "center", margin: [0, 10] },
       { text: `${orden.isMaster ? "Empresa Matriz" : "Cliente"}: ${orden.cliente.nombreRazonSocial}`, style: "clientInfo", margin: [0, 10] },
       {
@@ -444,7 +444,7 @@ export async function generateOrderPDF(orden: any, SMRLogoBase64: string, option
 }
 
 // 2. PRESUPUESTO
-export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: string, options: PDFOptions = {}) {
+export async function generateBudgetPDF(budgetData: BudgetData, logoBase64: string, options: PDFOptions = {}) {
     const ctx = await cargarContexto('presupuesto', options.ajustes);
     const pdfMake = await loadPdfDependencies();
     if (!pdfMake) return; 
@@ -520,7 +520,7 @@ export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: s
         pageMargins: [40, 40, 40, 40],
         content: [
             { text: budgetData.fechaCreacion, alignment: "right", style: "dateInfo" },
-            { image: SMRLogoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
+            { image: logoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
             { text: "PRESUPUESTO", style: "title", alignment: "center", margin: [0, 10] },
             { text: `${budgetData.isMaster ? "Empresa Matriz" : "Cliente"}: ${budgetData.clienteNombre}`, style: "clientInfo", margin: [0, 10] },
             {
@@ -546,7 +546,7 @@ export async function generateBudgetPDF(budgetData: BudgetData, SMRLogoBase64: s
 }
 
 // 3. RECIBO GENERAL
-export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatusData, SMRLogoBase64: string, options: PDFOptions = {}) {
+export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatusData, logoBase64: string, options: PDFOptions = {}) {
     const ctx = await cargarContexto('estadoCuenta', options.ajustes);
     const pdfMake = await loadPdfDependencies();
     if (!pdfMake) return;
@@ -569,7 +569,7 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
         pageMargins: [40, 40, 40, 40],
         content: [
             { text: `Corte al: ${data.fechaReporte}`, style: "dateInfo", alignment: "right", margin: [0, 0, 0, 5] },
-            { image: SMRLogoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
+            { image: logoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
             { text: "ESTADO DE CUENTA CONSOLIDADO", style: "title", alignment: "center", margin: [0, 5, 0, 15] },
             { stack: [{ text: `CLIENTE: ${data.clienteNombre.toUpperCase()}`, style: "clientInfo" }], margin: [0, 0, 0, 20] },
             {
@@ -607,7 +607,7 @@ export async function generateGeneralAccountStatusPDF(data: GeneralAccountStatus
 }
 
 // 4. NOTA DE ENTREGA — VENTAS DE CATÁLOGO
-export async function generateCatalogSalePDF(venta: any, SMRLogoBase64: string, options: PDFOptions = {}) {
+export async function generateCatalogSalePDF(venta: any, logoBase64: string, options: PDFOptions = {}) {
     const ctx = await cargarContexto('ventaCatalogo', options.ajustes);
     const pdfMake = await loadPdfDependencies();
     if (!pdfMake) return;
@@ -679,7 +679,7 @@ export async function generateCatalogSalePDF(venta: any, SMRLogoBase64: string, 
         pageMargins: [40, 40, 40, 40],
         content: [
             { text: `Coro, ${dateStr}`, alignment: "right", style: "dateInfo" },
-            { image: SMRLogoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
+            { image: logoBase64 || FALLBACK_LOGO_PRINCIPAL, width: 150, alignment: "left", margin: [0, 0, 0, 10] },
             { text: "NOTA DE ENTREGA", style: "title", alignment: "center", margin: [0, 10, 0, 5] },
             ...clienteLines,
             {

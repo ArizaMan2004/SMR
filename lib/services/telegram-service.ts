@@ -29,6 +29,7 @@
 
 import { db } from "@/lib/firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { MARCA_CORTA } from "@/lib/marca";
 
 /** Las áreas del taller, con los mismos ids que usa la pantalla. */
 export type AreaTelegram =
@@ -229,7 +230,7 @@ export const mensajeParaEmpleado = (t: {
         "",
         t.urlApp
             ? `Los detalles en tu cuenta: ${t.urlApp}`
-            : "Los detalles están en tu cuenta de SMR."
+            : `Los detalles están en tu cuenta de ${MARCA_CORTA}.`
     );
 
     return lineas.filter(l => l !== null).join("\n");

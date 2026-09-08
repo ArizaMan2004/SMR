@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { GastosForm } from "./gastos-form"
 import { GastosList } from "./gastos-list"
+import { MARCA_CORTA } from "@/lib/marca"
 
 interface InsumosViewProps {
   gastos: any[]
@@ -226,7 +227,7 @@ export function InsumosView({
             </div>
           </div>
           <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 opacity-70">
-            {selectedMonth === "ALL" ? "Control SMR" : `Inv. ${formatMonthYear(selectedMonth)}`}
+            {selectedMonth === "ALL" ? `Control ${MARCA_CORTA}` : `Inv. ${formatMonthYear(selectedMonth)}`}
           </p>
         </div>
 

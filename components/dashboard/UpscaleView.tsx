@@ -6,6 +6,7 @@ import {
     X, Maximize2, ArrowLeftRight,
     ShieldCheck, Zap, ImagePlus
 } from "lucide-react"
+import { MARCA_CORTA, MARCA_CLAVE } from "@/lib/marca"
 
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
@@ -222,7 +223,7 @@ export function UpscaleView() {
         <div className="p-3 sm:p-4 space-y-6 max-w-7xl mx-auto pb-24">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
                 <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tighter flex items-center gap-2 italic">
-                    <Maximize2 className="text-blue-600 w-6 h-6 sm:w-8 sm:h-8" /> SMR UPSCALER <span className="text-slate-300">|</span> HD
+                    <Maximize2 className="text-blue-600 w-6 h-6 sm:w-8 sm:h-8" /> {MARCA_CORTA.toUpperCase()} UPSCALER <span className="text-slate-300">|</span> HD
                 </h2>
                 <div className="flex items-center gap-3 sm:gap-4 bg-white dark:bg-white/5 p-2 px-4 rounded-full border border-slate-200 dark:border-white/10 self-start sm:self-auto">
                     <div className="flex items-center gap-2">
@@ -339,7 +340,7 @@ export function UpscaleView() {
                                 <Button onClick={() => {
                                     const a = document.createElement("a");
                                     a.href = processedImage;
-                                    a.download = `SMR_x${scaleFactor}.png`;
+                                    a.download = `${MARCA_CLAVE}_x${scaleFactor}.png`;
                                     a.click();
                                 }} className="w-full h-16 sm:h-20 bg-black text-white rounded-3xl font-black uppercase tracking-widest hover:bg-slate-800 shadow-2xl active:scale-95 transition-transform">
                                     <Download className="mr-3" /> Descargar PNG

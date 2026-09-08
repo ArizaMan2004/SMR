@@ -18,6 +18,7 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { MARCA } from "@/lib/marca"
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -321,7 +322,7 @@ export function CuentasBancariasPanel({ config, onGuardado }: Props) {
                                                             )}
 
                                                             {campo('Titular', c.titular, v => editarCuenta(id, c.id, { titular: v }),
-                                                                id === 'zelle' ? 'Samuel Leal' : 'SMR Lase Print C.A.')}
+                                                                id === 'zelle' ? '' : MARCA)}
                                                             {campo(id === 'zelle' ? 'Documento' : 'RIF / Cédula', c.documento, v => editarCuenta(id, c.id, { documento: v }), 'J-12345678-9')}
 
                                                             {CAMPOS[id].cuenta && (c.modo || 'cuenta') === 'cuenta' && campo('Número de cuenta', c.numeroCuenta, v => editarCuenta(id, c.id, { numeroCuenta: v }), '0134 0000 00 0000000000')}

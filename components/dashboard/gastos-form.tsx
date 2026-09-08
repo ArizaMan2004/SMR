@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import { MARCA_CORTA } from "@/lib/marca"
 
 interface GastosFormProps {
   onSubmit: (data: any) => Promise<void>
@@ -171,7 +172,7 @@ export function GastosForm({ onSubmit, isLoading, bcvRate, initialData }: Gastos
             {initialData ? "Editar Gasto" : "Nuevo Gasto"}
           </h3>
           <p className="text-blue-100 text-[10px] font-bold uppercase tracking-widest opacity-80">
-            SMR • Control de Operaciones
+            {MARCA_CORTA} • Control de Operaciones
           </p>
         </div>
         <ShoppingCart className="text-white/20 w-12 h-12 sm:w-16 sm:h-16 -rotate-12" />

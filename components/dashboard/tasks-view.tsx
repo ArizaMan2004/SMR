@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { useAuth } from "@/lib/auth-context"
 import { db } from "@/lib/firebase"
 import { collection, onSnapshot, addDoc, updateDoc, doc, deleteDoc } from "firebase/firestore"
+import { MARCA, MARCA_CORTA } from "@/lib/marca"
 
 // UI Components
 import { Card } from "@/components/ui/card"
@@ -345,7 +346,7 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                         <ClipboardList className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600 shrink-0" /> Taller de Producción
                     </h2>
                     <p className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">
-                        Control Digital de Órdenes de Trabajo SMR
+                        {`Control Digital de Órdenes de Trabajo ${MARCA_CORTA}`}
                     </p>
                 </div>
 
@@ -581,7 +582,7 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                                 <ClipboardList className="w-6 h-6 sm:w-8 sm:h-8" />
                             </div>
                             <div>
-                                <h2 className="text-xl sm:text-2xl font-black italic uppercase tracking-tighter">SMR Laser Print</h2>
+                                <h2 className="text-xl sm:text-2xl font-black italic uppercase tracking-tighter">{MARCA}</h2>
                                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60">
                                     {isReadOnly ? "Orden de Trabajo (Solo Lectura)" : "Orden de Trabajo Oficial"}
                                 </p>

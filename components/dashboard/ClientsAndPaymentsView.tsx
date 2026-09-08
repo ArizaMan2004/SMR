@@ -22,6 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { MARCA_CORTA } from "@/lib/marca"
 
 import { 
     Wallet, Search, 
@@ -726,7 +727,7 @@ export function ClientsAndPaymentsView({
                     <h2 className="text-2xl sm:text-4xl font-black italic tracking-tighter uppercase text-slate-900 dark:text-white flex items-center gap-2 sm:gap-3">
                         <Wallet className="w-7 h-7 sm:w-10 sm:h-10 text-blue-600 drop-shadow-lg"/> Cobranzas <span className="text-blue-600">Pro</span>
                     </h2>
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Siskoven SMR - Entorno Shared</p>
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">{MARCA_CORTA} - Entorno Shared</p>
                 </div>
                 
                 {/* BUSCADOR CON SOPORTE DE BÚSQUEDA PROFUNDA Y AUTOCOMPLETADO */}

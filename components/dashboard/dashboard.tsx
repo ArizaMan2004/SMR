@@ -5,6 +5,7 @@ import React, { useEffect, useState, useMemo, useCallback } from "react"
 import dynamic from "next/dynamic"
 import { motion, AnimatePresence } from "framer-motion"
 import { useAuth } from "@/lib/auth-context"
+import { MARCA_CORTA } from "@/lib/marca"
 
 // --- IMPORTACIONES PARA FIREBASE ---
 import { db } from "@/lib/firebase"
@@ -16,7 +17,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { toast } from "sonner" 
 
-// Componentes SMR (los que se ven siempre o casi siempre: viajan en el paquete
+// Componentes propios (los que se ven siempre o casi siempre: viajan en el paquete
 // principal porque hacen falta desde el primer segundo)
 import Sidebar from "@/components/dashboard/sidebar"
 import { OrdersTable } from "@/components/orden/orders-table"
@@ -289,7 +290,7 @@ export default function Dashboard() {
         },
         {
             id: 'admin_group',
-            label: 'Administración SMR',
+            label: `Administración ${MARCA_CORTA}`,
             icon: <Building2 className="w-4 h-4" />,
             children: [
                 { id: 'wallets', label: 'Billeteras & Caja' },
@@ -603,7 +604,7 @@ export default function Dashboard() {
                 // --- MAGIA: TRADUCTOR DE NOMBRES ---
                 let terminoExacto = searchTerm.trim();
 
-                // Si no es un número, adivinamos el cliente exacto usando la memoria de SMR
+                // Si no es un número, adivinamos el cliente exacto usando la memoria del sistema
                 if (isNaN(Number(terminoExacto))) {
                     const termLower = terminoExacto.toLowerCase();
                     const clienteGuardado = clientes.find(c => 

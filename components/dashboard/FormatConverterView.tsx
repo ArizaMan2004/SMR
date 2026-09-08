@@ -6,6 +6,7 @@ import {
     CheckCircle2, RefreshCw, Settings2, ShieldCheck, ImagePlus,
     AlertCircle, Trash2, Images
 } from "lucide-react"
+import { MARCA_CORTA, MARCA_CLAVE } from "@/lib/marca"
 
 // UI - Shadcn
 import { Card } from "@/components/ui/card"
@@ -190,7 +191,7 @@ export function FormatConverterView() {
         const a = document.createElement("a")
         a.href = item.convertedUrl
         const baseName = item.file.name.replace(/\.[^/.]+$/, "")
-        a.download = `${baseName}_SMR.${extFromMime(item.convertedFormat)}`
+        a.download = `${baseName}_${MARCA_CLAVE}.${extFromMime(item.convertedFormat)}`
         a.click()
     }
 
@@ -208,7 +209,7 @@ export function FormatConverterView() {
         <div className="p-4 space-y-6 max-w-6xl mx-auto">
             <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tighter flex items-center gap-2 italic">
-                    <ArrowRightLeft className="text-emerald-600 w-7 h-7 sm:w-8 sm:h-8 shrink-0" /> Convertidor <span className="text-slate-300 hidden sm:inline">|</span> SMR
+                    <ArrowRightLeft className="text-emerald-600 w-7 h-7 sm:w-8 sm:h-8 shrink-0" /> Convertidor <span className="text-slate-300 hidden sm:inline">|</span> {MARCA_CORTA}
                 </h2>
                 {queue.length > 0 && (
                     <Badge variant="outline" className="font-bold border-2 self-start sm:self-auto">

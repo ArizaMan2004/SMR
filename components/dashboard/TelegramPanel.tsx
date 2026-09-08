@@ -12,6 +12,7 @@
 "use client"
 
 import React, { useEffect, useState } from 'react'
+import { MARCA_CORTA } from "@/lib/marca"
 
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -99,7 +100,7 @@ export function TelegramPanel() {
         setProbando(area)
         const r = await enviarTelegram(
             chatId,
-            `✅ *Prueba desde SMR*\nSi lees esto, los avisos de ${AREAS_TELEGRAM.find(a => a.id === area)?.label} funcionan.`
+            `✅ *Prueba desde ${MARCA_CORTA}*\nSi lees esto, los avisos de ${AREAS_TELEGRAM.find(a => a.id === area)?.label} funcionan.`
         )
         setProbando(null)
 
@@ -317,7 +318,7 @@ export function TelegramPanel() {
                                         <>
                                             <button
                                                 onClick={async () => {
-                                                    const r = await enviarTelegram(chat, `✅ *Prueba desde SMR*
+                                                    const r = await enviarTelegram(chat, `✅ *Prueba desde ${MARCA_CORTA}*
 Hola ${e.nombre}, si lees esto tus avisos funcionan.`)
                                                     if (r.enviado) toast.success(`Enviado a ${e.nombre}`)
                                                     else toast.error(r.motivo || 'No se pudo enviar')

@@ -7,6 +7,7 @@ import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVe
 import { auth, db } from "@/lib/firebase"
 import { doc, setDoc, getDoc } from "firebase/firestore"
 import { useTheme } from "next-themes"
+import { MARCA, MARCA_CORTA } from "@/lib/marca"
 
 // UI - Shadcn & Iconos
 import { Button } from "@/components/ui/button"
@@ -130,13 +131,13 @@ export default function LoginForm() {
           
           <div className="flex flex-col items-center mb-10">
             <motion.div whileHover={{ scale: 1.05 }} className="relative w-48 h-16 mb-6">
-                <img src={logoSrc} alt="Logo SMR" className="w-full h-full object-contain" />
+                <img src={logoSrc} alt={`Logo ${MARCA}`} className="w-full h-full object-contain" />
             </motion.div>
             <h1 className="text-3xl font-black italic uppercase tracking-tighter text-slate-900 dark:text-white leading-none text-center">
                 {isLogin ? "Bienvenido" : "Registro"}
             </h1>
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mt-2 text-center">
-                {isLogin ? "SMR Staff Access" : "Creación de Cuenta Operativa"}
+                {isLogin ? `${MARCA_CORTA} Staff Access` : "Creación de Cuenta Operativa"}
             </p>
           </div>
 
@@ -225,7 +226,7 @@ export default function LoginForm() {
         </Card>
         
         <p className="text-center text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 mt-8 opacity-40">
-            SMR LASER PRINT SYSTEM © 2026 • PANEL INTERNO
+            {MARCA.toUpperCase()} © {new Date().getFullYear()} • PANEL INTERNO
         </p>
       </motion.div>
     </div>

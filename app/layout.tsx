@@ -5,14 +5,15 @@ import { Analytics } from "@vercel/analytics/next"
 import { AuthProvider } from "@/lib/auth-context"
 import { ThemeProviderWrapper } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
+import { MARCA, MARCA_DESCRIPCION, TITULO_APP } from "@/lib/marca"
 import "./globals.css"
 
 const geistSans = Geist({ subsets: ["latin"], variable: "--font-geist-sans", display: "swap" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono", display: "swap" })
 
 export const metadata: Metadata = {
-  title: "SMR Lase Print - Impresión Digital y Corte Láser",
-  description: "Servicios de Impresión Digital, Gran Formato, y Corte Láser de alta precisión. Entregas rápidas y calidad garantizada en Falcón. ¡Cotiza tu proyecto hoy!",
+  title: TITULO_APP,
+  description: `${MARCA}: ${MARCA_DESCRIPCION}.`,
   generator: "Jesus Ariza",
   manifest: "/manifest.json",
   icons: {
@@ -22,7 +23,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "SMR Lase Print",
+    title: MARCA,
   },
 }
 

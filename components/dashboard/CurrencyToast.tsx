@@ -3,6 +3,7 @@ import React from 'react'
 import { motion, AnimatePresence } from "framer-motion"
 import { CheckCircle2, TrendingUp } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { MARCA_CORTA } from "@/lib/marca"
 
 interface CurrencyToastProps {
   show: boolean
@@ -25,7 +26,7 @@ export function CurrencyToast({ show, message, onClose }: CurrencyToastProps) {
               <TrendingUp className="w-5 h-5 text-white" />
             </div>
             <div className="flex-1">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600">SMR Intelligence</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600">{MARCA_CORTA} Intelligence</p>
               <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-tight">{message}</p>
             </div>
           </div>

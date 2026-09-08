@@ -19,6 +19,7 @@ import {
     Key, Plus, Copy, Check, ShieldCheck, Ticket, Pencil, UserCog, SlidersHorizontal
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { MARCA_CORTA, MARCA_CLAVE } from "@/lib/marca"
 
 import { cn } from '@/lib/utils'
 import { usePermisos } from '@/lib/contexts/permisos-context'
@@ -110,7 +111,7 @@ export function UsersManagementView() {
         setIsGenerating(true);
         try {
             const randomString = Math.random().toString(36).substring(2, 8).toUpperCase();
-            const newCode = `SMR-${randomString}`;
+            const newCode = `${MARCA_CLAVE}-${randomString}`;
             
             await setDoc(doc(db, "admin_codes", newCode), {
                 createdAt: new Date(),
@@ -152,7 +153,7 @@ export function UsersManagementView() {
                 <div className="p-4 bg-blue-100 dark:bg-blue-500/20 text-blue-600 rounded-2xl"><ShieldCheck size={32} /></div>
                 <div>
                     <h2 className="text-2xl font-black uppercase italic tracking-tighter">Panel de Autorización</h2>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Gestión de Accesos y Equipo SMR</p>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">{`Gestión de Accesos y Equipo ${MARCA_CORTA}`}</p>
                 </div>
             </div>
 

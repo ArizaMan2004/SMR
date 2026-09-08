@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { 
     Table, TableBody, TableCell, TableHead, TableHeader, TableRow 
 } from "@/components/ui/table";
+import { MARCA_CORTA } from "@/lib/marca"
 
 // Iconos - Lucide
 import {
@@ -825,7 +826,7 @@ const CalculatorView = ({ onSendToProduction }: { onSendToProduction?: (calc: an
                     <div className="min-w-0">
                         <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tighter italic leading-none truncate">Calculadora</h1>
                         {/* Estaba a 8px: ilegible en un teléfono. */}
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1.5">Costos SMR</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1.5">{`Costos ${MARCA_CORTA}`}</p>
                     </div>
                 </motion.div>
                 <motion.div initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="flex gap-2 shrink-0">

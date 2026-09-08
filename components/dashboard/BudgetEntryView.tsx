@@ -77,7 +77,7 @@ const initialNewItemState = {
 };
 
 // Sugerencias genéricas de respaldo: solo se muestran si no hay ninguna coincidencia real en el inventario
-const SMR_CATALOG_FALLBACK = [
+const CATALOGO_DE_RESPALDO = [
     "Impresión de Alta Resolución en Vinil Adhesivo",
     "Letras Corpóreas en Acrílico con Iluminación LED",
     "Medallas en Acrílico Personalizadas",
@@ -279,7 +279,7 @@ export default function BudgetEntryView({
         if (catalogSuggestions.length > 0 || historicalSuggestions.length > 0) return [];
         const q = newItem.descripcion.trim();
         if (q.length < 2) return [];
-        return SMR_CATALOG_FALLBACK.filter(s => matchesQuery(s, q));
+        return CATALOGO_DE_RESPALDO.filter(s => matchesQuery(s, q));
     }, [catalogSuggestions, historicalSuggestions, newItem.descripcion]);
 
     const varianteSeleccionada = useMemo(() => {
