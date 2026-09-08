@@ -138,7 +138,7 @@ export function OrdenTallerDetalle({
                     </Button>
                 </header>
 
-                <div className="p-5 sm:p-6 space-y-5 overflow-y-auto custom-scrollbar">
+                <div className="p-5 sm:p-6 space-y-5 overflow-y-auto custom-scrollbar min-h-0">
 
                     {/* LA LISTA. Es lo que se viene a ver, así que va primero. */}
                     {total > 0 && (

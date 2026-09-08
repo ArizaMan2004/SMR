@@ -147,8 +147,20 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
             return copia
         })
 
-    const ponerVariante = (k: string, varianteId: string) =>
-        setAMano(prev => prev[k] ? { ...prev, [k]: { ...prev[k], varianteId: varianteId || undefined } } : prev)
+    /**
+     * Elige el uso de un renglon.
+     *
+     * Necesita el material ACTUAL porque en un renglon que la maquina ya
+     * clasifico no hay nada anotado a mano todavia. Antes se ignoraba el clic
+     * en esos: abrias la lista, elegias "Impresion" y no pasaba nada — que es
+     * justo donde mas falta hace, porque son la mayoria.
+     */
+    const ponerVariante = (k: string, varianteId: string, materialActual: string) =>
+        setAMano(prev => {
+            const material = prev[k]?.material || materialActual
+            if (!material) return prev
+            return { ...prev, [k]: { material, varianteId: varianteId || undefined } }
+        })
 
     const calcular = useCallback(async (fecha: Date) => {
         setCalculando(true)
@@ -437,7 +449,7 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
                                                                     varianteId={aMano[clave(r)]?.varianteId ?? (r.varianteId || undefined)}
                                                                     opciones={plan.opciones}
                                                                     onMaterial={v => ponerMaterial(clave(r), v)}
-                                                                    onVariante={v => ponerVariante(clave(r), v)}
+                                                                    onVariante={v => ponerVariante(clave(r), v, r.material || '')}
                                                                 />
 
                                                                 {r.yaAuditado && !aMano[clave(r)] && (
@@ -513,7 +525,7 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
                                                             varianteId={puesto?.varianteId}
                                                             opciones={plan.opciones}
                                                             onMaterial={v => ponerMaterial(k, v)}
-                                                            onVariante={v => ponerVariante(k, v)}
+                                                            onVariante={v => ponerVariante(k, v, puesto?.material || '')}
                                                         />
 
                                                         {r.tiempo && <span className="shrink-0 text-slate-400 tabular-nums">{r.tiempo}</span>}

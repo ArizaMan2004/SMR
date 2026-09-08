@@ -334,7 +334,7 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="relative max-w-2xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] overflow-hidden max-h-[92vh] flex flex-col">
+            <DialogContent className="max-w-2xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] overflow-hidden max-h-[92vh] flex flex-col">
                 <header className="p-5 sm:p-6 border-b border-black/5 dark:border-white/10 flex items-center justify-between gap-3 bg-slate-50 dark:bg-white/5">
                     <div className="flex items-center gap-3 min-w-0">
                         <div className="w-10 h-10 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/20">
@@ -354,7 +354,7 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
                     </Button>
                 </header>
 
-                <div className="p-5 sm:p-6 space-y-5 overflow-y-auto custom-scrollbar">
+                <div className="p-5 sm:p-6 space-y-5 overflow-y-auto custom-scrollbar min-h-0">
                     {existentes.length > 0 && (
                         <div className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50/70 dark:bg-amber-500/5 p-3 flex items-start gap-2.5">
                             <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
@@ -490,7 +490,7 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
                                 </div>
                             </div>
 
-                            <div className="p-4 space-y-2 overflow-y-auto custom-scrollbar">
+                            <div className="p-4 space-y-2 overflow-y-auto custom-scrollbar min-h-0">
                                 {existentes.map(e => (
                                     <div key={e.id} className="rounded-2xl bg-slate-50 dark:bg-white/5 p-3.5 space-y-2">
                                         <div className="flex flex-wrap items-center gap-2">

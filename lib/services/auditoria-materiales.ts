@@ -189,7 +189,17 @@ export async function planificarAuditoria(anio: number, mes: number): Promise<Pl
 
         (orden.items || []).forEach((item: any, indice: number) => {
             const descripcion = String(item?.nombre || "").trim();
-            const material = materialDeDescripcion(descripcion);
+            /**
+             * LO GUARDADO MANDA SOBRE LO DEDUCIDO.
+             *
+             * Si a este renglón ya se le puso material, es lo que hay que
+             * enseñar. Antes se enseñaba la deducción de la máquina aunque
+             * hubiera un dato confirmado debajo: quien miraba veía una cosa y
+             * en la base había otra, y al guardar se pisaba lo bueno con la
+             * suposición.
+             */
+            const aud = item?.materialAuditado;
+            const material = aud?.nombre || materialDeDescripcion(descripcion);
 
             const fila: RenglonAuditado = {
                 ordenId: d.id,
@@ -199,14 +209,16 @@ export async function planificarAuditoria(anio: number, mes: number): Promise<Pl
                 indice,
                 descripcion,
                 material,
-                productoId: idDeCatalogo(material, catalogo),
+                productoId: aud?.productoId ?? idDeCatalogo(material, catalogo),
+                varianteId: aud?.varianteId ?? null,
+                varianteNombre: aud?.varianteNombre ?? null,
                 m2: m2De(item),
                 laminado: /laminado/i.test(item?.materialDetalleCorte || ""),
                 unidad: item?.unidad,
                 tiempo: typeof item?.tiempoCorte === "string" ? item.tiempoCorte : undefined,
                 montoUSD: Number(item?.subtotal) || 0,
                 yaAuditado: !!item?.materialAuditado?.nombre,
-                origen: material ? "auto" : undefined,
+                origen: aud?.nombre ? (aud.origen === "manual" ? "manual" : "auto") : (material ? "auto" : undefined),
             };
 
             (material ? automaticos : manuales).push(fila);
