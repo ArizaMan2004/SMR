@@ -18,6 +18,10 @@ yarn-error.log*
 
 # env files
 .env*
+# ...menos la plantilla. No lleva ni una llave rellena: solo los nombres de
+# las variables y para qué sirve cada una. Sin ella, quien clone el repositorio
+# para montar otra copia no tiene de dónde partir.
+!.env.example
 
 # vercel
 .vercel

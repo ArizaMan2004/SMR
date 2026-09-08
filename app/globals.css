@@ -356,18 +356,158 @@ select { color-scheme: light; }
   box-shadow: 0 20px 60px -20px rgba(56, 189, 248, 0.45);
 }
 
-/* Retícula detrás del encabezado. Se desvanece hacia abajo para no competir
-   con el texto.
+/* ------------------------------------------------------------
+   EL FONDO DE LA PORTADA
 
-   La altura está acotada a propósito: con inset-0 mediría el documento entero,
-   y una capa de miles de píxeles con mask-image hace que el compositor del
-   navegador se rinda y deje la página sin pintar. Además solo tiene sentido
-   detrás del encabezado, que es donde se ve. */
-.reticula {
+   Cuadrícula y manchas de color, difuminadas hacia los bordes.
+
+   Va en `position: fixed`, y esa es toda la gracia. La versión anterior era
+   una capa absoluta que cubría el documento entero: miles de píxeles de alto
+   con una máscara encima, que es justo lo que hace que el compositor del
+   navegador se rinda y deje la página sin pintar. Fija mide lo que la
+   ventana y ni un píxel más, se pinta una vez y se queda quieta mientras el
+   contenido pasa por delante — que además es lo que se quiere ver.
+
+   Sin `filter: blur()`. Un degradado radial ya nace difuso; desenfocar una
+   superficie de este tamaño en cada fotograma se nota en el teléfono del
+   mostrador y no se nota en el resultado. */
+.fondo-portada {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.fondo-portada::before {
+  content: '';
+  position: absolute;
+  inset: 0;
   background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: linear-gradient(to bottom, black, transparent 75%);
-  -webkit-mask-image: linear-gradient(to bottom, black, transparent 75%);
+    linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 58px 58px;
+  mask-image: radial-gradient(ellipse 85% 70% at 50% 32%, #000 12%, transparent 72%);
+  -webkit-mask-image: radial-gradient(ellipse 85% 70% at 50% 32%, #000 12%, transparent 72%);
+}
+
+.fondo-portada::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(ellipse 70% 55% at 12% 8%, rgba(29, 78, 216, 0.30), transparent 62%),
+    radial-gradient(ellipse 60% 50% at 88% 22%, rgba(8, 145, 178, 0.24), transparent 60%),
+    radial-gradient(ellipse 75% 45% at 50% 105%, rgba(56, 189, 248, 0.16), transparent 62%);
+}
+
+/* ------------------------------------------------------------
+   EL BORDE QUE GIRA
+
+   La píldora de arriba del todo lleva un halo que da vueltas. Es lo único que
+   se mueve solo en toda la página, y por eso funciona: si se movieran cinco
+   cosas no se miraría ninguna.
+
+   El truco es un degradado cónico girando bajo una máscara anular, no un
+   `border` animado: el borde obligaría a recalcular la caja en cada
+   fotograma, mientras que esto solo repinta una capa que ya está compuesta
+   aparte. */
+@property --giro {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.borde-girando {
+  position: relative;
+  isolation: isolate;
+}
+
+.borde-girando::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--giro),
+    transparent 0deg,
+    var(--portada-agua) 60deg,
+    var(--portada-cielo) 110deg,
+    transparent 180deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: girar 4s linear infinite;
+  z-index: -1;
+}
+
+@keyframes girar {
+  to { --giro: 360deg; }
+}
+
+/* Quien pidió menos movimiento no lo pidió a medias. */
+@media (prefers-reduced-motion: reduce) {
+  .borde-girando::before { animation: none; }
+  .tira-modulos > * { animation: none !important; }
+}
+
+/* ------------------------------------------------------------
+   LA TIRA QUE PASA
+
+   Los nombres de los módulos desfilando. La lista va DUPLICADA en el HTML y
+   se desplaza exactamente la mitad: al llegar al final, la segunda copia está
+   justo donde estaba la primera, y el salto no se ve. */
+.tira-modulos {
+  mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+}
+
+.tira-modulos > * {
+  animation: desfilar 34s linear infinite;
+}
+
+@keyframes desfilar {
+  to { transform: translateX(-50%); }
+}
+
+/* ------------------------------------------------------------
+   EL MARCO DE LAS CAPTURAS
+
+   Las capturas son de verdad —salen del sistema funcionando, con los nombres
+   de clientes cambiados— y por eso se enseñan dentro de una ventana: sin
+   marco, una captura oscura sobre fondo oscuro se lee como un dibujo. */
+.ventana {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  box-shadow:
+    0 40px 90px -30px rgba(2, 6, 23, 0.95),
+    0 0 0 1px rgba(56, 189, 248, 0.07),
+    0 0 80px -30px rgba(56, 189, 248, 0.35);
+}
+
+/* La captura larga se corta por abajo con un desvanecido, en vez de con una
+   línea recta: una tijera se nota, un desvanecido invita a entrar. */
+.recorte-suave {
+  mask-image: linear-gradient(to bottom, black 62%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 62%, transparent 100%);
+}
+
+/* ------------------------------------------------------------
+   LAS TARJETAS DE VIDRIO */
+.vidrio {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+}
+
+.vidrio-vivo {
+  transition: border-color 0.25s ease, background 0.25s ease, transform 0.25s ease;
+}
+
+.vidrio-vivo:hover {
+  border-color: rgba(56, 189, 248, 0.28);
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.07), rgba(255, 255, 255, 0.02));
+  transform: translateY(-2px);
 }

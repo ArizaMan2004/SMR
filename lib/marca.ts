@@ -50,4 +50,17 @@ export const MARCA_CLAVE = (
     .slice(0, 12) || "APP";
 
 /** El título de la pestaña. */
+/**
+ * EL LOGO, para fondos oscuros.
+ *
+ * La portada es oscura siempre, así que aquí va la versión clara del logo.
+ * Poner la inicial dentro de un cuadrado es lo que se hace cuando no hay
+ * logo; habiéndolo, no hay razón para enseñar una letra.
+ *
+ * Sale del entorno como todo lo demás de la marca: una copia montada para
+ * otro taller pone su archivo en `public/` y su ruta aquí. Dejándolo vacío se
+ * vuelve a la inicial, que sigue siendo mejor que un hueco.
+ */
+export const MARCA_LOGO = process.env.NEXT_PUBLIC_MARCA_LOGO?.trim() ?? "/smr-logo-dark.png";
+
 export const TITULO_APP = `${MARCA} - ${MARCA_DESCRIPCION}`;

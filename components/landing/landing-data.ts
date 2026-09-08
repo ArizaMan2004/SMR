@@ -23,11 +23,21 @@ export interface ModuloPortada {
     titular: string;
     detalle: string;
     puntos: string[];
+    /**
+     * La captura de la vista, si la hay.
+     *
+     * Son capturas REALES del sistema funcionando, tomadas de esta misma
+     * instalación, con los nombres de los clientes y sus documentos cambiados
+     * por otros inventados. Los módulos que no tienen captura no llevan una
+     * inventada: se enseñan con sus puntos y ya.
+     */
+    imagen?: string;
 }
 
 export const MODULOS: ModuloPortada[] = [
     {
         id: "facturacion",
+        imagen: "/portada/ordenes.webp",
         label: "Facturación",
         icon: Receipt,
         titular: "La orden se arma y se cobra en la misma pantalla.",
@@ -70,6 +80,7 @@ export const MODULOS: ModuloPortada[] = [
     },
     {
         id: "catalogo",
+        imagen: "/portada/catalogo.webp",
         label: "Catálogo",
         icon: Package,
         titular: "Los precios viven en un sitio y todo lo demás los lee.",
@@ -84,6 +95,7 @@ export const MODULOS: ModuloPortada[] = [
     },
     {
         id: "balance",
+        imagen: "/portada/balance.webp",
         label: "Balance",
         icon: BarChart3,
         titular: "Cuánto entró, en qué se fue el material y qué área lo hizo.",
@@ -98,6 +110,7 @@ export const MODULOS: ModuloPortada[] = [
     },
     {
         id: "cobranza",
+        imagen: "/portada/cobranza.webp",
         label: "Cobranza",
         icon: Users,
         titular: "Quién debe, cuánto y desde cuándo.",
@@ -126,6 +139,7 @@ export const MODULOS: ModuloPortada[] = [
     },
     {
         id: "equipo",
+        imagen: "/portada/horarios.webp",
         label: "Equipo",
         icon: CalendarClock,
         titular: "Quién trabaja hoy y qué se le debe.",
@@ -137,6 +151,41 @@ export const MODULOS: ModuloPortada[] = [
             "Cada cuenta con su foto y su color, para saber con cuál estás",
             "Registro por código de invitación, y el admin aprueba",
         ],
+    },
+];
+
+export interface Dolor {
+    problema: string;
+    respuesta: string;
+}
+
+/**
+ * De dónde salió cada cosa.
+ *
+ * No son objeciones de vendedor: son las cosas que pasaban de verdad en el
+ * taller y que obligaron a construir cada pantalla. Van primero porque quien
+ * llega reconoce el problema antes que la solución.
+ */
+export const DOLORES: Dolor[] = [
+    {
+        problema: "«¿Este cliente pagó o no pagó?»",
+        respuesta:
+            "Cada orden lleva sus abonos con fecha, monto, comprobante y a qué cuenta entró. El saldo no se calcula de memoria.",
+    },
+    {
+        problema: "«¿Alguien mandó a hacer esto ya?»",
+        respuesta:
+            "Al pasar un trabajo al taller, el sistema avisa si esa orden ya tiene uno abierto y enseña el resumen antes de duplicarlo.",
+    },
+    {
+        problema: "«¿Cuánto banner se gastó este mes?»",
+        respuesta:
+            "Los metros salen de las medidas de cada renglón, repartidos por material y por servicio. Y lo que está deducido se marca como deducido.",
+    },
+    {
+        problema: "«Se me olvidó decirle a producción»",
+        respuesta:
+            "El trabajo entra al área y le suena el teléfono a quien le toca, con lo que lleva pendiente encima.",
     },
 ];
 
