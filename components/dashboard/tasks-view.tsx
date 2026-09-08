@@ -23,7 +23,7 @@ import { toast } from "sonner"
 import { 
   ClipboardList, Plus, User, Phone, PenTool, 
   Ruler, Printer, Scissors, Eye,
-  CheckCircle2, Clock, Trash2, Layers, Search, X, Filter
+  CheckCircle2, Clock, Trash2, Layers, Search, X, Filter, ChevronDown
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -99,6 +99,14 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
 
     // Filtros. Vacíos = no filtran: la pantalla arranca enseñando todo.
     const [busqueda, setBusqueda] = useState("")
+    /**
+     * Que areas tienen abierta su lista de terminadas.
+     *
+     * Cerradas por defecto: lo que hace falta ver al llegar es lo que queda
+     * por hacer. Lo terminado se abre cuando alguien quiere comprobar algo,
+     * y se cierra solo.
+     */
+    const [verTerminadas, setVerTerminadas] = useState<Record<string, boolean>>({})
     const [filtroMaterial, setFiltroMaterial] = useState("")
     const [desde, setDesde] = useState("")
     const [hasta, setHasta] = useState("")
@@ -288,6 +296,19 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
     const activeOrders = ordenesServicio.filter(o =>
         o.estado === "PENDIENTE" && o.areaActual === activeTab && pasaFiltros(o));
 
+    /**
+     * Lo terminado, POR AREA.
+     *
+     * Antes iba todo a una pestania comun: al dar por terminado un trabajo
+     * desaparecia de la vista y reaparecia en un monton con lo de las demas
+     * areas. Quien imprime no tiene por que ver lo que corto otro, y sobre
+     * todo no tenia forma de comprobar lo suyo.
+     */
+    const terminadasDe = useCallback((areaId: string) =>
+        ordenesServicio.filter(o =>
+            o.estado === "COMPLETADO" && o.areaActual === areaId && pasaFiltros(o)),
+        [ordenesServicio, pasaFiltros]);
+
     const completedOrders = ordenesServicio.filter(o =>
         o.estado === "COMPLETADO" && pasaFiltros(o));
 
@@ -411,21 +432,22 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                             </TabsTrigger>
                         )
                     })}
-                    {(isAdmin || userData?.rol === 'VENDEDOR') && (
-                        <TabsTrigger value="COMPLETADOS" className="rounded-lg sm:rounded-xl px-3 sm:px-6 py-2 sm:py-3 font-black uppercase text-[9px] sm:text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-emerald-600 data-[state=active]:shadow-sm flex items-center gap-1.5">
-                            <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Finalizados
-                        </TabsTrigger>
-                    )}
                 </TabsList>
 
-                {visibleAreas.map(area => (
-                    <TabsContent key={area.id} value={area.id} className="mt-0 focus-visible:outline-none">
+                {visibleAreas.map(area => {
+                    const terminadas = terminadasDe(area.id)
+                    const abierta = !!verTerminadas[area.id]
+
+                    return (
+                    <TabsContent key={area.id} value={area.id} className="mt-0 focus-visible:outline-none space-y-6">
+                        {/* LO QUE QUEDA POR HACER. Es lo primero porque es a lo
+                            que se viene. */}
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                             <AnimatePresence>
                                 {activeOrders.map(orden => (
-                                    <OrderCard 
-                                        key={orden.id} 
-                                        orden={orden} 
+                                    <OrderCard
+                                        key={orden.id}
+                                        orden={orden}
                                         onView={() => { setFormData(orden); setIsReadOnly(true); setIsModalOpen(true); }}
                                         onEdit={() => { setFormData(orden); setIsReadOnly(false); setIsModalOpen(true); }}
                                         onMove={(newArea: string) => handleMoveArea(orden.id!, newArea)}
@@ -449,26 +471,66 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                                 </div>
                             )}
                         </div>
-                    </TabsContent>
-                ))}
 
-                <TabsContent value="COMPLETADOS" className="mt-0 focus-visible:outline-none">
-                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 opacity-70 grayscale-[0.3]">
-                        {completedOrders.map(orden => (
-                            <OrderCard 
-                                key={orden.id} 
-                                orden={orden} 
-                                onView={() => { setFormData(orden); setIsReadOnly(true); setIsModalOpen(true); }}
-                                onEdit={() => { setFormData(orden); setIsReadOnly(false); setIsModalOpen(true); }}
-                                onMove={(newArea: string) => handleMoveArea(orden.id!, newArea)} 
-                                onComplete={() => {}}
-                                onDelete={() => handleDelete(orden.id!)}
-                                isAdmin={isAdmin}
-                                isCompleted={true}
-                            />
-                        ))}
-                    </div>
-                </TabsContent>
+                        {/* LO TERMINADO, EN SU AREA Y PLEGADO.
+
+                            Antes desaparecia a una pestania comun con lo de
+                            todas las areas: dabas por terminado algo y se iba a
+                            un monton que no te compete, sin forma de comprobar
+                            lo tuyo.
+
+                            Cerrada por defecto porque lo que hace falta ver al
+                            llegar es lo que queda; esto se abre para
+                            comprobar. */}
+                        {terminadas.length > 0 && (
+                            <div className="rounded-[1.5rem] sm:rounded-[2rem] border border-black/5 dark:border-white/5 bg-white dark:bg-[#1c1c1e] overflow-hidden">
+                                <button
+                                    type="button"
+                                    onClick={() => setVerTerminadas(p => ({ ...p, [area.id]: !p[area.id] }))}
+                                    className="w-full flex items-center gap-2.5 p-4 text-left"
+                                >
+                                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+                                    <span className="flex-1 min-w-0 text-[11px] font-black uppercase tracking-widest text-slate-500">
+                                        Terminadas en {area.label}
+                                    </span>
+                                    <Badge className="bg-emerald-500/10 text-emerald-600 border-0 px-2 py-0 text-[10px] font-black">
+                                        {terminadas.length}
+                                    </Badge>
+                                    <ChevronDown className={cn('w-4 h-4 shrink-0 text-slate-400 transition-transform', abierta && 'rotate-180')} />
+                                </button>
+
+                                <AnimatePresence initial={false}>
+                                    {abierta && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            className="overflow-hidden"
+                                        >
+                                            <div className="p-4 pt-0 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 opacity-70 grayscale-[0.3]">
+                                                {terminadas.map(orden => (
+                                                    <OrderCard
+                                                        key={orden.id}
+                                                        orden={orden}
+                                                        onView={() => { setFormData(orden); setIsReadOnly(true); setIsModalOpen(true); }}
+                                                        onEdit={() => { setFormData(orden); setIsReadOnly(false); setIsModalOpen(true); }}
+                                                        onMove={(newArea: string) => handleMoveArea(orden.id!, newArea)}
+                                                        onComplete={() => {}}
+                                                        onDelete={() => handleDelete(orden.id!)}
+                                                        isAdmin={isAdmin}
+                                                        isCompleted={true}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                        )}
+                    </TabsContent>
+                    )
+                })}
+
             </Tabs>
 
             <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
