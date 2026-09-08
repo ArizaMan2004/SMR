@@ -29,6 +29,7 @@ import {
 import { cn } from "@/lib/utils"
 import { esAdmin } from '@/lib/roles'
 import { claveFechaLocal } from '@/lib/utils/fechas'
+import { OrdenTallerDetalle } from '@/components/dashboard/OrdenTallerDetalle'
 import {
     subscribeToTelegram, avisarAlArea, mensajeTrabajoNuevo, mensajeTrabajoTerminado,
     chatDeEmpleado, enviarTelegram, mensajeParaEmpleado, resumenCorto,
@@ -68,6 +69,14 @@ interface ServiceOrder {
     descripcion: string;
     materiales: string[];
     notaMaterial: string;
+    /**
+     * Que renglones ya estan hechos, por su posicion.
+     *
+     * Un trabajo de cinco impresiones era un parrafo: quien lo hacia tenia
+     * que acordarse de por donde iba, y al dejarlo a medias para atender
+     * algo urgente, al volver no sabia que llevaba.
+     */
+    tareasHechas?: number[];
     medidas: { alto: string, ancho: string };
     adicionales: string[];
     observaciones: string;
@@ -86,7 +95,9 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
     const { userData } = useAuth()
     const [ordenesServicio, setOrdenesServicio] = useState<ServiceOrder[]>([])
     const [isModalOpen, setIsModalOpen] = useState(false)
-    const [isReadOnly, setIsReadOnly] = useState(false) 
+    const [isReadOnly, setIsReadOnly] = useState(false)
+    /** La orden que se esta MIRANDO. El formulario es para editar. */
+    const [viendo, setViendo] = useState<ServiceOrder | null>(null)
     const [formData, setFormData] = useState<ServiceOrder>(emptyOrder)
     const [activeTab, setActiveTab] = useState(areaPriorizada || "DISENO")
     const [isLoading, setIsLoading] = useState(true)
@@ -150,6 +161,12 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
             toast.loading("Guardando Orden de Trabajo...");
             if (formData.id) {
                 const { id, ...dataToUpdate } = formData;
+                const previa = ordenesServicio.find(o => o.id === id);
+                if (previa && previa.descripcion !== formData.descripcion) {
+                    // Cambio el texto: las posiciones ya no son las mismas y
+                    // mantener lo tachado daria por hecho lo que no lo esta.
+                    (dataToUpdate as any).tareasHechas = [];
+                }
                 await updateDoc(doc(db, "ordenes_servicio", id), dataToUpdate);
                 toast.success("Orden actualizada");
             } else {
@@ -448,7 +465,7 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                                     <OrderCard
                                         key={orden.id}
                                         orden={orden}
-                                        onView={() => { setFormData(orden); setIsReadOnly(true); setIsModalOpen(true); }}
+                                        onView={() => setViendo(orden)}
                                         onEdit={() => { setFormData(orden); setIsReadOnly(false); setIsModalOpen(true); }}
                                         onMove={(newArea: string) => handleMoveArea(orden.id!, newArea)}
                                         onComplete={() => handleComplete(orden.id!)}
@@ -512,7 +529,7 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                                                     <OrderCard
                                                         key={orden.id}
                                                         orden={orden}
-                                                        onView={() => { setFormData(orden); setIsReadOnly(true); setIsModalOpen(true); }}
+                                                        onView={() => setViendo(orden)}
                                                         onEdit={() => { setFormData(orden); setIsReadOnly(false); setIsModalOpen(true); }}
                                                         onMove={(newArea: string) => handleMoveArea(orden.id!, newArea)}
                                                         onComplete={() => {}}
@@ -532,6 +549,25 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                 })}
 
             </Tabs>
+
+            {/* MIRAR y EDITAR son dos cosas distintas.
+
+                Antes el visor era este mismo formulario en solo-lectura, y se
+                veia como lo que era: campos y recuadros, con dos casillas de
+                Medidas vacias porque las medidas ya vienen en cada renglon.
+                Un recuadro vacio no se lee como "no aplica", se lee como
+                "aqui falta algo". */}
+            <OrdenTallerDetalle
+                open={!!viendo}
+                onOpenChange={o => !o && setViendo(null)}
+                orden={viendo ? (ordenesServicio.find(x => x.id === viendo.id) || viendo) : null}
+                areas={AREAS_TALLER}
+                puedeEditar={isAdmin}
+                onEditar={() => { if (viendo) { setFormData(viendo); setIsReadOnly(false); setIsModalOpen(true); } }}
+                onMover={(a) => viendo?.id && handleMoveArea(viendo.id, a)}
+                onCompletar={() => viendo?.id && handleComplete(viendo.id)}
+                onEliminar={() => viendo?.id && handleDelete(viendo.id)}
+            />
 
             <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
                 <DialogContent className="w-[95vw] sm:max-w-4xl md:max-w-5xl lg:max-w-6xl max-h-[90vh] overflow-y-auto custom-scrollbar bg-white dark:bg-[#1c1c1e] rounded-[1.5rem] sm:rounded-[2rem] border-0 shadow-2xl p-0">
@@ -609,7 +645,7 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                         </div>
 
                         {/* PANELES: MATERIAL / MEDIDAS / ADICIONALES */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
 
                             <div className="border border-slate-200 dark:border-white/10 rounded-xl sm:rounded-2xl p-4 bg-white dark:bg-[#1c1c1e] shadow-sm">
                                 <p className="text-center font-black uppercase text-[10px] sm:text-xs tracking-widest border-b border-black/10 pb-2 mb-3 sm:mb-4">Tipo de Material</p>
@@ -627,22 +663,17 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                                 </div>
                             </div>
 
-                            <div className="border border-slate-200 dark:border-white/10 rounded-xl sm:rounded-2xl p-4 bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col items-center justify-center relative overflow-hidden min-h-[160px]">
-                                <Ruler className="absolute w-28 h-28 text-slate-100 dark:text-white/5 rotate-45 -right-8 -bottom-8" />
-                                <p className="text-center font-black uppercase text-[10px] sm:text-xs tracking-widest bg-slate-900 text-white px-4 py-1 rounded-full mb-5 z-10">Medidas</p>
+                            {/* Aqui habia un recuadro de Medidas con Alto y Ancho.
 
-                                <div className="flex items-center justify-center gap-3 sm:gap-4 w-full z-10">
-                                    <div className="text-center">
-                                        <Label className="text-[10px] font-black uppercase text-slate-400">Alto (↕)</Label>
-                                        <Input readOnly={isReadOnly} value={formData.medidas.alto} onChange={e=>setFormData({...formData, medidas: {...formData.medidas, alto: e.target.value}})} className={cn("w-16 sm:w-20 text-center font-black text-base sm:text-lg h-11 sm:h-12 mt-1 border-slate-300", isReadOnly && "pointer-events-none opacity-80")} placeholder="cm" />
-                                    </div>
-                                    <div className="text-xl sm:text-2xl font-black text-slate-300 mt-4 sm:mt-5">X</div>
-                                    <div className="text-center">
-                                        <Label className="text-[10px] font-black uppercase text-slate-400">Ancho (↔)</Label>
-                                        <Input readOnly={isReadOnly} value={formData.medidas.ancho} onChange={e=>setFormData({...formData, medidas: {...formData.medidas, ancho: e.target.value}})} className={cn("w-16 sm:w-20 text-center font-black text-base sm:text-lg h-11 sm:h-12 mt-1 border-slate-300", isReadOnly && "pointer-events-none opacity-80")} placeholder="cm" />
-                                    </div>
-                                </div>
-                            </div>
+                                Se quito: desde que la orden se manda desde
+                                facturacion, cada renglon lleva su medida escrita
+                                ("1 x banner — 70x50 cm"). Pedirlas otra vez
+                                dejaba dos casillas vacias en medio de la
+                                pantalla, y eso no se lee como "no aplica", se
+                                lee como "falta algo".
+
+                                Las ordenes viejas que si las tienen las siguen
+                                enseniando en el visor. */}
 
                             <div className="border border-slate-200 dark:border-white/10 rounded-xl sm:rounded-2xl p-4 bg-white dark:bg-[#1c1c1e] shadow-sm sm:col-span-2 md:col-span-1">
                                 <p className="text-center font-black uppercase text-[10px] sm:text-xs tracking-widest border-b border-black/10 pb-2 mb-3 sm:mb-4">Adicionales</p>

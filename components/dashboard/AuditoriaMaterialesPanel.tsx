@@ -114,7 +114,14 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
     const [plan, setPlan] = useState<PlanAuditoria | null>(null)
     const [calculando, setCalculando] = useState(true)
     const [aplicando, setAplicando] = useState(false)
-    const [verManuales, setVerManuales] = useState(false)
+    /**
+     * La lista de los que hay que resolver a mano arranca ABIERTA.
+     *
+     * Estaba plegada y no se veia que se podian tocar: parecia un aviso y no
+     * un sitio donde trabajar. Si hay renglones esperando decision, lo que
+     * hace falta es verlos, no un titular que diga cuantos son.
+     */
+    const [verManuales, setVerManuales] = useState(true)
     const [verOrdenes, setVerOrdenes] = useState(false)
 
     /**
@@ -317,6 +324,11 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
                 Los campos de material que trae el formulario vienen con un valor por defecto que
                 casi nadie cambia, así que no sirven para contar. Esto lee la descripción y las
                 medidas de cada renglón y escribe el material real. No toca precios.
+                <br />
+                <span className="text-slate-500 dark:text-slate-400">
+                    Lo que la máquina dedujo mal se corrige aquí abajo, renglón por renglón,
+                    antes de guardar.
+                </span>
             </p>
 
             {calculando ? (
@@ -369,9 +381,9 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
                                 onClick={() => setVerOrdenes(v => !v)}
                                 className="w-full flex items-center gap-2.5 p-3.5 text-left"
                             >
-                                <ListTree className="w-4 h-4 shrink-0 text-slate-400" />
+                                <ListTree className="w-4 h-4 shrink-0 text-indigo-500" />
                                 <span className="flex-1 min-w-0 text-[11px] font-black uppercase tracking-widest text-slate-500">
-                                    Ver las {porOrden.length} órdenes, una por una
+                                    Corregir orden por orden — {porOrden.length} órdenes
                                 </span>
                                 <ChevronDown className={cn("w-4 h-4 shrink-0 text-slate-400 transition-transform", verOrdenes && "rotate-180")} />
                             </button>
