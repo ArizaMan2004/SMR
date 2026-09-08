@@ -885,6 +885,48 @@ export function ItemFormModal({
                                             if (isBanner(v)) { updates.impresionConCorte = false; updates.impresionPegado = false; }
                                             else if (isSticker(v)) { updates.impresionConCorte = true; updates.impresionPegado = false; }
                                             else if (isClear(v)) { updates.tipoPegado = 'Acrilico'; }
+
+                                            /**
+                                             * ESTA LISTA TAMBIEN CUENTA EN EL BALANCE.
+                                             *
+                                             * Antes solo escribia materialImpresion, un texto
+                                             * suelto que el balance ignora a proposito: viene
+                                             * relleno con "Vinil Brillante" en casi todos los
+                                             * renglones y contarlo diria que todo es vinil.
+                                             *
+                                             * Resultado: cambiabas el material aqui y no pasaba
+                                             * nada en ningun sitio. Ahora se busca el producto
+                                             * del catalogo que se llama asi ("Banner Mate" ->
+                                             * Banner) y se guarda su id, que es lo que el
+                                             * balance sabe leer. Una eleccion deliberada deja
+                                             * rastro; el valor por defecto de hace meses no.
+                                             */
+                                            const buscado = v.trim().toLowerCase()
+                                            const igual = (x: any) => String(x || '').trim().toLowerCase() === buscado
+
+                                            // Primero por producto: "Banner Mate" es Banner.
+                                            let prod = catalogProductos.find((p: any) => {
+                                                const n = String(p?.nombre || '').trim().toLowerCase()
+                                                return n && (buscado === n || buscado.startsWith(n + ' '))
+                                            })
+                                            let variante: any = null
+
+                                            // Y si no, por variante: "Stickers" no es un
+                                            // material, es una forma de vender el vinil.
+                                            if (!prod) {
+                                                for (const p of catalogProductos) {
+                                                    const v2 = (p?.variantes || []).find((x: any) => igual(x?.nombre))
+                                                    if (v2) { prod = p; variante = v2; break }
+                                                }
+                                            }
+
+                                            updates.catalogoProductoId = prod?.id || null
+                                            updates.catalogoVarianteId = variante?.id || null
+                                            updates.catalogoVarianteNombre = variante?.nombre || null
+                                            updates.catalogoArea = prod
+                                                ? areaDeProducto(prod, catalogCategorias)
+                                                : null
+
                                             setState({...state, ...updates});
                                         }}>
                                             <SelectTrigger className="bg-white dark:bg-slate-800 border-none h-11 rounded-xl font-bold"><SelectValue /></SelectTrigger>
