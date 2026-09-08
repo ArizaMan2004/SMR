@@ -23,7 +23,7 @@ import {
 } from "lucide-react"
 
 import {
-    subscribeToCatalogoProducts, subscribeToCatalogoCategories,
+    subscribeToCatalogoProducts, subscribeToCatalogoCategories, areaDeProducto,
     precioDeServicio, acabadosActivos, opcionesDe,
     consumoMetroLineal, unidadDe, tipoEntradaDe,
     type CatalogoCategoria,
@@ -257,6 +257,12 @@ export function ItemFormModal({
   const seleccionarProductoVenta = (prod: any) => {
       const usarPublicista = esAliado && (prod.precioPublicista ?? 0) > 0
       const precio = usarPublicista ? prod.precioPublicista : prod.precioBase
+
+      // A que area del taller pertenece esto lo dice el catalogo, no el nombre
+      // del renglon. Una medalla es corte entera y un pendon impresion entera,
+      // aunque los dos se vendan por unidad.
+      const area = areaDeProducto(prod, catalogCategorias)
+
       setVentaProductoId(prod.id)
       setState((s: any) => ({
           ...s,
@@ -264,6 +270,10 @@ export function ItemFormModal({
           nombre: s.nombre || prod.nombre,
           monedaItem: usarPublicista ? 'EUR' : 'USD',
           unidad: unidadDe(prod) === 'metro_lineal' ? 'ml' : 'und',
+          // Se guarda tal cual, incluido 'AMBAS': con eso el balance reparte
+          // esta plata en vez de suponer.
+          catalogoArea: area,
+          tipoServicio: area === 'IMPRESION' ? 'IMPRESION' : area === 'CORTE' ? 'CORTE' : s.tipoServicio,
           catalogoProductoId: prod.id,
           _catalogPrecioBase: prod.precioBase || 0,
           _catalogPrecioPublicista: prod.precioPublicista || 0,
@@ -311,6 +321,11 @@ export function ItemFormModal({
           impresionTubos: op.tubos ? s.impresionTubos : false,
           // Referencias al catálogo: con esto la orden ya nace sabiendo qué
           // material gastó y no hace falta auditarla después.
+          //
+          // El área no toca el servicio elegido: este panel es el de impresión
+          // y quien está aquí ya dijo lo que hace. Se guarda para que el
+          // balance no tenga que deducirla del nombre.
+          catalogoArea: areaDeProducto(prod, catalogCategorias),
           catalogoProductoId: prod.id,
           catalogoVarianteId: varianteId ?? null,
           catalogoVarianteNombre: variante?.nombre || null,

@@ -201,6 +201,17 @@ export interface CatalogoProducto {
     id?: string
     categoriaId: string
     nombre: string
+    /**
+     * A que area del taller pertenece ESTE producto.
+     *
+     * Manda sobre la de su categoria. Una medalla y un pendon pueden vivir
+     * en la misma categoria de mercancia y aun asi una es corte entera y el
+     * otro impresion entera; sin poder decirlo aqui, el reparto de ingresos
+     * entre las dos areas se queda adivinando por el nombre.
+     *
+     * Sin valor, hereda la de la categoria.
+     */
+    area?: AreaTaller
     descripcion?: string
     tipoVenta: 'unidad' | 'metro_cuadrado'
     precioBase: number          // precio por unidad O precio por m²
@@ -557,11 +568,15 @@ export const anularVentaCatalogo = async (ventaId: string) =>
  * criterio en el que confiar.
  */
 export const areaDeProducto = (
-    producto: Pick<CatalogoProducto, "categoriaId" | "tipoVenta"> | undefined,
+    producto: Pick<CatalogoProducto, "categoriaId" | "tipoVenta" | "area"> | undefined,
     categorias: CatalogoCategoria[]
 ): AreaTaller => {
-    const propia = categorias.find(c => c.id === producto?.categoriaId)?.area;
-    if (propia) return propia;
+    // Lo que diga el producto manda: es lo mas concreto que hay.
+    if (producto?.area) return producto.area;
+
+    const deCategoria = categorias.find(c => c.id === producto?.categoriaId)?.area;
+    if (deCategoria) return deCategoria;
+
     return producto?.tipoVenta === "unidad" ? "CORTE" : "IMPRESION";
 };
 

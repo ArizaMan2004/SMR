@@ -77,6 +77,19 @@ type ViewMode = 'GENERAL' | 'IMPRESION' | 'CORTE';
 type DetailType = 'INGRESOS' | 'EGRESOS' | 'UTILIDAD' | 'DEUDA' | 'MATERIALES' | null;
 
 const identificarServicio = (item: any) => {
+    // LO QUE DIJO EL CATALOGO MANDA.
+    //
+    // Debajo hay dos listas de palabras que miran el nombre del renglon para
+    // adivinar el area. Adivinan bien casi siempre y por eso el error no se
+    // ve: se ve al final del mes, cuando el ingreso de impresion no cuadra
+    // con lo que de verdad salio de la impresora.
+    //
+    // Cuando el item se agrego desde el catalogo ya trae el area escrita por
+    // quien la configuro, y eso no se discute. 'AMBAS' si baja a adivinar:
+    // significa que el producto toca las dos areas, no que se sepa cual.
+    const delCatalogo = (item.catalogoArea || '').toUpperCase();
+    if (delCatalogo === 'IMPRESION' || delCatalogo === 'CORTE') return delCatalogo;
+
     const tipo = (item.tipoServicio || '').toUpperCase();
     const nombre = (item.nombre || item.descripcion || '').toLowerCase();
     if (tipo === 'DISENO' || tipo === 'DISEÑO') return 'DISENO';

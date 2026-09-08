@@ -16,7 +16,10 @@ import { getNextOrderNumber } from "@/lib/firebase/ordenes";
 
 // NUEVOS IMPORT PARA CLIENTES
 import { subscribeToClients } from "@/lib/services/clientes-service";
-import { subscribeToCatalogoProducts, calcPrecioM2, type CatalogoProducto } from "@/lib/services/catalog-service";
+import {
+    subscribeToCatalogoProducts, subscribeToCatalogoCategories, calcPrecioM2, areaDeProducto,
+    type CatalogoProducto, type CatalogoCategoria,
+} from "@/lib/services/catalog-service";
 import { db } from "@/lib/firebase";
 import { collection, addDoc } from "firebase/firestore";
 
@@ -141,6 +144,8 @@ export default function BudgetEntryView({
 
     // --- CATÁLOGO DE INVENTARIO (mercancía por unidad + materiales por m² como viniles) ---
     const [catalogProductos, setCatalogProductos] = useState<CatalogoProducto[]>([]);
+    // Hacen falta para saber el area de un producto que la hereda de su categoria.
+    const [catalogCategorias, setCatalogCategorias] = useState<CatalogoCategoria[]>([]);
     const [selectedCatalogProduct, setSelectedCatalogProduct] = useState<CatalogoProducto | null>(null);
     const [selectedVarianteId, setSelectedVarianteId] = useState<string | null>(null);
 
@@ -325,6 +330,7 @@ export default function BudgetEntryView({
 
         // SUSCRIBIR AL CATÁLOGO DE INVENTARIO (mismo origen de datos que el Order Wizard)
         const unsubscribeCatalog = subscribeToCatalogoProducts(setCatalogProductos);
+        const unsubscribeCategorias = subscribeToCatalogoCategories(setCatalogCategorias);
 
         // DETECTAR CLICS AFUERA PARA CERRAR LOS BUSCADORES
         function handleClickOutside(event: any) {
@@ -340,6 +346,7 @@ export default function BudgetEntryView({
         return () => {
             unsubscribeClients();
             unsubscribeCatalog();
+            unsubscribeCategorias();
             document.removeEventListener("mousedown", handleClickOutside);
         };
     }, [fetchHistory]);
@@ -480,6 +487,12 @@ export default function BudgetEntryView({
         const catalogRefs = {
             catalogProductoId: selectedCatalogProduct?.id || null,
             catalogVarianteId: selectedVarianteId || null,
+            // A que area del taller va esta plata. Se guarda desde ya para que
+            // al facturar el presupuesto la orden nazca sabiendolo, en vez de
+            // que el balance lo deduzca del nombre del renglon.
+            catalogoArea: selectedCatalogProduct
+                ? areaDeProducto(selectedCatalogProduct, catalogCategorias)
+                : null,
         };
 
         if (newItem.id) {
@@ -694,7 +707,13 @@ export default function BudgetEntryView({
                         unidad: item.unidad === 'm2' ? 'm2' : 'und',
                         medidaXCm: item.medidaXCm || 0,
                         medidaYCm: item.medidaYCm || 0,
-                        tipoServicio: item.unidad === 'm2' ? 'IMPRESION' : 'OTROS',
+                        // El area del catalogo manda sobre la unidad: un
+                        // producto vendido por unidad puede ser corte entero, y
+                        // marcarlo 'OTROS' obliga al balance a repartirlo a ojo.
+                        catalogoArea: item.catalogoArea || null,
+                        tipoServicio: item.catalogoArea === 'IMPRESION' ? 'IMPRESION'
+                            : item.catalogoArea === 'CORTE' ? 'CORTE'
+                            : (item.unidad === 'm2' ? 'IMPRESION' : 'OTROS'),
                         subtotal: item.totalUSD,
                         ...(principal?.productoId ? {
                             catalogoProductoId: principal.productoId,

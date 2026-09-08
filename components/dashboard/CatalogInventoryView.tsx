@@ -53,6 +53,8 @@ import {
     subcategoriasDe,
     type UnidadVenta,
     type TipoEntrada,
+    areaDeProducto,
+    type AreaTaller,
     type CatalogoCategoria,
     type CatalogoProducto,
     type CatalogoVariante,
@@ -1423,6 +1425,40 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                     ])}
                                 </SelectContent>
                             </Select>
+                        </div>
+
+                        {/* AREA DEL TALLER.
+
+                            Decide a que area se le acredita la plata de este
+                            item en el balance. Una medalla es corte entera y un
+                            pendon impresion entera, aunque los dos se vendan por
+                            unidad: sin decirlo aqui, el reparto lo adivina el
+                            nombre del renglon. */}
+                        <div className="space-y-2">
+                            <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Área del taller</Label>
+                            <div className="grid grid-cols-4 gap-2">
+                                {([
+                                    { valor: undefined,   txt: 'Heredar',   ayuda: 'La de su categoría' },
+                                    { valor: 'IMPRESION', txt: 'Impresión', ayuda: 'Todo a impresión' },
+                                    { valor: 'CORTE',     txt: 'Corte',     ayuda: 'Todo a corte' },
+                                    { valor: 'AMBAS',     txt: 'Ambas',     ayuda: 'Se reparte' },
+                                ] as const).map(a => {
+                                    const activo = prodForm.area === a.valor
+                                    return (
+                                        <button key={a.txt} onClick={() => setProdForm(p => ({ ...p, area: a.valor as AreaTaller | undefined }))}
+                                            className={cn('p-3 rounded-2xl border text-left transition-all',
+                                                activo ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10' : 'border-black/10 dark:border-white/10')}>
+                                            <p className="font-black text-[10px] uppercase text-indigo-600">{a.txt}</p>
+                                            <p className="text-[9px] text-slate-400 leading-snug">{a.ayuda}</p>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                            {!prodForm.area && prodForm.categoriaId && (
+                                <p className="text-[9px] font-bold text-slate-400 ml-2">
+                                    Hoy queda en <span className="text-indigo-500">{areaDeProducto(prodForm, categorias)}</span>, heredada.
+                                </p>
+                            )}
                         </div>
 
                         {/* Qué es esto: decide en qué pestaña sale al facturar. */}
