@@ -36,7 +36,7 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 import { db } from '@/lib/firebase'
-import { collection, addDoc, getDocs, query, where } from 'firebase/firestore'
+import { collection, addDoc, updateDoc, doc, getDocs, query, where } from 'firebase/firestore'
 import { claveFechaLocal } from '@/lib/utils/fechas'
 import { subscribeToEmpleados } from '@/lib/services/gastos-service'
 import type { Empleado } from '@/lib/types/gastos'
@@ -136,7 +136,15 @@ interface Props {
 
 export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorDefecto }: Props) {
     const [enviando, setEnviando] = useState(false)
-    const [yaEnviada, setYaEnviada] = useState<number | null>(null)
+    /**
+     * Las órdenes de trabajo que YA existen para esta orden facturada.
+     *
+     * Se guardan enteras y no solo contadas: para decidir si sobra una hay que
+     * poder verla —en qué área está, quién la lleva, qué dice— y eso no cabe
+     * en un número.
+     */
+    const [existentes, setExistentes] = useState<any[]>([])
+    const [decidiendo, setDecidiendo] = useState(false)
 
     const [area, setArea] = useState('IMPRESION')
     const [responsable, setResponsable] = useState('')
@@ -194,31 +202,54 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
     /**
      * ¿Ya se mandó esta orden al taller?
      *
-     * Mandarla dos veces la pone dos veces en la mesa, y el taller acaba
-     * imprimiendo el doble. Se avisa, no se prohíbe: a veces se manda un
-     * trabajo aparte de la misma orden y eso es correcto.
+     * Mandarla dos veces la pone dos veces en la mesa y el taller imprime el
+     * doble. Pero prohibirlo sería peor: a veces se manda un trabajo aparte de
+     * la misma orden, y eso es correcto.
+     *
+     * Así que no se decide aquí: se enseña lo que ya hay y decide quien mira.
      */
     useEffect(() => {
-        if (!open || !orden?.ordenNumero) { setYaEnviada(null); return }
+        if (!open || !orden?.ordenNumero) { setExistentes([]); return }
         let vivo = true
         getDocs(query(
             collection(db, 'ordenes_servicio'),
             where('ordenNumero', '==', orden.ordenNumero)
         ))
-            .then(s => { if (vivo) setYaEnviada(s.size) })
-            .catch(() => { if (vivo) setYaEnviada(null) })
+            .then(s => { if (vivo) setExistentes(s.docs.map(d => ({ id: d.id, ...d.data() }))) })
+            .catch(() => { if (vivo) setExistentes([]) })
         return () => { vivo = false }
     }, [open, orden?.ordenNumero])
 
     const alternar = (lista: string[], set: (v: string[]) => void, v: string) =>
         set(lista.includes(v) ? lista.filter(x => x !== v) : [...lista, v])
 
-    const enviar = async () => {
+    /**
+     * El botón de enviar.
+     *
+     * Si ya hay algo en el taller con esta orden, no se manda: se enseña lo que
+     * hay y se pregunta. Mandarla dos veces sin avisar es lo que hace que el
+     * taller imprima el doble.
+     */
+    const alPulsarEnviar = () => {
+        if (!descripcion.trim()) return toast.error('Escribe qué hay que hacer')
+        if (existentes.length > 0) return setDecidiendo(true)
+        enviar()
+    }
+
+    /**
+     * Guarda el trabajo.
+     *
+     * Con `sobrescribirId` reescribe la orden que ya estaba en vez de crear
+     * otra: el trabajo sigue siendo el mismo y conserva su sitio en la mesa.
+     * Vuelve a PENDIENTE porque acaba de cambiar y hay que rehacerlo.
+     */
+    const enviar = async (sobrescribirId?: string) => {
         if (!descripcion.trim()) return toast.error('Escribe qué hay que hacer')
 
+        setDecidiendo(false)
         setEnviando(true)
         try {
-            await addDoc(collection(db, 'ordenes_servicio'), {
+            const datos = {
                 ordenNumero: orden?.ordenNumero ?? null,
                 cliente: orden?.cliente?.nombreRazonSocial || 'Sin cliente',
                 telefono: orden?.cliente?.telefono || '',
@@ -232,10 +263,21 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
                 adicionales,
                 observaciones: observaciones.trim(),
                 areaActual: area,
-                estado: 'PENDIENTE',
-                creadoEn: new Date().toISOString(),
-            })
-            toast.success(`Orden #${orden?.ordenNumero ?? ''} enviada al taller`)
+                estado: 'PENDIENTE' as const,
+            }
+
+            if (sobrescribirId) {
+                // No se toca creadoEn: la orden es la misma, solo cambió lo que
+                // dice. Perder cuándo entró al taller sería perder el historial.
+                await updateDoc(doc(db, 'ordenes_servicio', sobrescribirId), datos)
+                toast.success(`Orden #${orden?.ordenNumero ?? ''} actualizada en el taller`)
+            } else {
+                await addDoc(collection(db, 'ordenes_servicio'), {
+                    ...datos,
+                    creadoEn: new Date().toISOString(),
+                })
+                toast.success(`Orden #${orden?.ordenNumero ?? ''} enviada al taller`)
+            }
 
             // El aviso va DESPUES de guardar y no puede tumbar nada: si
             // Telegram falla, el trabajo ya esta en la mesa igual. Perder un
@@ -292,7 +334,7 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-2xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] overflow-hidden max-h-[92vh] flex flex-col">
+            <DialogContent className="relative max-w-2xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] overflow-hidden max-h-[92vh] flex flex-col">
                 <header className="p-5 sm:p-6 border-b border-black/5 dark:border-white/10 flex items-center justify-between gap-3 bg-slate-50 dark:bg-white/5">
                     <div className="flex items-center gap-3 min-w-0">
                         <div className="w-10 h-10 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/20">
@@ -313,12 +355,13 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
                 </header>
 
                 <div className="p-5 sm:p-6 space-y-5 overflow-y-auto custom-scrollbar">
-                    {yaEnviada != null && yaEnviada > 0 && (
+                    {existentes.length > 0 && (
                         <div className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50/70 dark:bg-amber-500/5 p-3 flex items-start gap-2.5">
                             <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
                             <p className="text-[11px] font-bold text-amber-700 dark:text-amber-500 leading-snug">
-                                Esta orden ya se mandó al taller {yaEnviada === 1 ? 'una vez' : `${yaEnviada} veces`}.
-                                Si mandas otra, quedan las dos en la mesa.
+                                Esta orden ya está en el taller
+                                {existentes.length === 1 ? '' : ` ${existentes.length} veces`}.
+                                Al enviar te preguntará qué hacer.
                             </p>
                         </div>
                     )}
@@ -413,13 +456,99 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
 
                 <footer className="p-4 sm:p-5 border-t border-black/5 dark:border-white/10 bg-slate-50 dark:bg-white/5">
                     <Button
-                        onClick={enviar}
+                        onClick={alPulsarEnviar}
                         disabled={enviando}
                         className="w-full h-12 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-black uppercase tracking-widest text-[11px] gap-2 shadow-lg shadow-amber-500/20"
                     >
                         {enviando ? <><Loader2 className="w-4 h-4 animate-spin" /> Enviando</> : <><Send className="w-4 h-4" /> Enviar al taller</>}
                     </Button>
                 </footer>
+
+                {/* YA HAY UNA ORDEN CON ESTE NUMERO.
+
+                    No se decide por nadie: se ensena lo que hay y se pregunta.
+                    Duplicar sin avisar hace que el taller imprima el doble;
+                    prohibirlo impediria mandar un trabajo aparte de la misma
+                    orden, que a veces es lo correcto.
+
+                    Cancelar es lo facil: si otra persona ya lo reviso y esta
+                    bien, no hay nada que rehacer. */}
+                {decidiendo && (
+                    <div className="absolute inset-0 z-10 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+                        <div className="w-full max-w-lg bg-white dark:bg-[#1c1c1e] rounded-[1.75rem] shadow-2xl overflow-hidden max-h-full flex flex-col">
+                            <div className="p-5 border-b border-black/5 dark:border-white/10 flex items-start gap-3">
+                                <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-500/15 text-amber-600 flex items-center justify-center shrink-0">
+                                    <AlertTriangle className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="font-black uppercase italic tracking-tight leading-none">
+                                        Ya hay {existentes.length === 1 ? 'una orden' : `${existentes.length} ordenes`} en el taller
+                                    </p>
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">
+                                        con la #{orden.ordenNumero}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="p-4 space-y-2 overflow-y-auto custom-scrollbar">
+                                {existentes.map(e => (
+                                    <div key={e.id} className="rounded-2xl bg-slate-50 dark:bg-white/5 p-3.5 space-y-2">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className={cn(
+                                                'text-[9px] font-black uppercase tracking-widest rounded-full px-2 py-0.5',
+                                                e.estado === 'COMPLETADO'
+                                                    ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600'
+                                                    : 'bg-blue-100 dark:bg-blue-500/15 text-blue-600'
+                                            )}>
+                                                {e.estado === 'COMPLETADO' ? 'Terminada' : AREAS.find(a => a.id === e.areaActual)?.label || e.areaActual}
+                                            </span>
+                                            {e.responsable && (
+                                                <span className="text-[10px] font-bold text-slate-500">{e.responsable}</span>
+                                            )}
+                                            {e.fechaEntrega && (
+                                                <span className="text-[10px] font-bold text-slate-400 ml-auto">Entrega {e.fechaEntrega}</span>
+                                            )}
+                                        </div>
+
+                                        <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 leading-snug whitespace-pre-wrap">
+                                            {String(e.descripcion || '').trim() || 'Sin descripción'}
+                                        </p>
+
+                                        {e.observaciones && (
+                                            <p className="text-[10px] font-bold text-amber-600 leading-snug">{e.observaciones}</p>
+                                        )}
+
+                                        <Button
+                                            variant="outline"
+                                            onClick={() => enviar(e.id)}
+                                            disabled={enviando}
+                                            className="w-full h-10 rounded-xl font-black uppercase tracking-widest text-[10px]"
+                                        >
+                                            Sobrescribir esta
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="p-4 border-t border-black/5 dark:border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <Button
+                                    onClick={() => setDecidiendo(false)}
+                                    className="h-11 rounded-2xl bg-slate-900 hover:bg-black dark:bg-white dark:text-black text-white font-black uppercase tracking-widest text-[10px]"
+                                >
+                                    Cancelar, ya está hecha
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    onClick={() => enviar()}
+                                    disabled={enviando}
+                                    className="h-11 rounded-2xl font-black uppercase tracking-widest text-[10px] border-amber-300 text-amber-600 hover:bg-amber-50"
+                                >
+                                    Crear otra aparte
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </DialogContent>
         </Dialog>
     )
