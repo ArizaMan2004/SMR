@@ -15,11 +15,12 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge' // <--- ¡AQUÍ ESTÁ LA CORRECCIÓN!
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from 'sonner'
-import { UserCircle, Shield, Key, Mail, User, Loader2, Save, Eye, EyeOff, AlertTriangle, Building2, Landmark, FileText } from 'lucide-react'
+import { UserCircle, Shield, Key, Mail, User, Loader2, Save, Eye, EyeOff, AlertTriangle, Building2, Landmark, FileText, MessageCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { IdentidadEmpresaPanel } from '@/components/dashboard/IdentidadEmpresaPanel'
 import { CuentasBancariasPanel, CuentasBancariasHeader } from '@/components/dashboard/CuentasBancariasPanel'
 import { DocumentosPDFPanel } from '@/components/dashboard/DocumentosPDFPanel'
+import { TelegramPanel } from '@/components/dashboard/TelegramPanel'
 import { subscribeToBilleteras, type ConfigBilleteras } from '@/lib/services/billeteras-service'
 
 export function ProfileSettingsView() {
@@ -179,7 +180,15 @@ export function ProfileSettingsView() {
                     <TabsTrigger value="documentos" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                         <FileText className="w-4 h-4 mr-2 inline-block"/> Documentos PDF
                     </TabsTrigger>
+                    <TabsTrigger value="avisos" className="rounded-xl px-6 py-2.5 font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
+                        <MessageCircle className="w-4 h-4 mr-2 inline-block"/> Avisos al taller
+                    </TabsTrigger>
                 </TabsList>
+
+                {/* --- AVISOS POR TELEGRAM --- */}
+                <TabsContent value="avisos" className="mt-0">
+                    <TelegramPanel />
+                </TabsContent>
 
                 {/* --- PESTAÑA 5: LO QUE LLEVAN LOS DOCUMENTOS --- */}
                 <TabsContent value="documentos" className="mt-0">

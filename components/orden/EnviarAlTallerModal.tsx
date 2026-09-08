@@ -40,6 +40,10 @@ import { collection, addDoc, getDocs, query, where } from 'firebase/firestore'
 import { claveFechaLocal } from '@/lib/utils/fechas'
 import { subscribeToEmpleados } from '@/lib/services/gastos-service'
 import type { Empleado } from '@/lib/types/gastos'
+import {
+    subscribeToTelegram, avisarAlArea, mensajeTrabajoNuevo,
+    type ConfigTelegram,
+} from '@/lib/services/telegram-service'
 
 /** Las mismas áreas del taller, con el mismo id: es la pantalla que lo recibe. */
 const AREAS = [
@@ -149,6 +153,9 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
      * "jose angel", "J. Angel"— y entonces no se puede contar cuánto hizo cada
      * quien ni buscar sus trabajos.
      */
+    const [telegram, setTelegram] = useState<ConfigTelegram>({})
+    useEffect(() => subscribeToTelegram(setTelegram), [])
+
     const [empleados, setEmpleados] = useState<Empleado[]>([])
     useEffect(() => subscribeToEmpleados(setEmpleados), [])
 
@@ -221,6 +228,22 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
                 creadoEn: new Date().toISOString(),
             })
             toast.success(`Orden #${orden?.ordenNumero ?? ''} enviada al taller`)
+
+            // El aviso va DESPUES de guardar y no puede tumbar nada: si
+            // Telegram falla, el trabajo ya esta en la mesa igual. Perder un
+            // mensaje es molesto; perder la orden seria grave.
+            const aviso = await avisarAlArea(telegram, area, mensajeTrabajoNuevo({
+                area,
+                ordenNumero: orden?.ordenNumero,
+                cliente: orden?.cliente?.nombreRazonSocial,
+                descripcion,
+                materiales,
+                fechaEntrega,
+                responsable,
+                observaciones,
+            }))
+            if (aviso.enviado) toast.success('Avisado por Telegram')
+
             onOpenChange(false)
         } catch (e: any) {
             toast.error(`No se pudo enviar: ${e?.message || e}`)

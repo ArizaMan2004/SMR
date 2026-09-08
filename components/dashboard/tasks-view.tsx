@@ -29,6 +29,10 @@ import {
 import { cn } from "@/lib/utils"
 import { esAdmin } from '@/lib/roles'
 import { claveFechaLocal } from '@/lib/utils/fechas'
+import {
+    subscribeToTelegram, avisarAlArea, mensajeTrabajoNuevo, mensajeTrabajoTerminado,
+    type ConfigTelegram,
+} from '@/lib/services/telegram-service'
 
 const springConfig = { type: "spring" as const, stiffness: 300, damping: 30 };
 
@@ -83,6 +87,9 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
     const [formData, setFormData] = useState<ServiceOrder>(emptyOrder)
     const [activeTab, setActiveTab] = useState(areaPriorizada || "DISENO")
     const [isLoading, setIsLoading] = useState(true)
+
+    const [telegram, setTelegram] = useState<ConfigTelegram>({})
+    useEffect(() => subscribeToTelegram(setTelegram), [])
 
     // Filtros. Vacíos = no filtran: la pantalla arranca enseñando todo.
     const [busqueda, setBusqueda] = useState("")
@@ -144,16 +151,47 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
     }
 
     const handleMoveArea = async (id: string, newArea: string) => {
+        const orden = ordenesServicio.find(o => o.id === id);
         try {
             await updateDoc(doc(db, "ordenes_servicio", id), { areaActual: newArea, estado: "PENDIENTE" });
             toast.success(`Orden movida a ${AREAS_TALLER.find(a => a.id === newArea)?.label}`);
+
+            // Un trabajo va pasando de mano —se imprime, pasa a produccion que
+            // lo pega sobre PVC— y quien lo recibe tiene que enterarse. Si el
+            // aviso falla, el traspaso ya esta hecho: no se toca.
+            if (orden) {
+                await avisarAlArea(telegram, newArea, mensajeTrabajoNuevo({
+                    area: newArea,
+                    vieneDe: orden.areaActual,
+                    ordenNumero: orden.ordenNumero,
+                    cliente: orden.cliente,
+                    descripcion: orden.descripcion,
+                    materiales: orden.materiales,
+                    fechaEntrega: orden.fechaEntrega,
+                    responsable: orden.responsable,
+                    observaciones: orden.observaciones,
+                }));
+            }
         } catch (error) { toast.error("Error al mover"); }
     }
 
     const handleComplete = async (id: string) => {
+        const orden = ordenesServicio.find(o => o.id === id);
         try {
             await updateDoc(doc(db, "ordenes_servicio", id), { estado: "COMPLETADO" });
             toast.success("Trabajo marcado como finalizado");
+
+            // Al final de la cadena esta quien atiende al cliente: si no se
+            // entera, el trabajo se queda hecho en la mesa esperando a que
+            // alguien pregunte por el.
+            if (orden) {
+                await avisarAlArea(telegram, 'ADMINISTRACION', mensajeTrabajoTerminado({
+                    ordenNumero: orden.ordenNumero,
+                    cliente: orden.cliente,
+                    descripcion: orden.descripcion,
+                    area: orden.areaActual,
+                }));
+            }
         } catch (error) { toast.error("Error al completar"); }
     }
 
