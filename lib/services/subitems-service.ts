@@ -142,16 +142,29 @@ export const consumoDesdePresupuestos = (budgets: { items?: any[] }[]): ConsumoM
 export const unirConsumos = (...listas: ConsumoMaterial[][]): ConsumoMaterial[] => {
     const mapa = new Map<string, ConsumoMaterial>();
 
+    // Se une por NOMBRE y no por id por lo mismo: dos filas con el mismo
+    // nombre en pantalla siempre estan mal, vengan del catalogo o de una
+    // auditoria.
+    const claveDe = (e: ConsumoMaterial) =>
+        (e.productoNombre || e.productoId || "").trim().toLowerCase();
+
     listas.flat().forEach(entrada => {
-        if (!mapa.has(entrada.productoId)) {
-            mapa.set(entrada.productoId, {
+        const k = claveDe(entrada);
+
+        if (!mapa.has(k)) {
+            mapa.set(k, {
                 ...entrada,
                 porServicio: entrada.porServicio.map(s => ({ ...s })),
             });
             return;
         }
 
-        const acumulado = mapa.get(entrada.productoId)!;
+        const acumulado = mapa.get(k)!;
+        // El id del catalogo gana al de relleno: enlaza con el producto real.
+        const esRelleno = (id?: string) => !id || id.startsWith("nombre:");
+        if (esRelleno(acumulado.productoId) && !esRelleno(entrada.productoId)) {
+            acumulado.productoId = entrada.productoId;
+        }
         acumulado.m2Totales += entrada.m2Totales;
         acumulado.unidadesTotales += entrada.unidadesTotales;
         acumulado.ingresosUSD += entrada.ingresosUSD;
@@ -185,8 +198,21 @@ export const unirConsumos = (...listas: ConsumoMaterial[][]): ConsumoMaterial[] 
  * suma nada: preferimos un total que se queda corto y lo dice, a uno inflado
  * con suposiciones. Cuantos faltan lo dice `renglonesSinAuditar`.
  */
-export const consumoDesdeOrdenes = (ordenes: { items?: any[] }[]): ConsumoMaterial[] => {
+export const consumoDesdeOrdenes = (
+    ordenes: { items?: any[] }[],
+    /**
+     * El catalogo, para poder leer lo que se eligio al crear la orden.
+     *
+     * Sin el, un renglon donde alguien eligio "Clear" a mano en el formulario
+     * no contaba como clear: se caia a deducirlo de la descripcion. Cambiabas
+     * el material del item y el balance no se enteraba.
+     */
+    productos: { id?: string; nombre?: string }[] = []
+): ConsumoMaterial[] => {
     const mapa = new Map<string, ConsumoMaterial>();
+    const nombreDeProducto = new Map(
+        productos.filter(p => p.id).map(p => [p.id as string, String(p.nombre || "").trim()])
+    );
 
     ordenes.forEach(orden => {
         (orden?.items || []).forEach((item: any) => {
@@ -206,10 +232,30 @@ export const consumoDesdeOrdenes = (ordenes: { items?: any[] }[]): ConsumoMateri
              * Auditar no cambia el numero: lo confirma.
              */
             const aud = item?.materialAuditado;
-            const estimado = !aud?.nombre;
 
-            const nombreMaterial = aud?.nombre || materialDeDescripcion(item?.nombre || item?.descripcion || "");
+            /**
+             * DE MAS FIABLE A MENOS:
+             *
+             *   1. Lo que alguien confirmo auditando.
+             *   2. El producto que se eligio del catalogo al hacer la orden.
+             *      Es una eleccion deliberada, no una suposicion.
+             *   3. Lo que dice la descripcion.
+             *
+             * El 2 faltaba: cambiabas el material en la edicion del item y el
+             * balance seguia deduciendo del nombre, asi que el cambio no se
+             * veia por ningun lado.
+             */
+            const delCatalogo = item?.catalogoProductoId
+                ? nombreDeProducto.get(item.catalogoProductoId)
+                : undefined;
+
+            const nombreMaterial = aud?.nombre || delCatalogo
+                || materialDeDescripcion(item?.nombre || item?.descripcion || "");
             if (!nombreMaterial) return;
+
+            // Solo lo confirmado deja de ser estimado. Lo del catalogo dice el
+            // material, pero los metros siguen saliendo de las medidas.
+            const estimado = !aud?.nombre;
 
             const m2Deducido = (() => {
                 const x = Number(item?.medidaXCm) || 0;
@@ -219,13 +265,24 @@ export const consumoDesdeOrdenes = (ordenes: { items?: any[] }[]): ConsumoMateri
                 return Math.round((x / 100) * (y / 100) * c * 10000) / 10000;
             })();
 
-            // Sin id de catalogo se agrupa por nombre: el material puede no
-            // estar dado de alta todavia y aun asi hay que contarlo.
-            const clave = aud?.productoId || `nombre:${nombreMaterial}`;
+            /**
+             * SE AGRUPA POR NOMBRE, NO POR ID.
+             *
+             * Antes la clave era el productoId cuando lo habia y el nombre
+             * cuando no. Resultado: el mismo material caia en DOS cubos segun
+             * estuviera auditado o no, y auditar un renglon no movia su
+             * numero — aparecia una fila nueva al lado. Parecia que el balance
+             * ignoraba la auditoria.
+             *
+             * El nombre es lo que se lee en pantalla: dos filas con el mismo
+             * nombre siempre estan mal. El id se guarda igual, para enlazar
+             * con el catalogo.
+             */
+            const clave = `nombre:${nombreMaterial.trim().toLowerCase()}`;
 
             if (!mapa.has(clave)) {
                 mapa.set(clave, {
-                    productoId: clave,
+                    productoId: aud?.productoId || item?.catalogoProductoId || clave,
                     productoNombre: nombreMaterial,
                     m2Totales: 0,
                     unidadesTotales: 0,
@@ -260,11 +317,31 @@ export const consumoDesdeOrdenes = (ordenes: { items?: any[] }[]): ConsumoMateri
              * sigue aparte del material base: son los mismos metros de vinil,
              * pero gastan ademas rollo de laminado.
              */
-            const nombreServicio = aud?.varianteNombre
-                || (aud?.laminado ? "Con laminado" : estimado ? "Sin clasificar" : "Impresion");
+            /**
+             * EN QUE SE USO EL MATERIAL.
+             *
+             * La variante auditada es la respuesta buena: "Aviso", "Pendon",
+             * "Stickers". El laminado se sigue aparte porque son los mismos
+             * metros de vinil pero gastan ademas rollo de laminado.
+             *
+             * Cuando nadie lo dijo se dice que no se sabe, y se marca: no es
+             * un servicio, es la falta de uno.
+             */
+            // El uso tambien puede venir de la orden: al elegir el material se
+            // elige tambien en que se usa, y eso vale igual que auditarlo.
+            const usoElegido = aud?.varianteNombre || item?.catalogoVarianteNombre || null;
+
+            const sinDecir = !usoElegido && !aud?.laminado;
+            const nombreServicio = usoElegido
+                || (aud?.laminado ? "Con laminado" : "Sin clasificar");
             let servicio = material.porServicio.find(x => x.nombre === nombreServicio);
             if (!servicio) {
-                servicio = { varianteId: aud?.varianteId || nombreServicio, nombre: nombreServicio, m2: 0, unidades: 0, ingresosUSD: 0 };
+                servicio = {
+                    varianteId: aud?.varianteId || item?.catalogoVarianteId || nombreServicio,
+                    nombre: nombreServicio,
+                    m2: 0, unidades: 0, ingresosUSD: 0,
+                    ...(sinDecir ? { sinClasificar: true } : {}),
+                };
                 material.porServicio.push(servicio);
             }
             servicio.m2 += m2;

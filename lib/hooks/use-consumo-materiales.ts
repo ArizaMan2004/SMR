@@ -122,7 +122,7 @@ export function useConsumoMateriales(ventasCatalogo: any[] = [], ordenes: any[] 
         // de las ordenes.
         const materiales = unirConsumos(
             consumoPorMaterial(delMostrador),
-            consumoDesdeOrdenes(delTaller)
+            consumoDesdeOrdenes(delTaller, productos)
         ).filter(m => {
             // Los materiales auditados en órdenes pueden no estar dados de alta
             // en el catálogo: su clave es "nombre:Banner". Para esos se busca el

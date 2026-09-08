@@ -237,9 +237,39 @@ export function ConsumoMaterialesPanel({ datos, cargando, area, embebido }: Prop
                                         <p className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
                                             {mat.productoNombre}
                                         </p>
-                                        <p className="text-[10px] font-bold text-slate-400">
-                                            {mat.porServicio.length} {mat.porServicio.length === 1 ? 'servicio' : 'servicios'}
-                                        </p>
+                                        {/* CUANTOS SERVICIOS SE SABEN.
+
+                                            Decia "1 servicio" cuando lo unico
+                                            que habia era un bloque de metros
+                                            sin clasificar. Eso no es un
+                                            servicio: es la falta de uno, y
+                                            contarlo afirma algo que no se
+                                            sabe. Ahora se cuentan solo los
+                                            conocidos y se dice aparte cuanto
+                                            queda por desglosar. */}
+                                        {(() => {
+                                            const conocidos = mat.porServicio.filter(x => !x.sinClasificar)
+                                            const m2Sin = mat.porServicio
+                                                .filter(x => x.sinClasificar)
+                                                .reduce((t, x) => t + x.m2, 0)
+
+                                            return (
+                                                <p className="text-[10px] font-bold text-slate-400">
+                                                    {conocidos.length > 0 && (
+                                                        <span>
+                                                            {conocidos.length} {conocidos.length === 1 ? 'servicio' : 'servicios'}
+                                                        </span>
+                                                    )}
+                                                    {conocidos.length > 0 && m2Sin > 0.005 && <span> · </span>}
+                                                    {m2Sin > 0.005 && (
+                                                        <span className="text-amber-600">
+                                                            {formatoM2(m2Sin)} m² sin desglosar
+                                                        </span>
+                                                    )}
+                                                    {conocidos.length === 0 && m2Sin <= 0.005 && <span>Sin desglosar</span>}
+                                                </p>
+                                            )
+                                        })()}
 
                                         <p className="text-xl font-black tracking-tighter text-slate-900 dark:text-white leading-none mt-1.5 tabular-nums">
                                             {porM2 ? formatoM2(mat.m2Totales) : mat.unidadesTotales}
@@ -275,8 +305,13 @@ export function ConsumoMaterialesPanel({ datos, cargando, area, embebido }: Prop
                                             <div className="px-4 pb-4 space-y-1.5 border-t border-black/5 dark:border-white/5 pt-3">
                                                 {mat.porServicio.map(s => (
                                                     <div key={s.varianteId} className="flex items-center gap-2 text-[11px]">
-                                                        <span className="flex-1 min-w-0 truncate font-bold text-slate-500 dark:text-slate-400">
-                                                            {s.nombre}
+                                                        <span className={cn(
+                                                            "flex-1 min-w-0 truncate font-bold",
+                                                            s.sinClasificar
+                                                                ? "text-amber-600 italic"
+                                                                : "text-slate-500 dark:text-slate-400"
+                                                        )}>
+                                                            {s.sinClasificar ? 'Sin decir en qué se usó' : s.nombre}
                                                         </span>
                                                         <span className="shrink-0 font-black tabular-nums text-slate-700 dark:text-slate-200">
                                                             {s.m2 > 0

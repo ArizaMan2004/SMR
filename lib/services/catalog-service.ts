@@ -375,6 +375,14 @@ export interface ConsumoMaterial {
         m2: number
         unidades: number
         ingresosUSD: number
+        /**
+         * Estos metros no dicen en que se usaron.
+         *
+         * No es un servicio: es la ausencia de uno. Contarlo como servicio
+         * hace que la pantalla diga "1 servicio" cuando lo cierto es "no se
+         * sabe", que es lo contrario de saber algo.
+         */
+        sinClasificar?: boolean
     }[]
 }
 
