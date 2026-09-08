@@ -21,6 +21,7 @@ import { IdentidadEmpresaPanel } from '@/components/dashboard/IdentidadEmpresaPa
 import { CuentasBancariasPanel, CuentasBancariasHeader } from '@/components/dashboard/CuentasBancariasPanel'
 import { DocumentosPDFPanel } from '@/components/dashboard/DocumentosPDFPanel'
 import { TelegramPanel } from '@/components/dashboard/TelegramPanel'
+import { AparienciaPerfilPanel } from '@/components/dashboard/AparienciaPerfilPanel'
 import { subscribeToBilleteras, type ConfigBilleteras } from '@/lib/services/billeteras-service'
 
 export function ProfileSettingsView() {
@@ -223,7 +224,11 @@ export function ProfileSettingsView() {
                 </TabsContent>
 
                 {/* --- PESTAÑA 1: DATOS PERSONALES --- */}
-                <TabsContent value="perfil" className="mt-0">
+                <TabsContent value="perfil" className="mt-0 space-y-6">
+                    {/* La cara primero: es lo que se viene a cambiar aqui, y los
+                        nombres ya se ven en el menu. */}
+                    <AparienciaPerfilPanel />
+
                     <Card className="rounded-[2.5rem] border-0 shadow-xl bg-white dark:bg-[#1c1c1e] p-6 md:p-10 space-y-8">
                         <div>
                             <h3 className="text-xl font-black uppercase italic tracking-tight">Información Básica</h3>

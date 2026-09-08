@@ -13,6 +13,9 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
+import { useAuth } from '@/lib/auth-context'
+import { AvatarUsuario } from '@/components/dashboard/AvatarUsuario'
+import { nombreDePila } from '@/lib/services/perfil-apariencia'
 
 import { cn } from '@/lib/utils'
 import {
@@ -51,6 +54,8 @@ const saludo = (): string => {
 }
 
 export function ResumenDelDia({ ordenes, horarios, onNavigate, onVerOrden }: Props) {
+    const { userData } = useAuth()
+    const miNombre = nombreDePila(userData?.nombre)
     const hoyClave = claveFechaLocal()
 
     const equipo = useMemo(() => asistenciaDe(horarios), [horarios])
@@ -106,12 +111,30 @@ export function ResumenDelDia({ ordenes, horarios, onNavigate, onVerOrden }: Pro
             animate="visible"
             className="space-y-3 sm:space-y-4"
         >
-            {/* Saludo */}
-            <motion.div variants={tarjeta} className="flex items-center gap-2 px-1">
-                <Sparkles className="w-3.5 h-3.5 text-blue-500" />
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-                    {saludo()} · {new Date().toLocaleDateString('es-VE', { weekday: 'long', day: 'numeric', month: 'long' })}
-                </p>
+{/* SALUDO.
+
+                Antes era una linea gris con la hora y la fecha. Decir el nombre
+                de quien esta dentro cuesta lo mismo y contesta la pregunta que
+                importa cuando seis personas comparten pantallas: ¿con que
+                cuenta estoy? La cara al lado lo confirma sin leer. */}
+            <motion.div variants={tarjeta} className="flex items-center gap-3 px-1">
+                {userData && (
+                    <AvatarUsuario
+                        nombre={userData.nombre}
+                        apellido={userData.apellido}
+                        apariencia={userData}
+                        tamano={44}
+                    />
+                )}
+                <div className="min-w-0">
+                    <h2 className="text-xl sm:text-2xl font-black italic uppercase tracking-tighter leading-none truncate">
+                        {miNombre ? <>Hola, {miNombre}</> : saludo()}
+                    </h2>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mt-1 flex items-center gap-1.5">
+                        <Sparkles className="w-3 h-3 text-blue-500 shrink-0" />
+                        {saludo()} · {new Date().toLocaleDateString('es-VE', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    </p>
+                </div>
             </motion.div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">

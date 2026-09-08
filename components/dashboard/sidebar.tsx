@@ -10,6 +10,7 @@ import { ThemeToggle } from "@/components/theme-toggle"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth-context"
 import { usePermisos } from "@/lib/contexts/permisos-context"
+import { AvatarUsuario } from "@/components/dashboard/AvatarUsuario"
 
 // Interfaz adaptada para soportar protección por roles
 export interface NavItem {
@@ -75,9 +76,7 @@ export default function Sidebar({
         })
         .filter(item => (item.children ? item.children.length > 0 : puedeVer(item.id)));
 
-    const userInitials = userData && userData.nombre && userData.apellido
-        ? `${userData.nombre.charAt(0)}${userData.apellido.charAt(0)}`.toUpperCase()
-        : "U";
+    // Las iniciales las calcula el propio avatar: aqui solo se le pasa quien es.
     const userName = userData ? `${userData.nombre} ${userData.apellido}` : "Cargando...";
     // Nombre legible del rango ("Jefe de Producción"), no el identificador crudo.
     const userRoleLabel = rolActual?.label ?? userData?.rol ?? "...";
@@ -232,8 +231,16 @@ export default function Sidebar({
                         className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800 flex items-center gap-3 cursor-pointer hover:border-blue-500/50 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-all group"
                         title="Configurar Perfil"
                     >
-                        <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 font-black text-sm group-hover:scale-105 transition-transform shrink-0">
-                            {userInitials}
+                        {/* Su foto o su color, no el mismo cuadrito azul para
+                            todos: es lo que dice de un vistazo con que cuenta
+                            esta abierta la pantalla. */}
+                        <div className="group-hover:scale-105 transition-transform shrink-0">
+                            <AvatarUsuario
+                                nombre={userData?.nombre}
+                                apellido={userData?.apellido}
+                                apariencia={userData || undefined}
+                                tamano={40}
+                            />
                         </div>
                         <div className="flex-1 overflow-hidden">
                             <p className="text-xs font-black text-slate-900 dark:text-white truncate capitalize group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{userName}</p>

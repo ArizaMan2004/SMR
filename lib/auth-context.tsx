@@ -22,6 +22,17 @@ export interface UserData {
   vistasExtra?: string[]
   /** Vistas retiradas a esta persona aunque su rango las incluya. */
   vistasBloqueadas?: string[]
+
+  /**
+   * Cómo se ve esta cuenta: su foto y su color.
+   *
+   * Todo el mundo veía el mismo cuadrito azul con dos letras. En un taller
+   * donde se comparten pantallas, mirar la esquina y no saber con qué cuenta
+   * estás abierto es como para registrar un pago a nombre de otro.
+   */
+  fotoUrl?: string
+  colorDesde?: string
+  colorHasta?: string
 }
 
 interface AuthContextType {
