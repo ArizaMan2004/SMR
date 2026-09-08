@@ -87,20 +87,6 @@ const FEATURES = [
         tip: 'Los ingresos del Catálogo de Ventas también suman aquí en la vista General.'
     },
     {
-        id: 'task_control',
-        icon: '✅',
-        color: 'rose',
-        title: 'Control de Tareas',
-        tagline: 'Asignación y seguimiento de trabajo',
-        bullets: [
-            'El admin asigna tareas a empleados con nombre, descripción y valor en USD',
-            'Los empleados ven sus tareas pendientes y marcan cuáles completaron',
-            'Las tareas "Requieren Atención" son trabajos completados que esperan validación del admin',
-            'Elimina tareas creadas por error con el botón de papelera (solo admin)',
-        ],
-        tip: '"Requieren Atención" = el empleado terminó el trabajo y espera que el admin lo valide y libere el pago.'
-    },
-    {
         id: 'wallets',
         icon: '💰',
         color: 'green',
@@ -204,11 +190,6 @@ const TOURS: Record<string, any[]> = {
     clients: [
         { element: "#clients-header",  popover: { title: "Gestión de Clientes", description: "Base de datos completa con RIF, teléfono y correo.", side: "bottom", align: 'start' } },
         { element: "#clients-search",  popover: { title: "Búsqueda", description: "Busca por nombre, RIF o teléfono.", side: "bottom", align: 'start' } },
-    ],
-    task_control: [
-        { element: "#task-header",   popover: { title: "Control de Tareas", description: "Asigna trabajo a tu equipo y haz seguimiento del avance.", side: "bottom", align: 'start' } },
-        { element: "#task-tabs",     popover: { title: "Pestañas", description: "Pendientes = en espera · Completadas = terminadas · Requieren Atención = esperan validación admin.", side: "bottom", align: 'start' } },
-        { element: "#btn-new-task",  popover: { title: "Nueva Tarea", description: "Asigna trabajo con nombre, descripción y valor en USD.", side: "left", align: 'center' } },
     ],
     wallets: [
         { element: "#wallets-header",  popover: { title: "Caja y Billeteras", description: "Saldos en tiempo real de cada forma de pago.", side: "bottom", align: 'start' } },

@@ -19,6 +19,13 @@
 export type ViewId =
     | 'orders'
     | 'tasks_taller'
+    /**
+     * Retiradas del menu por desuso.
+     *
+     * El identificador se conserva porque hay cuentas con permisos guardados
+     * que lo nombran: quitarlo dejaria esos datos apuntando a algo que ya no
+     * existe. Simplemente ya no se ofrece ni se monta.
+     */
     | 'task_control'
     | 'my_finances'
     | 'profile_settings'
@@ -58,8 +65,6 @@ export const VIEW_CATALOG: ViewMeta[] = [
     // Operación diaria
     { id: 'orders', label: 'Facturación y Cierre', grupo: 'Operación', descripcion: 'Crear órdenes, cobrar y cerrar el día' },
     { id: 'tasks_taller', label: 'Taller de Producción', grupo: 'Operación', descripcion: 'Trabajos en curso por área' },
-    { id: 'task_control', label: 'Control de Tareas (Bonos)', grupo: 'Operación', descripcion: 'Asignar tareas y aprobar bonos' },
-    { id: 'my_finances', label: 'Mis Finanzas', grupo: 'Operación', descripcion: 'Lo que cada empleado ha ganado' },
 
     // Ventas
     { id: 'catalogo_ventas', label: 'Catálogo & Ventas', grupo: 'Ventas', descripcion: 'Inventario y venta directa de mercancía' },
@@ -121,7 +126,7 @@ export const ROL_POR_DEFECTO: RolId = 'EMPLEADO';
 
 // Todo el personal puede consultar los horarios (saber cuándo le toca venir);
 // solo quien supervisa puede modificarlos.
-const VISTAS_TALLER: ViewId[] = ['tasks_taller', 'task_control', 'my_finances', 'horarios'];
+const VISTAS_TALLER: ViewId[] = ['tasks_taller', 'horarios'];
 
 /**
  * Roles de fábrica. El admin puede editarles las vistas y crear los suyos,
@@ -257,8 +262,8 @@ export function resolverVistas(
  */
 export function vistaInicialPara(vistasPermitidas: Set<ViewId>, esProduccion = false): ViewId {
     const preferencia: ViewId[] = esProduccion
-        ? ['tasks_taller', 'task_control', 'my_finances', 'catalogo_ventas', 'orders', 'profile_settings']
-        : ['orders', 'catalogo_ventas', 'tasks_taller', 'task_control', 'my_finances', 'profile_settings'];
+        ? ['tasks_taller', 'catalogo_ventas', 'orders', 'profile_settings']
+        : ['orders', 'catalogo_ventas', 'tasks_taller', 'profile_settings'];
     return preferencia.find(v => vistasPermitidas.has(v)) ?? 'profile_settings';
 }
 

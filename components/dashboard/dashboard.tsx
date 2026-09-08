@@ -53,7 +53,6 @@ const BudgetEntryView = dynamic(() => import("@/components/dashboard/BudgetEntry
 const CalculatorView = dynamic(() => import("@/components/dashboard/CalculatorView"), { ssr: false, loading: CargandoVista })
 const WalletsView = dynamic(() => import("@/components/dashboard/WalletsView").then(m => m.WalletsView), { ssr: false, loading: CargandoVista })
 const PaymentAuditView = dynamic(() => import("@/components/dashboard/PaymentAuditView").then(m => m.PaymentAuditView), { ssr: false, loading: CargandoVista })
-const TaskControlView = dynamic(() => import("@/components/dashboard/TaskControlView").then(m => m.TaskControlView), { ssr: false, loading: CargandoVista })
 const CatalogInventoryView = dynamic(() => import("@/components/dashboard/CatalogInventoryView").then(m => m.CatalogInventoryView), { ssr: false, loading: CargandoVista })
 
 // Herramientas de IA y diseño: son las más pesadas de todo el sistema.
@@ -68,7 +67,6 @@ const EmpleadosView = dynamic(() => import("@/components/dashboard/empleados-vie
 const EstadisticasDashboard = dynamic(() => import("@/components/dashboard/estadisticas-dashboard").then(m => m.EstadisticasDashboard), { ssr: false, loading: CargandoVista })
 const UsersManagementView = dynamic(() => import("@/components/dashboard/UsersManagementView").then(m => m.UsersManagementView), { ssr: false, loading: CargandoVista })
 const ProfileSettingsView = dynamic(() => import("@/components/dashboard/ProfileSettingsView").then(m => m.ProfileSettingsView), { ssr: false, loading: CargandoVista })
-const EmployeeFinancesView = dynamic(() => import("@/components/dashboard/EmployeeFinancesView").then(m => m.EmployeeFinancesView), { ssr: false, loading: CargandoVista })
 const HorariosView = dynamic(() => import("@/components/dashboard/HorariosView").then(m => m.HorariosView), { ssr: false, loading: CargandoVista })
 
 // Controlador del Tutorial
@@ -262,16 +260,6 @@ export default function Dashboard() {
             id: 'tasks_taller',
             label: 'Taller de Producción',
             icon: <CheckCircle className="w-4 h-4" />,
-        },
-        {
-            id: 'task_control',
-            label: 'Control de Tareas (Bonos)',
-            icon: <Layers className="w-4 h-4" />,
-        },
-        {
-            id: 'my_finances',
-            label: 'Mis Finanzas',
-            icon: <Wallet className="w-4 h-4" />,
         },
         {
             id: 'horarios',
@@ -850,7 +838,6 @@ export default function Dashboard() {
                 <h2 className="text-lg sm:text-xl font-bold tracking-tight italic uppercase truncate max-w-[150px] sm:max-w-none">
                     {activeView === "tasks_taller" ? "Taller" :
                      activeView === "profile_settings" ? "Configuración" :
-                     activeView === "my_finances" ? "Mis Finanzas" :
                      navItems.find(i => i.id === activeView)?.label ||
                      (activeView === "design_production" ? "Pago Diseños" : "Panel")}
                 </h2>
@@ -1031,25 +1018,12 @@ export default function Dashboard() {
                     <ProfileSettingsView />
                 )}
 
-                {/* VISTA DE FINANZAS PERSONALES DEL EMPLEADO */}
-                {activeView === "my_finances" && puedeVer("my_finances") && (
-                    <EmployeeFinancesView
-                        empleados={empleados}
-                        pagos={pagos}
-                        tareas={tareasControl}
-                        currentUserId={currentUserId}
-                        rates={{ usd: currentBcvRate, eur: eurRate }}
-                    />
-                )}
+                {/* Aqui vivian Control de Tareas (Bonos) y Mis Finanzas.
 
-                {/* VISTA DE CONTROL DE TAREAS Y BONOS */}
-                {activeView === "task_control" && puedeVer("task_control") && (
-                    <TaskControlView
-                        currentUser={userData}
-                        empleadosDb={empleados}
-                        rates={{ usd: currentBcvRate, eur: eurRate, usdt: parallelRate }}
-                    />
-                )}
+                    Se retiraron del menu por desuso. Los ficheros siguen en el
+                    repositorio y los permisos guardados que las nombran siguen
+                    siendo validos: si algun dia se reactivan, basta con volver
+                    a montarlas. */}
 
                 {/* VISTA DEL TALLER DE PRODUCCIÓN (El componente en sí filtra las áreas) */}
                 {activeView === "tasks_taller" && puedeVer("tasks_taller") && (
