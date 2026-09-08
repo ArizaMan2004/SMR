@@ -506,7 +506,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 relative">
                 <div>
                     <h2 className="text-2xl sm:text-3xl font-black italic uppercase tracking-tighter flex items-center gap-2 sm:gap-3">
-                        <Wallet className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600" /> Billeteras <span className="text-slate-300">|</span> Tesorería
+                        <Wallet className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600" /> Billeteras <span className="text-slate-300 dark:text-white/20">|</span> Tesorería
                     </h2>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Tasa Hoy: {rates.usd} Bs/$</p>
                 </div>
@@ -541,7 +541,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                 <div className="lg:col-span-2">
                     <Card className="rounded-[2rem] sm:rounded-[2.5rem] border-none shadow-xl bg-white dark:bg-[#1c1c1e] overflow-hidden flex flex-col h-[480px] sm:h-[600px]">
 
-                        <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 bg-slate-50/50 shrink-0">
+                        <div className="p-4 sm:p-6 border-b border-slate-100 dark:border-white/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 bg-slate-50/50 dark:bg-white/[0.03] shrink-0">
                             <div>
                                 <h3 className="text-lg sm:text-2xl font-black italic uppercase tracking-tight">{currentWalletData?.label}</h3>
                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 sm:mt-1">Historial de Movimientos</p>
@@ -553,7 +553,7 @@ export function WalletsView({ rates, yesterdayRate = 0, initialBalancesData }: W
                                     placeholder="Buscar cliente, orden, nota..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="pl-9 h-9 sm:h-10 bg-white border border-slate-200 rounded-xl text-xs font-bold shadow-sm focus-visible:ring-1 focus-visible:ring-indigo-500"
+                                    className="pl-9 h-9 sm:h-10 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold shadow-sm focus-visible:ring-1 focus-visible:ring-indigo-500"
                                 />
                             </div>
                         </div>
@@ -838,7 +838,9 @@ function WalletCard({ config, balance, isActive, onClick, secondaryValue, rateAn
     return (
         <motion.div onClick={onClick} whileHover={{ y: -3 }} whileTap={{ scale: 0.97 }}
             className={cn("p-4 sm:p-6 rounded-[1.75rem] sm:rounded-[2.5rem] cursor-pointer transition-all border-2 relative overflow-hidden group",
-                isActive ? `border-${config.color}-500/50 shadow-xl shadow-${config.color}-500/20 bg-white` : "border-transparent bg-white hover:border-slate-200 shadow-sm")}>
+                isActive
+                    ? `border-${config.color}-500/50 shadow-xl shadow-${config.color}-500/20 bg-white dark:bg-[#1c1c1e]`
+                    : "border-transparent bg-white dark:bg-[#1c1c1e] hover:border-slate-200 dark:hover:border-white/10 shadow-sm")}>
             <div className={cn("absolute top-0 right-0 w-20 h-20 sm:w-32 sm:h-32 -mr-6 -mt-6 sm:-mr-10 sm:-mt-10 rounded-full opacity-10 transition-transform group-hover:scale-150", config.bg)} />
             <div className="flex justify-between items-start mb-3 sm:mb-5 relative z-10">
                 <div className={cn("p-2 sm:p-3 rounded-xl sm:rounded-2xl text-white shadow-md", config.bg)}>
@@ -848,7 +850,7 @@ function WalletCard({ config, balance, isActive, onClick, secondaryValue, rateAn
             </div>
             <div className="relative z-10">
                 <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.15em] sm:tracking-[0.2em] text-slate-400 mb-0.5 sm:mb-1 truncate">{config.label}</p>
-                <h3 className="text-base sm:text-xl md:text-2xl lg:text-3xl font-black tracking-tighter text-slate-900 leading-none break-all">
+                <h3 className="text-base sm:text-xl md:text-2xl lg:text-3xl font-black tracking-tighter text-slate-900 dark:text-white leading-none break-all">
                     {config.currency === 'USD' ? '$' : config.currency === 'USDT' ? '₮' : 'Bs.'}
                     {balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </h3>
