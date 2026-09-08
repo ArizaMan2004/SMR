@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { AuthProvider } from "@/lib/auth-context"
 import { ThemeProviderWrapper } from "@/components/theme-provider"
+import { Toaster } from "@/components/ui/sonner"
 import "./globals.css"
 
 const geistSans = Geist({ subsets: ["latin"], variable: "--font-geist-sans", display: "swap" })
@@ -45,6 +46,15 @@ export default function RootLayout({
         <AuthProvider>
           <ThemeProviderWrapper>{children}</ThemeProviderWrapper>
         </AuthProvider>
+
+        {/* SIN ESTO NINGÚN AVISO SE VE.
+            La app llama a toast() por todas partes —"Producto actualizado",
+            "No se pudo guardar", "Error: ..."— y no había Toaster montado en
+            ningún sitio, así que todos esos mensajes se perdían.
+            Lo grave no son las confirmaciones: son los errores. Guardar un
+            producto podía fallar y la pantalla se quedaba igual, sin decir
+            nada, como si no hubiera pasado nada. */}
+        <Toaster position="bottom-right" richColors closeButton />
         <Analytics />
       </body>
     </html>

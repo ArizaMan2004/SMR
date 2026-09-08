@@ -326,7 +326,11 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
         if (prodForm.precioBase <= 0) return toast.error('El precio debe ser mayor a 0')
         const tid = toast.loading('Guardando producto...')
         try {
-            await saveCatalogoProduct(prodForm, editingProd?.id)
+            // La bandera se deduce, no se marca a mano: hay variantes si las hay.
+            await saveCatalogoProduct(
+                { ...prodForm, tieneVariantes: (prodForm.variantes || []).length > 0 },
+                editingProd?.id
+            )
             toast.dismiss(tid)
             toast.success(editingProd ? 'Producto actualizado' : 'Producto creado')
             setIsProdModalOpen(false)
@@ -393,8 +397,13 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
             stockMinimo: Number(prodVarianteInput.stockMinimo) || 0,
             // Precios propios del servicio derivado. Si se dejan en 0 se hereda
             // el del material base, que es lo razonable para "vinil solo".
-            precioGeneral: Number(prodVarianteInput.precioGeneral) || undefined,
-            precioAliado: Number(prodVarianteInput.precioAliado) || undefined,
+            //
+            // Las claves se OMITEN cuando no hay precio, no se ponen en
+            // undefined: Firestore rechaza undefined y tumba el guardado
+            // entero. Como el aviso de error tampoco se veía, añadir una
+            // variante sin precio no guardaba nada y no decía por qué.
+            ...(Number(prodVarianteInput.precioGeneral) ? { precioGeneral: Number(prodVarianteInput.precioGeneral) } : {}),
+            ...(Number(prodVarianteInput.precioAliado) ? { precioAliado: Number(prodVarianteInput.precioAliado) } : {}),
         }
         setProdForm(p => ({ ...p, variantes: [...p.variantes, nueva] }))
         setProdVarianteInput({ nombre: '', stock: 0, stockMinimo: 0, precioGeneral: 0, precioAliado: 0 })
@@ -1766,10 +1775,25 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                             </div>
                         </div>
 
-                        {/* Gestión de variantes */}
-                        {prodForm.tieneVariantes && (
+                        {/* GESTIÓN DE VARIANTES.
+
+                            Estaba escondida tras `tieneVariantes`, y nada en el
+                            formulario encendía esa bandera: un material que no
+                            nacía con variantes no podía tenerlas nunca. El banner
+                            no podía decir si salía como aviso o como pendón.
+
+                            Ahora se ve siempre y la bandera se deduce al guardar:
+                            hay variantes si hay variantes. Una casilla que hay que
+                            acordarse de marcar para que aparezca lo que ya se está
+                            buscando sobra. */}
+                        {(
                             <div className="bg-slate-50 dark:bg-white/5 p-4 rounded-2xl space-y-3">
                                 <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Servicios derivados de este material</p>
+                                <p className="text-[10px] font-bold text-slate-400 leading-snug -mt-1">
+                                    En qué se usa. Del banner salen avisos, pendones, backings y afiches;
+                                    aunque cuesten lo mismo, así se sabe qué se imprime más. Sin precio propio,
+                                    heredan el del material.
+                                </p>
 
                                 {prodForm.variantes.map(v => (
                                     <div key={v.id} className="flex items-center gap-2 bg-white dark:bg-black/20 p-3 rounded-xl border border-black/5">
