@@ -42,6 +42,7 @@ import { subscribeToEmpleados } from '@/lib/services/gastos-service'
 import type { Empleado } from '@/lib/types/gastos'
 import {
     subscribeToTelegram, avisarAlArea, mensajeTrabajoNuevo,
+    chatDeEmpleado, enviarTelegram, mensajeParaEmpleado, resumenCorto,
     type ConfigTelegram,
 } from '@/lib/services/telegram-service'
 
@@ -167,6 +168,13 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
         [empleados]
     )
 
+    /** Quién es el responsable elegido, para poder escribirle a él y no al grupo. */
+    const empleadoElegido = useMemo(
+        () => empleados.find(e =>
+            [e.nombre, e.apellido].filter(Boolean).join(' ').trim() === responsable.trim()),
+        [empleados, responsable]
+    )
+
     const items = useMemo(() => (orden?.items || []) as any[], [orden])
 
     // Al abrir se rellena con lo que ya dice la orden. No se toca mientras el
@@ -242,7 +250,35 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
                 responsable,
                 observaciones,
             }))
-            if (aviso.enviado) toast.success('Avisado por Telegram')
+            if (aviso.enviado) toast.success('Avisado al grupo del área')
+
+            // Y al que le toca, por privado. En un grupo con doce personas
+            // nadie se da por aludido; en su chat, sí.
+            const suyo = chatDeEmpleado(telegram, empleadoElegido?.id)
+            if (suyo) {
+                // Se cuenta lo que ya tiene encima ANTES de este, y se le suma
+                // el nuevo: es lo que va a tener cuando lea el mensaje.
+                let pendientes = 1
+                try {
+                    const previos = await getDocs(query(
+                        collection(db, 'ordenes_servicio'),
+                        where('responsable', '==', responsable.trim()),
+                        where('estado', '==', 'PENDIENTE')
+                    ))
+                    pendientes = previos.size
+                } catch { /* si no se puede contar, se manda sin el conteo */ }
+
+                const r = await enviarTelegram(suyo, mensajeParaEmpleado({
+                    nombre: empleadoElegido?.nombre,
+                    ordenNumero: orden?.ordenNumero,
+                    cliente: orden?.cliente?.nombreRazonSocial,
+                    resumen: resumenCorto(descripcion),
+                    fechaEntrega,
+                    pendientes,
+                    urlApp: telegram.urlApp,
+                }))
+                if (r.enviado) toast.success(`Avisado a ${empleadoElegido?.nombre}`)
+            }
 
             onOpenChange(false)
         } catch (e: any) {

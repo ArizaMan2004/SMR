@@ -59,6 +59,23 @@ export interface ConfigTelegram {
     activo?: boolean;
     /** Id del grupo de cada área. Vacío: esa área no recibe avisos. */
     chats?: Partial<Record<AreaTelegram, string>>;
+    /**
+     * El chat privado de cada empleado, por su id.
+     *
+     * El grupo sirve para que el área se entere; el mensaje directo sirve para
+     * que a QUIEN le toca le suene el teléfono. En un grupo con doce personas
+     * nadie se da por aludido.
+     */
+    empleados?: Record<string, string>;
+    /**
+     * A dónde manda el enlace del mensaje.
+     *
+     * El aviso no lleva los detalles: lleva lo justo para saber que hay algo y
+     * un enlace para entrar. Los detalles se ven dentro de la cuenta, que es
+     * donde están los permisos — un mensaje de Telegram se reenvía a
+     * cualquiera.
+     */
+    urlApp?: string;
     actualizadoEn?: string;
 }
 
@@ -90,6 +107,12 @@ export const guardarTelegram = async (cfg: ConfigTelegram) => {
         { ...cfg, actualizadoEn: new Date().toISOString() },
         { merge: true }
     );
+};
+
+/** El chat privado de un empleado, si lo tiene y los avisos están encendidos. */
+export const chatDeEmpleado = (cfg: ConfigTelegram, empleadoId?: string): string => {
+    if (cfg?.activo === false || !empleadoId) return "";
+    return String(cfg?.empleados?.[empleadoId] || "").trim();
 };
 
 /** El grupo de un área, si lo tiene configurado y los avisos están encendidos. */
@@ -162,6 +185,71 @@ export const enviarTelegram = async (
     } catch (e: any) {
         return { enviado: false, motivo: e?.message || "Sin conexión" };
     }
+};
+
+/**
+ * EL MENSAJE DIRECTO A QUIEN LE TOCA.
+ *
+ * Corto a propósito. No lleva medidas ni material ni precios: lleva que hay
+ * algo suyo, cuántas cosas tiene encima y por dónde entrar.
+ *
+ * Los detalles se ven dentro de la cuenta y no aquí por dos razones: un
+ * mensaje de Telegram se reenvía a cualquiera y no sabe de permisos, y un
+ * mensaje largo en el teléfono no se lee — se archiva.
+ */
+export const mensajeParaEmpleado = (t: {
+    nombre?: string;
+    ordenNumero?: string | number | null;
+    cliente?: string;
+    resumen?: string;
+    fechaEntrega?: string;
+    pendientes?: number;
+    urlApp?: string;
+}): string => {
+    const lineas = [
+        "🔔 *NUEVA ORDEN*",
+        t.nombre ? `${t.nombre}, te toca esta:` : null,
+        "",
+        t.ordenNumero ? `*Orden #${t.ordenNumero}*` : null,
+        t.cliente ? `Cliente: ${t.cliente}` : null,
+        (t.resumen || "").trim() || null,
+        t.fechaEntrega ? `Entrega: ${t.fechaEntrega}` : null,
+    ];
+
+    if (t.pendientes != null) {
+        lineas.push(
+            "",
+            t.pendientes === 1
+                ? "Con esta tienes *1 pendiente*."
+                : `Con esta tienes *${t.pendientes} pendientes*.`
+        );
+    }
+
+    lineas.push(
+        "",
+        t.urlApp
+            ? `Los detalles en tu cuenta: ${t.urlApp}`
+            : "Los detalles están en tu cuenta de SMR."
+    );
+
+    return lineas.filter(l => l !== null).join("\n");
+};
+
+/**
+ * El resumen de un trabajo en una línea.
+ *
+ * Lo que se lee de un vistazo sin abrir nada. Si son varios renglones se dice
+ * cuántos, en vez de pegar una lista que nadie lee en el teléfono.
+ */
+export const resumenCorto = (descripcion?: string): string => {
+    const lineas = String(descripcion || "")
+        .split("\n")
+        .map(l => l.trim())
+        .filter(Boolean);
+
+    if (!lineas.length) return "";
+    if (lineas.length === 1) return lineas[0];
+    return `${lineas[0]} (+${lineas.length - 1} más)`;
 };
 
 /**

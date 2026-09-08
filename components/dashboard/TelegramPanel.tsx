@@ -27,6 +27,8 @@ import {
     subscribeToTelegram, guardarTelegram, enviarTelegram, descubrirChats, AREAS_TELEGRAM,
     type ConfigTelegram, type AreaTelegram, type ChatDescubierto,
 } from '@/lib/services/telegram-service'
+import { subscribeToEmpleados } from '@/lib/services/gastos-service'
+import type { Empleado } from '@/lib/types/gastos'
 
 export function TelegramPanel() {
     const { userData } = useAuth()
@@ -34,7 +36,12 @@ export function TelegramPanel() {
 
     const [cfg, setCfg] = useState<ConfigTelegram>({})
     const [chats, setChats] = useState<Partial<Record<AreaTelegram, string>>>({})
+    const [empleadosChat, setEmpleadosChat] = useState<Record<string, string>>({})
+    const [urlApp, setUrlApp] = useState('')
     const [activo, setActivo] = useState(true)
+
+    const [empleados, setEmpleados] = useState<Empleado[]>([])
+    useEffect(() => subscribeToEmpleados(setEmpleados), [])
     const [tocado, setTocado] = useState(false)
     const [guardando, setGuardando] = useState(false)
     const [probando, setProbando] = useState<string | null>(null)
@@ -61,13 +68,15 @@ export function TelegramPanel() {
     useEffect(() => {
         if (tocado) return
         setChats({ ...(cfg.chats || {}) })
+        setEmpleadosChat({ ...(cfg.empleados || {}) })
+        setUrlApp(cfg.urlApp || '')
         setActivo(cfg.activo !== false)
     }, [cfg, tocado])
 
     const guardar = async () => {
         setGuardando(true)
         try {
-            await guardarTelegram({ activo, chats })
+            await guardarTelegram({ activo, chats, empleados: empleadosChat, urlApp: urlApp.trim() })
             toast.success('Grupos guardados')
             setTocado(false)
         } catch (e: any) {
@@ -191,15 +200,37 @@ export function TelegramPanel() {
                             <select
                                 defaultValue=""
                                 onChange={e => {
-                                    if (!e.target.value) return
-                                    setChats(p => ({ ...p, [e.target.value as AreaTelegram]: c.id }))
+                                    const v = e.target.value
+                                    if (!v) return
                                     setTocado(true)
-                                    toast.success(`Puesto en ${AREAS_TELEGRAM.find(a => a.id === e.target.value)?.label}`)
+
+                                    if (v.startsWith('area:')) {
+                                        const id = v.slice(5) as AreaTelegram
+                                        setChats(p => ({ ...p, [id]: c.id }))
+                                        toast.success(`Puesto en ${AREAS_TELEGRAM.find(a => a.id === id)?.label}`)
+                                    } else {
+                                        const id = v.slice(4)
+                                        setEmpleadosChat(p => ({ ...p, [id]: c.id }))
+                                        const emp = empleados.find(x => x.id === id)
+                                        toast.success(`Vinculado a ${emp?.nombre || 'el empleado'}`)
+                                    }
                                 }}
                                 className="h-8 rounded-lg bg-slate-50 dark:bg-white/5 border-none text-[10px] font-black uppercase px-2 outline-none shrink-0"
                             >
                                 <option value="">Usar en...</option>
-                                {AREAS_TELEGRAM.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+                                <optgroup label="Grupo de área">
+                                    {AREAS_TELEGRAM.map(a => <option key={a.id} value={`area:${a.id}`}>{a.label}</option>)}
+                                </optgroup>
+                                {/* Un chat privado es de una persona, no de un
+                                    área: el grupo avisa al equipo, el privado
+                                    le suena a quien le toca. */}
+                                <optgroup label="Chat de un empleado">
+                                    {empleados.map(e => (
+                                        <option key={e.id} value={`emp:${e.id}`}>
+                                            {[e.nombre, e.apellido].filter(Boolean).join(' ')}
+                                        </option>
+                                    ))}
+                                </optgroup>
                             </select>
                         </div>
                     ))}
@@ -244,6 +275,92 @@ export function TelegramPanel() {
                         </div>
                     )
                 })}
+            </div>
+
+            {/* QUIÉN RECIBE POR PRIVADO.
+
+                El grupo avisa al área; el privado le suena a quien le toca. En
+                un grupo de doce nadie se da por aludido. */}
+            <div className="rounded-2xl border border-black/5 dark:border-white/5 p-4 space-y-3">
+                <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                        Aviso directo a cada quien
+                    </p>
+                    <p className="text-[10px] font-bold text-slate-400 leading-snug mt-0.5">
+                        Cada quien le escribe al bot por privado, tú le das a Buscar grupos y lo
+                        vinculas aquí. Recibe su orden y cuántas lleva pendientes.
+                    </p>
+                </div>
+
+                {empleados.length === 0 ? (
+                    <p className="text-[10px] font-bold text-slate-400">No hay empleados registrados.</p>
+                ) : (
+                    <div className="flex flex-wrap gap-2">
+                        {empleados.map(e => {
+                            const chat = empleadosChat[e.id]
+                            const nombre = [e.nombre, e.apellido].filter(Boolean).join(' ')
+                            return (
+                                <div
+                                    key={e.id}
+                                    className={cn(
+                                        'flex items-center gap-1.5 rounded-full pl-3 pr-1 h-8 border',
+                                        chat
+                                            ? 'border-emerald-200 bg-emerald-50 dark:bg-emerald-500/10'
+                                            : 'border-black/10 dark:border-white/10'
+                                    )}
+                                >
+                                    <span className={cn('text-[10px] font-black uppercase', chat ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-400')}>
+                                        {nombre}
+                                    </span>
+
+                                    {chat ? (
+                                        <>
+                                            <button
+                                                onClick={async () => {
+                                                    const r = await enviarTelegram(chat, `✅ *Prueba desde SMR*
+Hola ${e.nombre}, si lees esto tus avisos funcionan.`)
+                                                    if (r.enviado) toast.success(`Enviado a ${e.nombre}`)
+                                                    else toast.error(r.motivo || 'No se pudo enviar')
+                                                }}
+                                                title="Mandarle una prueba"
+                                                className="text-emerald-600 hover:text-emerald-800 p-1"
+                                            >
+                                                <Send className="w-3 h-3" />
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setEmpleadosChat(p => { const c = { ...p }; delete c[e.id]; return c })
+                                                    setTocado(true)
+                                                }}
+                                                title="Desvincular"
+                                                className="text-slate-300 hover:text-red-500 p-1"
+                                            >
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <span className="text-[9px] font-bold text-slate-300 pr-2">sin vincular</span>
+                                    )}
+                                </div>
+                            )
+                        })}
+                    </div>
+                )}
+
+                {/* A dónde manda el enlace. El aviso no lleva los detalles: los
+                    detalles se ven dentro de la cuenta, que es donde están los
+                    permisos. Un mensaje de Telegram se reenvía a cualquiera. */}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <Label className="text-[9px] font-black uppercase tracking-widest text-slate-400 shrink-0">
+                        Enlace a la app
+                    </Label>
+                    <Input
+                        value={urlApp}
+                        onChange={e => { setUrlApp(e.target.value); setTocado(true) }}
+                        placeholder="https://tu-app.vercel.app"
+                        className="h-10 flex-1 min-w-[12rem] rounded-xl bg-slate-50 dark:bg-white/5 border-none text-xs font-bold"
+                    />
+                </div>
             </div>
 
             <p className="text-[10px] font-bold text-slate-400 leading-snug">

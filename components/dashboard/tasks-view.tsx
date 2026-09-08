@@ -31,8 +31,11 @@ import { esAdmin } from '@/lib/roles'
 import { claveFechaLocal } from '@/lib/utils/fechas'
 import {
     subscribeToTelegram, avisarAlArea, mensajeTrabajoNuevo, mensajeTrabajoTerminado,
+    chatDeEmpleado, enviarTelegram, mensajeParaEmpleado, resumenCorto,
     type ConfigTelegram,
 } from '@/lib/services/telegram-service'
+import { subscribeToEmpleados } from '@/lib/services/gastos-service'
+import type { Empleado } from '@/lib/types/gastos'
 
 const springConfig = { type: "spring" as const, stiffness: 300, damping: 30 };
 
@@ -90,6 +93,9 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
 
     const [telegram, setTelegram] = useState<ConfigTelegram>({})
     useEffect(() => subscribeToTelegram(setTelegram), [])
+
+    const [empleados, setEmpleados] = useState<Empleado[]>([])
+    useEffect(() => subscribeToEmpleados(setEmpleados), [])
 
     // Filtros. Vacíos = no filtran: la pantalla arranca enseñando todo.
     const [busqueda, setBusqueda] = useState("")
@@ -171,6 +177,28 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                     responsable: orden.responsable,
                     observaciones: orden.observaciones,
                 }));
+
+                // Y por privado a quien le toca, con lo que lleva encima. El
+                // grupo avisa al area; el privado le suena a la persona.
+                const nombre = String(orden.responsable || '').trim();
+                const emp = empleados.find(e =>
+                    [e.nombre, e.apellido].filter(Boolean).join(' ').trim() === nombre);
+                const suyo = chatDeEmpleado(telegram, emp?.id);
+
+                if (suyo) {
+                    const pendientes = ordenesServicio.filter(o =>
+                        o.estado === 'PENDIENTE' && String(o.responsable || '').trim() === nombre).length;
+
+                    await enviarTelegram(suyo, mensajeParaEmpleado({
+                        nombre: emp?.nombre,
+                        ordenNumero: orden.ordenNumero,
+                        cliente: orden.cliente,
+                        resumen: resumenCorto(orden.descripcion),
+                        fechaEntrega: orden.fechaEntrega,
+                        pendientes,
+                        urlApp: telegram.urlApp,
+                    }));
+                }
             }
         } catch (error) { toast.error("Error al mover"); }
     }
