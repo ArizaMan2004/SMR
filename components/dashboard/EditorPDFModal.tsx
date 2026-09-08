@@ -58,8 +58,15 @@ interface Props {
     onOpenChange: (o: boolean) => void
     datos: DatosDocumento | null
     tasas: TasaDisponible[]
-    /** Un presupuesto no puede imprimirse como factura: no es una venta. */
-    soloPresupuesto?: boolean
+    /**
+     * Que puede llegar a ser este papel.
+     *
+     * Un presupuesto no se imprime como factura —no es una venta—, y un
+     * estado de cuenta tampoco: es un resumen de lo que ya se facturo. Sin
+     * esta lista, un clic en la pestana equivocada convierte una oferta en
+     * un documento fiscal.
+     */
+    tiposPermitidos?: TipoImpreso[]
     tipoInicial?: TipoImpreso
     logoBase64?: string
     firmaBase64?: string
@@ -68,7 +75,7 @@ interface Props {
 
 export function EditorPDFModal({
     open, onOpenChange, datos, tasas,
-    soloPresupuesto, tipoInicial,
+    tiposPermitidos, tipoInicial,
     logoBase64, firmaBase64, selloBase64,
 }: Props) {
     const [config, setConfig] = useState<ConfigPDF>({})
@@ -77,7 +84,7 @@ export function EditorPDFModal({
     useEffect(() => subscribeToBilleteras(setBilleteras), [])
 
     const [tipo, setTipo] = useState<TipoImpreso>(
-        soloPresupuesto ? 'PRESUPUESTO' : (tipoInicial || 'NOTA_DE_ENTREGA')
+        tipoInicial || tiposPermitidos?.[0] || 'NOTA_DE_ENTREGA'
     )
     const [mostrarEntrega, setMostrarEntrega] = useState(true)
     const [mostrarTasa, setMostrarTasa] = useState(true)
@@ -108,7 +115,9 @@ export function EditorPDFModal({
     const empresa = empresaDe(config)
     const firmante = firmanteDe(config)
     const tasaElegida = tasas.find(t => t.id === tasaId) || tasas[0]
-    const disponibles = soloPresupuesto ? TIPOS.filter(t => t.id === 'PRESUPUESTO') : TIPOS
+    const disponibles = tiposPermitidos
+        ? TIPOS.filter(t => tiposPermitidos.includes(t.id))
+        : TIPOS.filter(t => t.id !== 'ESTADO_DE_CUENTA')
 
     const avisos = useMemo(
         () => datos ? problemasPara(tipo, empresa, {

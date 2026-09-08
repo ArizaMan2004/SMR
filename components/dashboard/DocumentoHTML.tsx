@@ -32,12 +32,17 @@ export interface DatosDocumento {
     clienteNombre: string
     clienteDocumento?: string
     /**
-     * Presupuesto matriz: una empresa pide el trabajo de varias sedes y lo
-     * paga junto. Lo marca quien lo hace, no se adivina del renglon: si un
-     * presupuesto dejo de ser matriz, a sus renglones viejos les puede
-     * quedar el nombre de la sede pegado y no por eso hay que separarlos.
+     * Partir los renglones en secciones tituladas, con su subtotal.
+     *
+     * Se pide a proposito y no se adivina del renglon: a un presupuesto que
+     * dejo de ser matriz le pueden quedar nombres de local pegados en
+     * renglones viejos, y ahi no hay nada que separar.
      */
-    esMatriz?: boolean
+    agruparRenglones?: boolean
+    /** Como encabezar al destinatario, si no vale el del tipo de documento. */
+    etiquetaCliente?: string
+    /** Como llamar al total, si no basta con 'TOTAL'. */
+    etiquetaTotal?: string
     clienteTelefono?: string
     items: {
         descripcion: string
@@ -45,8 +50,12 @@ export interface DatosDocumento {
         unidad?: string
         precioUnitario: number
         total: number
-        /** La sede o sucursal a la que se le carga, en los presupuestos matriz. */
-        subCliente?: string
+        /**
+         * La seccion en la que va el renglon: el local de una matriz, la
+         * orden en un estado de cuenta. Solo se usa si el documento pide
+         * agrupar.
+         */
+        grupo?: string
     }[]
     totalUSD: number
     /** Lo ya cobrado, para las notas de entrega y las facturas. */
@@ -233,26 +242,27 @@ export function DocumentoHTML({ datos, op }: { datos: DatosDocumento; op: Opcion
     const numero = datos.numero != null ? String(datos.numero).padStart(5, '0') : ''
 
     /**
-     * Un presupuesto matriz le cobra a una empresa el trabajo de varias sedes,
-     * y quien lo recibe necesita ver cuanto le toca a cada una. Sin separarlos
-     * la matriz recibe una lista corrida de renglones sin saber cual es de
-     * quien, y el papel no le sirve para repartir el gasto.
+     * Un presupuesto matriz le cobra a una empresa el trabajo de varios de sus
+     * locales, y quien lo recibe necesita ver cuanto le toca a cada uno. Un
+     * estado de cuenta junta trabajos de varias ordenes, y el cliente necesita
+     * saber a cual pertenece cada renglon. Es el mismo problema: sin separar,
+     * llega una lista corrida que no le sirve a nadie para repartir nada.
      *
-     * Cuando ningun renglon trae sede esto no cambia nada: queda un solo grupo
-     * sin titulo y la tabla sale igual que siempre.
+     * Cuando no se pide agrupar —o ningun renglon dice a que seccion va— queda
+     * un solo grupo sin titulo y la tabla sale igual que siempre.
      */
-    const conSedes = !!datos.esMatriz && datos.items.some(it => it.subCliente?.trim())
+    const agrupado = !!datos.agruparRenglones && datos.items.some(it => it.grupo?.trim())
 
     const grupos = (() => {
-        if (!conSedes) return [{ nombre: '', items: datos.items, total: datos.totalUSD }]
+        if (!agrupado) return [{ nombre: '', items: datos.items, total: datos.totalUSD }]
 
         const orden: string[] = []
         const porSede = new Map<string, typeof datos.items>()
 
         for (const it of datos.items) {
-            // El renglon suelto de un presupuesto matriz cae en 'General': es
-            // trabajo de la empresa, no de ninguna de sus sedes.
-            const sede = it.subCliente?.trim() || 'General'
+            // El renglon que no dice a que seccion va cae en 'General': en una
+            // matriz es trabajo de la empresa y no de ninguno de sus locales.
+            const sede = it.grupo?.trim() || 'General'
             if (!porSede.has(sede)) { porSede.set(sede, []); orden.push(sede) }
             porSede.get(sede)!.push(it)
         }
@@ -289,7 +299,7 @@ export function DocumentoHTML({ datos, op }: { datos: DatosDocumento; op: Opcion
             {/* -------------------------------------------------- cliente */}
             <section className="h-cliente">
                 <div>
-                    <p className="et">{datos.esMatriz ? 'Empresa matriz' : reglas.etiquetaCliente}</p>
+                    <p className="et">{datos.etiquetaCliente || reglas.etiquetaCliente}</p>
                     <p className="nombre">{datos.clienteNombre || 'Consumidor final'}</p>
                     {op.bloques.datosFiscalesCliente && datos.clienteDocumento && (
                         <p>RIF/CI: {datos.clienteDocumento}</p>
@@ -365,7 +375,7 @@ export function DocumentoHTML({ datos, op }: { datos: DatosDocumento; op: Opcion
                     )}
 
                     <div className="total">
-                        <dt>{conSedes ? 'TOTAL GENERAL MATRIZ' : 'TOTAL'}</dt>
+                        <dt>{datos.etiquetaTotal || 'TOTAL'}</dt>
                         <dd>{usd(total)}</dd>
                     </div>
 

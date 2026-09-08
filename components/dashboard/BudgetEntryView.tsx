@@ -393,7 +393,7 @@ export default function BudgetEntryView({
             unidad: i.unidad === 'm2' ? 'm²' : i.unidad === 'und' ? 'Und.' : i.unidad,
             precioUnitario: i.precioUnitarioUSD ?? (i.totalUSD / (i.cantidad || 1)),
             total: i.totalUSD,
-            subCliente: i.subCliente,
+            grupo: i.subCliente,
         }));
 
         setPdfEnEdicion({
@@ -401,7 +401,12 @@ export default function BudgetEntryView({
             fecha: data.dateCreated || new Date().toISOString(),
             clienteNombre: data.clienteNombre,
             clienteDocumento: data.clienteCedula || data.clienteRif,
-            esMatriz: !!data.isMaster,
+            // Un presupuesto matriz sigue siendo UNO: se parte en secciones
+            // por local para que la empresa reparta el gasto, pero abajo hay
+            // un solo total.
+            agruparRenglones: !!data.isMaster,
+            etiquetaCliente: data.isMaster ? 'Empresa matriz' : undefined,
+            etiquetaTotal: data.isMaster ? 'TOTAL GENERAL MATRIZ' : undefined,
             items,
             totalUSD: data.totalUSD || totalUSD,
         });
@@ -1681,7 +1686,7 @@ export default function BudgetEntryView({
                 open={!!pdfEnEdicion}
                 onOpenChange={o => !o && setPdfEnEdicion(null)}
                 datos={pdfEnEdicion}
-                soloPresupuesto
+                tiposPermitidos={['PRESUPUESTO']}
                 tasas={[
                     { id: 'usd',  nombre: 'Dólar (BCV, hoy)',    valor: safeRates.usd,  esDeHoy: true },
                     { id: 'eur',  nombre: 'Euro (BCV, hoy)',     valor: safeRates.eur,  esDeHoy: true },

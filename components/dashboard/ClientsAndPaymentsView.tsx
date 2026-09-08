@@ -42,7 +42,8 @@ import {
     type ConfigBilleteras, type CuentaBilletera,
 } from "@/lib/services/billeteras-service"
 import { DatosCuentaModal } from "@/components/dashboard/DatosCuentaModal"
-import { generateGeneralAccountStatusPDF } from "@/lib/services/pdf-generator"
+import { EditorPDFModal } from "@/components/dashboard/EditorPDFModal"
+import type { DatosDocumento } from "@/components/dashboard/DocumentoHTML"
 import { buscarOrdenesHistoricas } from "@/lib/services/ordenes-service" 
 import { getFrequentClients } from "@/lib/firebase/clientes" 
 import { cn } from '@/lib/utils'
@@ -144,6 +145,9 @@ export function ClientsAndPaymentsView({
     const [configBilleteras, setConfigBilleteras] = useState<ConfigBilleteras>({});
     const [globalCuentaId, setGlobalCuentaId] = useState('');
     const [cuentaAMostrar, setCuentaAMostrar] = useState<CuentaBilletera | null>(null);
+
+    /** El estado de cuenta que se esta preparando para entregar. */
+    const [pdfEnEdicion, setPdfEnEdicion] = useState<DatosDocumento | null>(null);
     useEffect(() => subscribeToBilleteras(setConfigBilleteras), []);
 
     const cuentasGlobales = cuentasActivas(globalWallet, configBilleteras);
@@ -502,40 +506,66 @@ export function ClientsAndPaymentsView({
         return price * qty;
     };
 
-    // --- REPORTES PDF ---
-    const handleGenerateGeneralReceipt = (summary: ClientSummary, rateType: 'USD' | 'EUR' | 'USDT' | 'USD_ONLY') => {
-        try {
-            toast.loading(`Generando estado de cuenta...`);
-            let selectedCurrency = { rate: rates.usd, label: "Tasa BCV ($)", symbol: "Bs." };
-            if (rateType === 'EUR') selectedCurrency = { rate: rates.eur, label: "Tasa BCV (€)", symbol: "Bs." };
-            if (rateType === 'USDT') selectedCurrency = { rate: rates.usdt, label: "Tasa Monitor", symbol: "Bs." };
-            if (rateType === 'USD_ONLY') selectedCurrency = { rate: 1, label: "", symbol: "" };
+    // --- ESTADO DE CUENTA ---
+    /**
+     * Arma el estado de cuenta de un cliente y lo abre en el editor.
+     *
+     * QUE CUADRA CON QUE
+     *
+     * Los renglones se listan a precio completo, agrupados por la orden de la
+     * que salieron —sin eso el cliente recibe una lista corrida y no sabe que
+     * esta reclamando cada linea—. Su suma es lo FACTURADO.
+     *
+     * Lo que el cliente debe de verdad es menos que eso cuando ya abono. Por
+     * eso el papel resta: facturado menos abonado da el saldo, y ese saldo es
+     * exactamente el mismo numero que la vista muestra como pendiente.
+     *
+     * Antes el PDF ponia los renglones a precio completo y abajo el saldo
+     * pendiente, sin la resta en medio: dos numeros que no cuadraban y ninguna
+     * linea que explicara la diferencia.
+     */
+    const handleGenerateGeneralReceipt = (summary: ClientSummary) => {
+        const items = summary.ordenesPendientes.flatMap(orden =>
+            (orden.items || []).map((item: any) => {
+                const qty = parseFloat(item.cantidad?.toString()) || 0;
+                const x = parseFloat(item.medidaXCm) || 0;
+                const y = parseFloat(item.medidaYCm) || 0;
 
-            const consolidatedItems = summary.ordenesPendientes.flatMap(orden => 
-                (orden.items || []).map((item: any) => {
-                    const qty = parseFloat(item.cantidad?.toString()) || 0;
-                    const x = parseFloat(item.medidaXCm) || 0;
-                    const y = parseFloat(item.medidaYCm) || 0;
-                    let itemSubtotal = 0;
-                    
-                    if (item.subtotal !== undefined && item.subtotal !== null) itemSubtotal = parseFloat(item.subtotal);
-                    else if (item.totalAjustado !== undefined) itemSubtotal = parseFloat(item.totalAjustado);
-                    else {
-                        const price = parseFloat(item.precioUnitario?.toString()) || 0;
-                        if (item.unidad === "m2" && x > 0 && y > 0) itemSubtotal = (x / 100) * (y / 100) * price * qty;
-                        else itemSubtotal = price * qty;
-                    }
+                let subtotal = 0;
+                if (item.subtotal !== undefined && item.subtotal !== null) subtotal = parseFloat(item.subtotal);
+                else if (item.totalAjustado !== undefined) subtotal = parseFloat(item.totalAjustado);
+                else {
+                    const price = parseFloat(item.precioUnitario?.toString()) || 0;
+                    subtotal = (item.unidad === "m2" && x > 0 && y > 0)
+                        ? (x / 100) * (y / 100) * price * qty
+                        : price * qty;
+                }
 
-                    return { parentOrder: `#${orden.ordenNumero || 'S/N'}`, nombre: item.nombre, cantidad: qty, medidasTiempo: item.unidad === "m2" ? `${x}x${y}cm` : (item.tiempoCorte || "N/A"), precioUnitario: qty > 0 ? (itemSubtotal / qty) : 0, totalUSD: itemSubtotal };
-                })
-            );
+                return {
+                    descripcion: item.nombre,
+                    cantidad: qty,
+                    unidad: item.unidad === "m2" ? 'm²' : 'Und.',
+                    precioUnitario: qty > 0 ? subtotal / qty : 0,
+                    total: subtotal,
+                    grupo: `Orden #${orden.ordenNumero || 'S/N'}`,
+                };
+            })
+        );
 
-            generateGeneralAccountStatusPDF(
-                { clienteNombre: summary.nombre, clienteRIF: summary.rif, items: consolidatedItems, totalPendienteUSD: summary.totalPendienteUSD, fechaReporte: new Date().toLocaleDateString('es-VE') },
-                pdfLogoBase64 || "", { firmaBase64, selloBase64, currency: selectedCurrency }
-            );
-            toast.dismiss(); toast.success("PDF Generado");
-        } catch (error) { toast.dismiss(); toast.error("Error al generar reporte"); }
+        const facturado = items.reduce((t, i) => t + i.total, 0);
+
+        setPdfEnEdicion({
+            fecha: new Date().toISOString(),
+            clienteNombre: summary.nombre,
+            clienteDocumento: summary.rif,
+            agruparRenglones: true,
+            etiquetaTotal: 'TOTAL FACTURADO',
+            // Lo abonado sale de la resta y no de un campo aparte: asi el saldo
+            // del papel no puede alejarse del que muestra la vista.
+            cobradoUSD: Math.max(0, facturado - summary.totalPendienteUSD),
+            items,
+            totalUSD: facturado,
+        });
     };
 
     // --- MANEJO DE ABONO GLOBAL ---
@@ -868,37 +898,14 @@ export function ClientsAndPaymentsView({
                                             </div>
 
                                             <div className="flex gap-2">
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button 
-                                                            variant="outline"
-                                                            className="rounded-2xl border-slate-200 dark:border-white/10 font-black py-7 px-6 text-xs uppercase italic tracking-widest gap-3 shadow-sm hover:bg-slate-100 dark:hover:bg-white/5"
-                                                        >
-                                                            <Printer className="w-5 h-5 text-slate-500"/> Recibo General <ChevronDown className="w-3 h-3 opacity-50"/>
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end" className="rounded-2xl min-w-[200px]">
-                                                        <DropdownMenuLabel className="text-[10px] uppercase font-black text-slate-400">Seleccionar Tasa</DropdownMenuLabel>
-                                                        <DropdownMenuSeparator />
-                                                        <DropdownMenuItem onClick={() => handleGenerateGeneralReceipt(summary, 'USD')} className="gap-3 py-3 cursor-pointer">
-                                                            <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-200">BCV $</Badge>
-                                                            <span className="font-bold text-xs">{rates.usd.toFixed(2)}</span>
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => handleGenerateGeneralReceipt(summary, 'EUR')} className="gap-3 py-3 cursor-pointer">
-                                                            <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200">BCV €</Badge>
-                                                            <span className="font-bold text-xs">{rates.eur.toFixed(2)}</span>
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => handleGenerateGeneralReceipt(summary, 'USDT')} className="gap-3 py-3 cursor-pointer">
-                                                            <Badge variant="outline" className="bg-orange-50 text-orange-600 border-orange-200">Monitor</Badge>
-                                                            <span className="font-bold text-xs">{rates.usdt.toFixed(2)}</span>
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuSeparator />
-                                                        <DropdownMenuItem onClick={() => handleGenerateGeneralReceipt(summary, 'USD_ONLY')} className="gap-3 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10">
-                                                            <Banknote className="w-4 h-4 text-slate-500" />
-                                                            <span className="font-bold text-xs text-slate-600 dark:text-slate-300">Solo Dólares (Sin Bs)</span>
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
+                                                <Button
+                                                    variant="outline"
+                                                    onClick={() => handleGenerateGeneralReceipt(summary)}
+                                                    title="Abrir el editor del documento"
+                                                    className="rounded-2xl border-slate-200 dark:border-white/10 font-black py-7 px-6 text-xs uppercase italic tracking-widest gap-3 shadow-sm hover:bg-slate-100 dark:hover:bg-white/5"
+                                                >
+                                                    <Printer className="w-5 h-5 text-slate-500"/> Estado de cuenta
+                                                </Button>
 
                                                 {summary.ordenesPendientes.length > 1 && (
                                                     <Button 
@@ -1412,6 +1419,22 @@ export function ClientsAndPaymentsView({
                     onOpenChange={o => !o && setCuentaAMostrar(null)}
                 />
             </Dialog>
+
+            <EditorPDFModal
+                open={!!pdfEnEdicion}
+                onOpenChange={o => !o && setPdfEnEdicion(null)}
+                datos={pdfEnEdicion}
+                tipoInicial="ESTADO_DE_CUENTA"
+                tiposPermitidos={['ESTADO_DE_CUENTA']}
+                tasas={[
+                    { id: 'usd',  nombre: 'Dólar (BCV, hoy)',      valor: rates.usd,  esDeHoy: true },
+                    { id: 'eur',  nombre: 'Euro (BCV, hoy)',       valor: rates.eur,  esDeHoy: true },
+                    { id: 'usdt', nombre: 'Paralelo / USDT (hoy)', valor: rates.usdt, esDeHoy: true },
+                ]}
+                logoBase64={pdfLogoBase64}
+                firmaBase64={firmaBase64}
+                selloBase64={selloBase64}
+            />
 
             {/* MODAL HISTORIAL Y REVERSIÓN DE ABONOS GLOBALES AUTÓNOMO */}
             <GlobalPaymentHistoryModal 

@@ -23,7 +23,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 import { formatCurrency } from "@/lib/utils/order-utils"
-import { generateOrderPDF } from "@/lib/services/pdf-generator"
+import { EditorPDFModal } from "@/components/dashboard/EditorPDFModal"
+import type { DatosDocumento } from "@/components/dashboard/DocumentoHTML"
 import { toast } from "sonner"
 import {
     Trash2, Eye, Pencil, ChevronLeft, ChevronRight,
@@ -96,6 +97,15 @@ export function OrdersTable({
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
   const [orderForPayment, setOrderForPayment] = useState<OrdenServicio | null>(null)
   
+  /**
+   * La orden que se esta preparando para entregar.
+   *
+   * Se abre el editor en vez de soltar el PDF: la orden se entrega como
+   * nota de entrega o como factura segun lo que pida el cliente, y eso se
+   * decide en el momento, viendo la hoja.
+   */
+  const [pdfEnEdicion, setPdfEnEdicion] = useState<DatosDocumento | null>(null)
+
   const [isSyncing, setIsSyncing] = useState(false)
   const [isFixing, setIsFixing] = useState(false) 
 
@@ -120,17 +130,40 @@ export function OrdersTable({
     return { unpaidOrders: unpaid, paidOrders: paid };
   }, [ordenes]);
 
-  const handleDownloadPDF = async (o: OrdenServicio, rateType: 'USD' | 'EUR' | 'USDT' | 'USD_ONLY') => {
-    if (!pdfLogoBase64) return void toast.error("Por favor, cargue un logo en Presupuestos → Configuración.");
-    let selectedCurrency = { rate: rates.usd, label: "Tasa BCV ($)", symbol: "Bs." };
-    if (rateType === 'EUR') selectedCurrency = { rate: rates.eur, label: "Tasa BCV (€)", symbol: "Bs." };
-    if (rateType === 'USDT') selectedCurrency = { rate: rates.usdt, label: "Tasa Monitor", symbol: "Bs." };
-    if (rateType === 'USD_ONLY') selectedCurrency = { rate: 1, label: "", symbol: "" };
+  /**
+   * Abre el editor del documento de una orden.
+   *
+   * Antes preguntaba la tasa en un menu y despues soltaba el PDF de una,
+   * sin que nadie lo viera antes de mandarlo. Ahora se ve la hoja completa y
+   * se decide ahi: tipo de documento, tasa, IVA y tamano.
+   */
+  const handleDownloadPDF = (o: OrdenServicio) => {
+    const esMatriz = (o as any).isMaster === true;
 
-    await generateOrderPDF(o, pdfLogoBase64, { 
-        firmaBase64, 
-        selloBase64,
-        currency: selectedCurrency 
+    const items = (o.items || []).map((i: any) => ({
+      descripcion: i.nombre,
+      cantidad: i.cantidad,
+      unidad: i.unidad === 'm2' ? 'm²' : 'Und.',
+      precioUnitario: i.precioUnitario ?? (i.subtotal / (i.cantidad || 1)),
+      total: i.subtotal,
+      grupo: i.subCliente,
+    }));
+
+    setPdfEnEdicion({
+      numero: o.ordenNumero,
+      fecha: o.fecha,
+      fechaEntrega: o.fechaEntrega,
+      clienteNombre: o.cliente?.nombreRazonSocial || '',
+      clienteDocumento: o.cliente?.rifCedula,
+      clienteTelefono: o.cliente?.telefono,
+      // Lo ya abonado viaja con la orden: una nota de entrega que no diga
+      // cuanto se pago deja al cliente sin saber que le queda debiendo.
+      cobradoUSD: o.montoPagadoUSD || 0,
+      agruparRenglones: esMatriz,
+      etiquetaCliente: esMatriz ? 'Empresa matriz' : undefined,
+      etiquetaTotal: esMatriz ? 'TOTAL GENERAL MATRIZ' : undefined,
+      items,
+      totalUSD: o.totalUSD || 0,
     });
   };
 
@@ -315,6 +348,22 @@ export function OrdersTable({
           </DialogContent>
       </Dialog>
 
+      <EditorPDFModal
+          open={!!pdfEnEdicion}
+          onOpenChange={o => !o && setPdfEnEdicion(null)}
+          datos={pdfEnEdicion}
+          tipoInicial="NOTA_DE_ENTREGA"
+          tiposPermitidos={['NOTA_DE_ENTREGA', 'FACTURA', 'PRESUPUESTO']}
+          tasas={[
+              { id: 'usd',  nombre: 'Dólar (BCV, hoy)',      valor: rates.usd,  esDeHoy: true },
+              { id: 'eur',  nombre: 'Euro (BCV, hoy)',       valor: rates.eur,  esDeHoy: true },
+              { id: 'usdt', nombre: 'Paralelo / USDT (hoy)', valor: rates.usdt, esDeHoy: true },
+          ]}
+          logoBase64={pdfLogoBase64}
+          firmaBase64={firmaBase64}
+          selloBase64={selloBase64}
+      />
+
       {/* --- AQUÍ RENDERIZAMOS EL MODAL DE PAGOS --- */}
       {orderForPayment && (
           <PaymentEditModal
@@ -481,34 +530,13 @@ function OrdersSubTable({ data, actions, rates }: any) {
                                     <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <ActionButton icon={<Eye />} color="blue" onClick={() => actions.handleOpenDetail(o)} label="Ver Factura" />
                                         
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <button className="w-10 h-10 rounded-xl flex items-center justify-center transition-all border active:scale-95 shadow-sm text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-600 hover:text-white dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:hover:bg-emerald-500">
-                                                    <Download className="w-5 h-5" />
-                                                </button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end" className="rounded-2xl min-w-[150px]">
-                                                <DropdownMenuLabel className="text-[10px] uppercase font-black text-slate-400">Seleccionar Tasa</DropdownMenuLabel>
-                                                <DropdownMenuSeparator />
-                                                <DropdownMenuItem onClick={() => actions.handleDownloadPDF(o, 'USD')} className="gap-3 cursor-pointer text-xs font-bold">
-                                                    <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-200">BCV $</Badge>
-                                                    {rates?.usd?.toFixed(2)}
-                                                </DropdownMenuItem>
-                                                <DropdownMenuItem onClick={() => actions.handleDownloadPDF(o, 'EUR')} className="gap-3 cursor-pointer text-xs font-bold">
-                                                    <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200">BCV €</Badge>
-                                                    {rates?.eur?.toFixed(2)}
-                                                </DropdownMenuItem>
-                                                <DropdownMenuItem onClick={() => actions.handleDownloadPDF(o, 'USDT')} className="gap-3 cursor-pointer text-xs font-bold">
-                                                    <Badge variant="outline" className="bg-orange-50 text-orange-600 border-orange-200">Monitor</Badge>
-                                                    {rates?.usdt?.toFixed(2)}
-                                                </DropdownMenuItem>
-                                                <DropdownMenuSeparator />
-                                                <DropdownMenuItem onClick={() => actions.handleDownloadPDF(o, 'USD_ONLY')} className="gap-3 cursor-pointer text-xs font-bold hover:bg-slate-100 dark:hover:bg-white/10">
-                                                    <Banknote className="w-4 h-4 text-slate-500" />
-                                                    Solo Dólares (Sin Bs)
-                                                </DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
+                                        <button
+                                            onClick={() => actions.handleDownloadPDF(o)}
+                                            title="Abrir el editor del documento"
+                                            className="w-10 h-10 rounded-xl flex items-center justify-center transition-all border active:scale-95 shadow-sm text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-600 hover:text-white dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:hover:bg-emerald-500"
+                                        >
+                                            <Download className="w-5 h-5" />
+                                        </button>
 
                                         <ActionButton icon={<History />} color="indigo" onClick={() => actions.handleOpenHistory(o)} label="Historial" />
                                         
@@ -568,34 +596,13 @@ function OrdersSubTable({ data, actions, rates }: any) {
                             <div className="flex items-center gap-2 flex-wrap pt-1">
                                 <ActionButton icon={<Eye />} color="blue" onClick={() => actions.handleOpenDetail(o)} label="Ver Factura" />
 
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <button className="w-10 h-10 rounded-xl flex items-center justify-center transition-all border active:scale-95 shadow-sm text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-600 hover:text-white dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:hover:bg-emerald-500">
-                                            <Download className="w-5 h-5" />
-                                        </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="rounded-2xl min-w-[150px]">
-                                        <DropdownMenuLabel className="text-[10px] uppercase font-black text-slate-400">Seleccionar Tasa</DropdownMenuLabel>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => actions.handleDownloadPDF(o, 'USD')} className="gap-3 cursor-pointer text-xs font-bold">
-                                            <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-200">BCV $</Badge>
-                                            {rates?.usd?.toFixed(2)}
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => actions.handleDownloadPDF(o, 'EUR')} className="gap-3 cursor-pointer text-xs font-bold">
-                                            <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200">BCV €</Badge>
-                                            {rates?.eur?.toFixed(2)}
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => actions.handleDownloadPDF(o, 'USDT')} className="gap-3 cursor-pointer text-xs font-bold">
-                                            <Badge variant="outline" className="bg-orange-50 text-orange-600 border-orange-200">Monitor</Badge>
-                                            {rates?.usdt?.toFixed(2)}
-                                        </DropdownMenuItem>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => actions.handleDownloadPDF(o, 'USD_ONLY')} className="gap-3 cursor-pointer text-xs font-bold hover:bg-slate-100 dark:hover:bg-white/10">
-                                            <Banknote className="w-4 h-4 text-slate-500" />
-                                            Solo Dólares (Sin Bs)
-                                        </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
+                                <button
+                                    onClick={() => actions.handleDownloadPDF(o)}
+                                    title="Abrir el editor del documento"
+                                    className="w-10 h-10 rounded-xl flex items-center justify-center transition-all border active:scale-95 shadow-sm text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-600 hover:text-white dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:hover:bg-emerald-500"
+                                >
+                                    <Download className="w-5 h-5" />
+                                </button>
 
                                 <ActionButton icon={<History />} color="indigo" onClick={() => actions.handleOpenHistory(o)} label="Historial" />
                                 {saldo > 0.01 && (

@@ -26,7 +26,8 @@ import {
 import { cn } from '@/lib/utils'
 import { uploadFileToCloudinary } from '@/lib/services/cloudinary-service'
 import { subscribeToClients } from '@/lib/services/clientes-service'
-import { generateCatalogSalePDF } from '@/lib/services/pdf-generator'
+import { EditorPDFModal } from '@/components/dashboard/EditorPDFModal'
+import type { DatosDocumento } from '@/components/dashboard/DocumentoHTML'
 import {
     subscribeToCatalogoCategories,
     subscribeToCatalogoProducts,
@@ -178,6 +179,9 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     const [isCatModalOpen, setIsCatModalOpen] = useState(false)
     const [isCartItemModalOpen, setIsCartItemModalOpen] = useState(false)
     const [isReceiptOpen, setIsReceiptOpen] = useState(false)
+
+    /** La venta que se esta preparando para entregar. */
+    const [pdfEnEdicion, setPdfEnEdicion] = useState<DatosDocumento | null>(null)
     const [isStockModalOpen, setIsStockModalOpen] = useState(false)
 
     // Estado de edición
@@ -518,20 +522,43 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     const removeFromCart = (key: string) => setCart(prev => prev.filter(i => i.key !== key))
     const clearCart = () => { if (confirm('¿Limpiar el carrito?')) setCart([]) }
 
-    const handleGenerarPDF = async (venta: VentaCatalogo) => {
-        const currency = moneda === 'BS'
-            ? { rate: rates.usd, label: 'Tasa BCV', symbol: 'Bs.' }
-            : moneda === 'EUR'
-            ? { rate: rates.eur, label: 'Tasa EUR', symbol: '€' }
-            : { rate: 1, label: 'USD', symbol: '$' }
-        try {
-            await generateCatalogSalePDF(venta, pdfLogoBase64 || '', {
-                firmaBase64, selloBase64,
-                currency: { rate: (venta as any).tasaCambio || 1, label: 'Tasa', symbol: (venta as any).moneda === 'BS' ? 'Bs.' : (venta as any).moneda === 'EUR' ? '€' : '$' }
-            })
-        } catch (e) {
-            toast.error('Error al generar PDF')
+    /**
+     * Abre el documento de una venta de mostrador.
+     *
+     * Una venta de mostrador se cobra completa en el acto, asi que sale como
+     * nota de entrega con todo cancelado. Si el cliente pide factura, se
+     * cambia la pestana ahi mismo.
+     *
+     * La venta anulada no se puede entregar: seguiria diciendo que se cobro
+     * algo que se devolvio.
+     */
+    const handleGenerarPDF = (venta: VentaCatalogo) => {
+        if (venta.estado === 'ANULADA') {
+            toast.error('Esta venta esta anulada; no se puede emitir su documento.')
+            return
         }
+
+        const items = (venta.items || []).map(i => ({
+            descripcion: i.varianteNombre ? `${i.productoNombre} — ${i.varianteNombre}` : i.productoNombre,
+            cantidad: i.cantidad,
+            unidad: i.tipoVenta === 'metro_cuadrado' ? 'm²' : 'Und.',
+            precioUnitario: i.cantidad > 0 ? i.subtotalUSD / i.cantidad : i.subtotalUSD,
+            total: i.subtotalUSD,
+        }))
+
+        setPdfEnEdicion({
+            // Firestore devuelve Timestamp; una venta recien hecha en memoria
+            // todavia trae una fecha normal.
+            fecha: venta.fecha?.toDate ? venta.fecha.toDate().toISOString() : new Date(venta.fecha).toISOString(),
+            clienteNombre: venta.clienteNombre || 'Consumidor final',
+            clienteDocumento: venta.clienteRif,
+            clienteTelefono: venta.clienteTelefono,
+            // Se cobra en el acto: el papel sale cancelado, no debiendo.
+            cobradoUSD: venta.totalUSD,
+            notas: venta.notas,
+            items,
+            totalUSD: venta.totalUSD,
+        })
     }
 
     // ============================================================
@@ -1979,6 +2006,22 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
             {/* ============================================================
                 MODAL: RECIBO DE VENTA
             ============================================================ */}
+            <EditorPDFModal
+                open={!!pdfEnEdicion}
+                onOpenChange={o => !o && setPdfEnEdicion(null)}
+                datos={pdfEnEdicion}
+                tipoInicial="NOTA_DE_ENTREGA"
+                tiposPermitidos={['NOTA_DE_ENTREGA', 'FACTURA']}
+                tasas={[
+                    { id: 'usd',  nombre: 'Dólar (BCV, hoy)',      valor: rates.usd,  esDeHoy: true },
+                    { id: 'eur',  nombre: 'Euro (BCV, hoy)',       valor: rates.eur,  esDeHoy: true },
+                    { id: 'usdt', nombre: 'Paralelo / USDT (hoy)', valor: rates.usdt, esDeHoy: true },
+                ]}
+                logoBase64={pdfLogoBase64}
+                firmaBase64={firmaBase64}
+                selloBase64={selloBase64}
+            />
+
             <Dialog open={isReceiptOpen} onOpenChange={setIsReceiptOpen}>
                 <DialogContent className="sm:max-w-md rounded-[2.5rem] bg-white dark:bg-[#1c1c1e] border-0 shadow-2xl p-0 overflow-hidden max-h-[90vh]">
                     {selectedVenta && (

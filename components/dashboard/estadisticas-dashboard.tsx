@@ -23,6 +23,7 @@ import {
 } from "lucide-react"
 import { toPng } from 'html-to-image'
 import jsPDF from 'jspdf'
+import { billeteraDeMetodo } from '@/lib/services/billeteras-service'
 
 import { db } from "@/lib/firebase"
 import { collection, query, where, getDocs, Timestamp } from "firebase/firestore"
@@ -326,23 +327,29 @@ export function EstadisticasDashboard({
 
           if (Array.isArray(historial) && historial.length > 0) {
               historial.forEach((pago: any, index: number) => {
-                  const metodoLower = (pago.metodo || '').toLowerCase();
-                  let wallet = 'cash_usd';
-                  let currency = 'USD';
+                  // A que billetera va lo cobrado lo decide billeteraDeMetodo,
+                  // el mismo criterio que usa Tesoreria. Aqui habia una copia
+                  // con sus propias reglas y no coincidian:
+                  //
+                  //   "Efectivo Bs" caia en el banco, porque la regla buscaba
+                  //   el trozo "bs" dentro del texto. Es plata de la gaveta y
+                  //   se contaba como saldo bancario.
+                  //
+                  //   "Pago Movil" a secas caia en efectivo, porque la regla
+                  //   buscaba "movil" sin tilde y el texto guardado la lleva.
+                  //
+                  // Dos criterios para la misma pregunta terminan siempre asi.
+                  //
+                  // Sin metodo anotado se queda en efectivo, no en el banco:
+                  // quien cuadra el banco contra el sistema buscaria ese
+                  // dinero en el estado de cuenta y no lo encontraria.
+                  const wallet = pago.metodo ? billeteraDeMetodo(pago.metodo) : 'cash_usd';
                   const tasaAplicada = Number(pago.tasaBCV) || rates?.usd || 1;
-                  let montoOriginal = Number(pago.montoUSD) || 0;
 
-                  if (metodoLower.includes('movil') || metodoLower.includes('transferencia') || metodoLower.includes('bs')) {
-                      wallet = 'bank_bs';
-                      currency = 'VES';
-                      montoOriginal = (pago.montoBs && Number(pago.montoBs) > 0) ? Number(pago.montoBs) : (Number(pago.montoUSD) * tasaAplicada);
-                  } else if (metodoLower.includes('zelle')) {
-                      wallet = 'zelle';
-                      currency = 'USD';
-                  } else if (metodoLower.includes('usdt') || metodoLower.includes('binance')) {
-                      wallet = 'usdt';
-                      currency = 'USDT';
-                  }
+                  const currency = wallet === 'bank_bs' ? 'VES' : wallet === 'usdt' ? 'USDT' : 'USD';
+                  const montoOriginal = wallet === 'bank_bs'
+                      ? ((pago.montoBs && Number(pago.montoBs) > 0) ? Number(pago.montoBs) : (Number(pago.montoUSD) * tasaAplicada))
+                      : (Number(pago.montoUSD) || 0);
 
                   const safeItems = Array.isArray(orden.items) ? orden.items : [];
                   const itemsResumen = safeItems.map((i:any) => `${i.cantidad}x ${i.nombre || i.descripcion}`).join(', ') || 'Varios';
@@ -366,8 +373,22 @@ export function EstadisticasDashboard({
                   });
               });
           } else {
+              // ORDENES VIEJAS, SIN HISTORIAL DE ABONOS.
+              //
+              // Antes solo entraban las marcadas como pagadas del todo. Una
+              // orden abonada a medias —cobrada de verdad, con su plata en la
+              // gaveta— no aportaba nada y ese dinero no aparecia por ningun
+              // lado: ni en ingresos, ni en billeteras, ni en el historial.
+              //
+              // Ahora manda montoPagadoUSD, que es lo que se cobro. Si no lo
+              // tiene, se cae al total de la orden marcada pagada.
               const cobroLegacy = cobranzas.find(c => c.id === orden.id);
-              if (cobroLegacy && cobroLegacy.estado === 'pagado') {
+              const yaPagado = Number((orden as any).montoPagadoUSD) || 0;
+              const montoLegacy = yaPagado > 0.01
+                  ? yaPagado
+                  : (cobroLegacy && cobroLegacy.estado === 'pagado' ? Number(cobroLegacy.montoUSD) || 0 : 0);
+
+              if (montoLegacy > 0.01) {
                    const safeItems = Array.isArray(orden.items) ? orden.items : [];
                    const itemsResumen = safeItems.map((i:any) => `${i.cantidad}x ${i.nombre || i.descripcion}`).join(', ') || 'Varios';
 
@@ -377,21 +398,79 @@ export function EstadisticasDashboard({
                       ordenData: orden,
                       ordenNumero: orden.ordenNumero,
                       nombreCliente: orden.cliente?.nombreRazonSocial || "Cliente Desconocido",
-                      fechaReal: getFechaRealPago(cobroLegacy),
-                      monto: Number(cobroLegacy.montoUSD) || 0,
+                      fechaReal: cobroLegacy ? getFechaRealPago(cobroLegacy) : new Date(orden.fecha),
+                      monto: montoLegacy,
                       tipo: 'TOTAL_LEGACY',
-                      imagenUrl: (cobroLegacy as any).imagenUrl || null,
-                      wallet: 'cash_usd', 
+                      imagenUrl: (cobroLegacy as any)?.imagenUrl || null,
+                      // No se sabe por donde entro: la orden es anterior al
+                      // registro de abonos. Se deja en efectivo y se dice, en
+                      // vez de repartirlo a un banco que nadie confirmo.
+                      wallet: 'cash_usd',
                       currency: 'USD',
-                      montoOriginal: Number(cobroLegacy.montoUSD) || 0,
+                      montoOriginal: montoLegacy,
                       itemsResumen,
-                      metodo: 'Legacy'
+                      metodo: 'Sin registrar'
                   });
               }
           }
       });
+      /**
+       * LAS VENTAS DE MOSTRADOR TAMBIEN SON PLATA QUE ENTRO.
+       *
+       * Se sumaban aparte, directo a los ingresos, y por eso no aparecian en
+       * el desglose por billetera: una venta cobrada por pago movil engordaba
+       * el total del mes pero no el del banco. Quien cuadraba el banco contra
+       * el sistema no encontraba ese dinero.
+       *
+       * Entrando por aqui van al mismo sitio que los abonos: ingresos,
+       * billeteras e historial, todo de una sola fuente.
+       *
+       * La anulada no entra: se devolvio.
+       */
+      (ventasCatalogo || []).forEach((venta: any, index: number) => {
+          if (venta.estado === 'ANULADA') return;
+
+          const monto = Number(venta.totalUSD) || 0;
+          if (monto <= 0.01) return;
+
+          const wallet = billeteraDeMetodo(venta.metodoPago);
+          const tasa = Number(venta.tasaCambio) || rates?.usd || 1;
+
+          let fechaReal: Date;
+          try { fechaReal = venta.fecha?.toDate ? venta.fecha.toDate() : new Date(venta.fecha); }
+          catch { fechaReal = new Date(0); }
+          if (isNaN(fechaReal.getTime())) fechaReal = new Date(0);
+
+          const items = Array.isArray(venta.items) ? venta.items : [];
+
+          list.push({
+              id: `venta_${venta.id || index}`,
+              // No cuelga de ninguna orden, pero necesita clave propia: el
+              // detalle del dia agrupa por ordenId, y con la misma clave todas
+              // las ventas del dia se leerian como un solo movimiento.
+              // Los repartos por area no la encuentran y la dejan fuera de
+              // Impresion y Corte, igual que antes.
+              ordenId: `venta_${venta.id || index}`,
+              ordenData: null,
+              ordenNumero: 'MOSTRADOR',
+              nombreCliente: venta.clienteNombre || 'Consumidor final',
+              fechaReal,
+              monto,
+              tipo: 'VENTA_MOSTRADOR',
+              metodo: venta.metodoPago || 'Sin registrar',
+              nota: venta.notas,
+              imagenUrl: null,
+              wallet,
+              currency: wallet === 'bank_bs' ? 'VES' : wallet === 'usdt' ? 'USDT' : 'USD',
+              montoOriginal: wallet === 'bank_bs'
+                  ? ((Number(venta.totalLocal) > 0 && venta.moneda === 'BS') ? Number(venta.totalLocal) : monto * tasa)
+                  : monto,
+              itemsResumen: items.map((i: any) => `${i.cantidad}x ${i.productoNombre}`).join(', ') || 'Varios',
+          });
+      });
+
       return list;
-  }, [localOrdenes, cobranzas, rates?.usd]);
+  }, [localOrdenes, cobranzas, ventasCatalogo, rates?.usd]);
 
   const productionMetrics = useMemo(() => {
       const calcularStats = (inicio: Date, fin: Date) => {
@@ -639,16 +718,9 @@ export function EstadisticasDashboard({
              });
         }
 
-        // Ventas del catálogo (contribuyen solo en vista GENERAL)
-        if (viewMode === 'GENERAL') {
-            (ventasCatalogo || []).forEach(v => {
-                if (v.estado === 'ANULADA') return;
-                try {
-                    const d = v.fecha?.toDate ? v.fecha.toDate() : new Date(v.fecha)
-                    if (d >= inicio && d <= fin) ingresos += Number(v.totalUSD) || 0
-                } catch { /* fecha inválida */ }
-            });
-        }
+        // Las ventas de mostrador ya vienen sumadas arriba, dentro de
+        // transaccionesReales. Aqui se sumaban una segunda vez desde su propia
+        // coleccion; ahora hay un solo camino y no se pueden contar doble.
 
         return { ingresos, egresosDirectos, ordenesCount, gastosDiseno, gastosFijosPagados };
     };
@@ -921,7 +993,9 @@ export function EstadisticasDashboard({
           return {
               id: pago.id,
               ordenId: pago.ordenId,
-              descripcion: `Orden #${pago.ordenNumero || 'S/N'} - ${pago.nombreCliente}`,
+              descripcion: pago.tipo === 'VENTA_MOSTRADOR'
+              ? `Venta de mostrador - ${pago.nombreCliente}`
+              : `Orden #${pago.ordenNumero || 'S/N'} - ${pago.nombreCliente}`,
               monto: monto,
               tipo: "Ingreso",
               metodo: pago.metodo,

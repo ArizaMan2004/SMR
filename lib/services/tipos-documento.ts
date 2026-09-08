@@ -15,7 +15,11 @@
 // declarados, y la revisión de un contador— y nada de esto sustituye esa
 // asesoría.
 
-export type TipoImpreso = "PRESUPUESTO" | "NOTA_DE_ENTREGA" | "FACTURA";
+export type TipoImpreso =
+    | "PRESUPUESTO"
+    | "NOTA_DE_ENTREGA"
+    | "FACTURA"
+    | "ESTADO_DE_CUENTA";
 
 export const TIPOS: { id: TipoImpreso; titulo: string; explicacion: string }[] = [
     {
@@ -32,6 +36,11 @@ export const TIPOS: { id: TipoImpreso; titulo: string; explicacion: string }[] =
         id: "FACTURA",
         titulo: "Factura",
         explicacion: "El documento fiscal, con desglose de impuesto.",
+    },
+    {
+        id: "ESTADO_DE_CUENTA",
+        titulo: "Estado de cuenta",
+        explicacion: "Lo que un cliente debe, sumado. No es un cobro nuevo.",
     },
 ];
 
@@ -77,6 +86,21 @@ export function reglasDe(tipo: TipoImpreso): ReglasImpreso {
         };
     }
 
+    if (tipo === "ESTADO_DE_CUENTA") {
+        return {
+            titulo: "ESTADO DE CUENTA",
+            etiquetaNumero: "Corte N\u00b0",
+            // No desglosa impuesto: el estado de cuenta junta trabajos que ya
+            // se documentaron aparte. Sacarle IVA aqui seria inventar un
+            // impuesto que ya se cobro —o que no se cobro— en su factura.
+            desglosaIva: false,
+            muestraCobros: true,
+            leyenda: "Resumen de saldos pendientes. No sustituye a las facturas emitidas.",
+            etiquetaCliente: "Cliente",
+            etiquetaConforme: "Conforme del cliente",
+        };
+    }
+
     return {
         titulo: "FACTURA",
         etiquetaNumero: "Factura N°",
@@ -117,7 +141,10 @@ export function problemasPara(
 /** Un nombre de archivo que dice qué es sin abrirlo: tipo, número y cliente. */
 export function nombreArchivo(tipo: TipoImpreso, numero: string, cliente: string): string {
     const base =
-        tipo === "FACTURA" ? "factura" : tipo === "PRESUPUESTO" ? "presupuesto" : "nota-entrega";
+        tipo === "FACTURA" ? "factura"
+        : tipo === "PRESUPUESTO" ? "presupuesto"
+        : tipo === "ESTADO_DE_CUENTA" ? "estado-de-cuenta"
+        : "nota-entrega";
     const nombreCliente = (cliente || "")
         .trim()
         .toLowerCase()
