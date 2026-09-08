@@ -36,24 +36,69 @@ import { OrderDetailModal } from "@/components/orden/order-detail-modal"
 import { ConsumoMaterialesPanel } from "@/components/dashboard/ConsumoMaterialesPanel"
 import { useConsumoMateriales } from "@/lib/hooks/use-consumo-materiales"
 
+// El orden importa: 'melamina' contiene 'mdf' en algunas escrituras y
+// 'acr' es un trozo de 'acrilico'. Lo mas especifico va primero.
 const MATERIALES_CORTE_KEYS: any = {
-    'Acrilico': ['acrilico', 'acr', 'acrylic', 'plastico'],
-    'MDF': ['mdf', 'm.d.f', 'madera', 'fibro', 'mdf crudo'],
-    'Melamina': ['melamina', 'mdf melamina', 'chapilla'],
+    'Melamina': ['melamina', 'chapilla'],
+    'MDF': ['mdf', 'm.d.f', 'madera', 'fibro', 'plywood', 'contrachapado'],
+    'PVC': ['pvc', 'sintra', 'foamboard', 'foam board', 'espumado'],
     'Cartulina': ['cartulina', 'carton', 'papel grueso'],
+    'Acrilico': ['acrilico', 'acrílico', 'acrylic', 'plastico', 'acr'],
     'Otro': []
 };
 
+/**
+ * Colores que se cortan de verdad en el taller.
+ *
+ * Faltaban la mitad —turquesa, fucsia, gris, rosado…— y los renglones que los
+ * nombraban se perdian, asi que el desglose de colores solo enseniaba los
+ * cuatro de siempre. Van con y sin tilde, y con la falta de ortografia que se
+ * teclea a diario ('turqueza'): esto lee lo que la gente escribe, no lo que
+ * deberia escribir.
+ */
 const COLORES_KEYS: any = {
-    'Transparente': ['transparente', 'cristal', 'clear'],
-    'Blanco': ['blanco', 'white', 'leche'],
+    'Transparente': ['transparente', 'cristal', 'clear', 'incoloro'],
+    'Blanco': ['blanco', 'white', 'leche', 'opal'],
     'Negro': ['negro', 'black'],
     'Rojo': ['rojo', 'red'],
-    'Dorado': ['dorado', 'oro', 'gold'],
+    'Vino': ['vino', 'borgona', 'borgoña', 'bordo'],
+    'Rosado': ['rosado', 'rosa', 'pink'],
+    'Fucsia': ['fucsia', 'fuccia', 'fuchsia', 'magenta'],
+    'Morado': ['morado', 'lila', 'violeta', 'purpura', 'púrpura'],
+    'Dorado': ['dorado', 'oro', 'gold', 'ambar', 'ámbar'],
+    'Bronce': ['bronce', 'cobre'],
     'Espejo': ['espejo', 'mirror', 'plateado', 'plata', 'silver'],
-    'Azul': ['azul', 'blue'],
+    'Azul': ['azul', 'blue', 'celeste'],
+    'Turquesa': ['turquesa', 'turqueza', 'aguamarina', 'turqueza'],
     'Verde': ['verde', 'green'],
-    'Amarillo': ['amarillo', 'yellow']
+    'Amarillo': ['amarillo', 'yellow'],
+    'Naranja': ['naranja', 'anaranjado', 'orange'],
+    'Gris': ['gris', 'grey', 'gray', 'humo'],
+    'Marron': ['marron', 'marrón', 'cafe', 'café', 'chocolate']
+};
+
+/**
+ * Los minutos que se cortaron de verdad.
+ *
+ * El taller los apunta como "5:39" —cinco minutos y treinta y nueve
+ * segundos—. Se leia con parseFloat, que se queda en el 5 y tira el resto, y
+ * el campo que se miraba (`tiempo`) ni siquiera existe: el guardado es
+ * `tiempoCorte`. Asi que cada renglon aportaba UN minuto, el de la cantidad,
+ * y el total del mes salia siendo el numero de renglones.
+ *
+ * "Servicio" no es un tiempo: es un trabajo cobrado a precio cerrado, y no
+ * suma minutos de maquina.
+ */
+const minutosDeCorte = (item: any): number => {
+    const crudo = item?.tiempoCorte ?? item?.tiempo ?? item?.tiempoEstimadoMinutos;
+    if (crudo == null) return 0;
+
+    const txt = String(crudo).trim();
+    const reloj = txt.match(/^(\d+):([0-5]?\d)$/);
+    if (reloj) return parseInt(reloj[1], 10) + parseInt(reloj[2], 10) / 60;
+
+    const n = parseFloat(txt.replace(',', '.'));
+    return isNaN(n) ? 0 : n;
 };
 
 const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.05 } } };
@@ -607,23 +652,43 @@ export function EstadisticasDashboard({
                   }
                   
                   if (servicio === 'CORTE') {
-                      const minutosItem = (item.tiempo ? parseFloat(item.tiempo) : qty);
-                      minutosTotales += minutosItem;
-                      
-                      let materialKey = item.materialDeCorte || 'Otros';
-                      if (!item.materialDeCorte || item.materialDeCorte === 'Otros') {
-                             const detected = detectarCategoria(nombreLower, MATERIALES_CORTE_KEYS, 'Otros');
-                             if(detected !== 'Otros') materialKey = detected;
-                      }
-                      
+                      minutosTotales += minutosDeCorte(item);
+
+                      // LO QUE ESCRIBIO EL TALLER MANDA SOBRE EL FORMULARIO.
+                      //
+                      // Medido sobre septiembre de 2026: los 29 renglones de
+                      // corte del mes traian EXACTAMENTE lo mismo —
+                      // materialDeCorte "Acrilico", colorAcrilico
+                      // "Transparente", grosor "3mm"— porque son los valores
+                      // con los que arranca el formulario y nadie los cambia.
+                      //
+                      // Se leian esos campos primero, asi que el desglose
+                      // decia que todo el mes fue acrilico transparente. En
+                      // los nombres estaban el MDF, la cartulina y ocho
+                      // colores: blanco, azul, dorado, turquesa, negro,
+                      // plateado, fucsia y gris.
+                      //
+                      // Ahora se lee el nombre primero y los campos solo
+                      // cuando el nombre no dice nada. Un dato que todos los
+                      // renglones comparten no distingue nada: no es un dato.
+                      const detalle = [item.materialDetalleCorte, item.materialDeCorte]
+                          .filter(Boolean).join(' ').toLowerCase();
+
+                      const matDelNombre = detectarCategoria(nombreLower, MATERIALES_CORTE_KEYS, 'Otros');
+                      const matDelCampo = detalle ? detectarCategoria(detalle, MATERIALES_CORTE_KEYS, 'Otros') : 'Otros';
+                      const materialKey = matDelNombre !== 'Otros' ? matDelNombre
+                          : matDelCampo !== 'Otros' ? matDelCampo
+                          : 'Sin especificar';
+
                       if (!matCorte[materialKey]) matCorte[materialKey] = { label: materialKey, count: 0, revenue: 0, details: [] };
                       addDetailCorte(matCorte[materialKey], item, o, qty, totalSubtotal);
 
-                      let colorKey = item.colorAcrilico || 'N/A';
-                      if (!item.colorAcrilico || item.colorAcrilico === 'N/A') {
-                          colorKey = detectarCategoria(nombreLower, COLORES_KEYS, 'N/A');
-                      }
-                      
+                      const colDelNombre = detectarCategoria(nombreLower, COLORES_KEYS, 'N/A');
+                      const colDelCampo = item.colorAcrilico
+                          ? detectarCategoria(String(item.colorAcrilico).toLowerCase(), COLORES_KEYS, 'N/A')
+                          : 'N/A';
+                      const colorKey = colDelNombre !== 'N/A' ? colDelNombre : colDelCampo;
+
                       if (colorKey !== 'N/A' && colorKey !== 'Otros') {
                           if (!colCorte[colorKey]) colCorte[colorKey] = { label: colorKey, count: 0, revenue: 0, details: [] };
                           addDetailCorte(colCorte[colorKey], item, o, qty, totalSubtotal);
