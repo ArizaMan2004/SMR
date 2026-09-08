@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/lib/auth-context"
 import { PermisosProvider } from "@/lib/contexts/permisos-context"
-import LoginForm from "@/components/auth/login-form"
+import PortadaPage from "@/components/landing/PortadaPage"
 import Dashboard from "@/components/dashboard/dashboard"
 
 export default function Home() {
@@ -21,11 +21,17 @@ export default function Home() {
 
   // Los permisos se resuelven por encima del dashboard para que el propio
   // dashboard pueda decidir con ellos qué vista abrir y qué menú construir.
+  // Sin cuenta se ve la portada, no el formulario.
+  //
+  // Antes se caia directo en la caja de contrasenia, que no dice nada de lo
+  // que hay dentro: quien llega por primera vez —un empleado nuevo, alguien a
+  // quien se le ensenia el sistema— veia un campo vacio y punto. El formulario
+  // sigue existiendo, en /acceso, a un boton de distancia.
   return user ? (
     <PermisosProvider>
       <Dashboard />
     </PermisosProvider>
   ) : (
-    <LoginForm />
+    <PortadaPage />
   )
 }
