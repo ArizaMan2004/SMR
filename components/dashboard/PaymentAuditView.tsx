@@ -487,12 +487,14 @@ export function PaymentAuditView(_props: PaymentAuditViewProps) {
             <div className="flex flex-col gap-3 bg-white dark:bg-[#1c1c1e] p-4 sm:p-6 rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-slate-100 dark:border-white/5">
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                        <div className={cn("w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl flex items-center justify-center shadow-lg shrink-0 transition-colors", mainTab === 'ingresos' ? "bg-emerald-600 shadow-emerald-500/20" : "bg-rose-600 shadow-rose-500/20")}>
-                            {mainTab === 'ingresos' ? <ArrowDownLeft className="text-white w-5 h-5 sm:w-7 sm:h-7" /> : <ArrowUpRight className="text-white w-5 h-5 sm:w-7 sm:h-7" />}
+                        <div className={cn("w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl flex items-center justify-center shadow-lg shrink-0 transition-colors", mainTab === 'ingresos' ? "bg-emerald-600 shadow-emerald-500/20" : mainTab === 'materiales' ? "bg-indigo-600 shadow-indigo-500/20" : "bg-rose-600 shadow-rose-500/20")}>
+                            {mainTab === 'ingresos' ? <ArrowDownLeft className="text-white w-5 h-5 sm:w-7 sm:h-7" /> : mainTab === 'materiales' ? <ClipboardCheck className="text-white w-5 h-5 sm:w-7 sm:h-7" /> : <ArrowUpRight className="text-white w-5 h-5 sm:w-7 sm:h-7" />}
                         </div>
                         <div className="min-w-0">
                             <h1 className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white tracking-tighter uppercase italic leading-tight">
-                                {mainTab === 'ingresos' ? "Auditoría de Ingresos" : "Auditoría de Egresos"}
+                                {mainTab === 'ingresos' ? "Auditoría de Ingresos"
+                                    : mainTab === 'materiales' ? "Auditoría de Materiales"
+                                    : "Auditoría de Egresos"}
                             </h1>
                             <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
                                 {isFetching
@@ -554,7 +556,11 @@ export function PaymentAuditView(_props: PaymentAuditViewProps) {
 
                     {/* ──────────────── MATERIALES ──────────────── */}
                     <TabsContent value="materiales" className="mt-0">
-                        <AuditoriaMaterialesPanel />
+                        <AuditoriaMaterialesPanel
+                            anio={parseInt(selectedYear)}
+                            mes={parseInt(selectedMonth)}
+                            onCambiarMes={(a, m) => { setSelectedYear(String(a)); setSelectedMonth(String(m)); }}
+                        />
                     </TabsContent>
 
                     {/* ──────────────── INGRESOS ──────────────── */}

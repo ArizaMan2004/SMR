@@ -9,7 +9,7 @@
 
 "use client"
 
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 import { Card } from '@/components/ui/card'
@@ -17,14 +17,17 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
     ClipboardCheck, Loader2, Ruler, AlertTriangle, Check,
-    ChevronDown, ChevronLeft, ChevronRight, ShieldAlert,
+    ChevronDown, ChevronLeft, ChevronRight, ShieldAlert, ListTree,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 import { useAuth } from '@/lib/auth-context'
 import { esAdmin } from '@/lib/roles'
-import { planificarAuditoria, aplicarAuditoria, type PlanAuditoria } from '@/lib/services/auditoria-materiales'
+import {
+    planificarAuditoria, aplicarAuditoria,
+    type PlanAuditoria, type RenglonAuditado,
+} from '@/lib/services/auditoria-materiales'
 import { olvidarPresupuestosEnCache } from '@/lib/hooks/use-consumo-materiales'
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -32,15 +35,33 @@ const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
 
 const n2 = (v: number) => v.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-export function AuditoriaMaterialesPanel() {
+interface Props {
+    /**
+     * El mes que manda, el de la pantalla.
+     *
+     * El panel tenia su propio mes y la pantalla el suyo: dos selectores a la
+     * vista, con la misma pinta, y solo uno movia esto. Cambiabas el mes
+     * arriba y la auditoria seguia mostrando otro sin decir nada.
+     */
+    anio?: number
+    mes?: number
+    /** Las flechas del panel mueven el mes de la pantalla, no uno aparte. */
+    onCambiarMes?: (anio: number, mes: number) => void
+}
+
+export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}) {
     const { userData } = useAuth()
     const puedeAplicar = esAdmin(userData?.rol)
 
-    const [ref, setRef] = useState(() => new Date())
+    // Sin mes de fuera se apana con el de hoy: asi el panel sigue sirviendo
+    // suelto, sin que quien lo monte tenga que llevarle la cuenta.
+    const [refPropia, setRefPropia] = useState(() => new Date())
+    const ref = (anio != null && mes != null) ? new Date(anio, mes, 1) : refPropia
     const [plan, setPlan] = useState<PlanAuditoria | null>(null)
     const [calculando, setCalculando] = useState(true)
     const [aplicando, setAplicando] = useState(false)
     const [verManuales, setVerManuales] = useState(false)
+    const [verOrdenes, setVerOrdenes] = useState(false)
 
     const calcular = useCallback(async (fecha: Date) => {
         setCalculando(true)
@@ -55,9 +76,18 @@ export function AuditoriaMaterialesPanel() {
         }
     }, [])
 
-    useEffect(() => { calcular(ref) }, [ref, calcular])
+    // Se mira el ano y el mes, no el objeto Date: cuando el mes viene de
+    // fuera se construye uno nuevo en cada render y el efecto se dispararia
+    // sin parar, releyendo las ordenes cada vez.
+    const anioRef = ref.getFullYear()
+    const mesRef = ref.getMonth()
+    useEffect(() => { calcular(new Date(anioRef, mesRef, 1)) }, [anioRef, mesRef, calcular])
 
-    const mover = (n: number) => setRef(f => new Date(f.getFullYear(), f.getMonth() + n, 1))
+    const mover = (n: number) => {
+        const destino = new Date(ref.getFullYear(), ref.getMonth() + n, 1)
+        if (onCambiarMes) onCambiarMes(destino.getFullYear(), destino.getMonth())
+        else setRefPropia(destino)
+    }
 
     const aplicar = async () => {
         if (!plan) return
@@ -75,7 +105,7 @@ export function AuditoriaMaterialesPanel() {
             const n = await aplicarAuditoria(plan)
             olvidarPresupuestosEnCache()
             toast.success(`${n} órdenes auditadas`)
-            await calcular(ref)
+            await calcular(new Date(anioRef, mesRef, 1))
         } catch (e) {
             console.error(e)
             toast.error('No se pudo guardar la auditoría')
@@ -83,6 +113,50 @@ export function AuditoriaMaterialesPanel() {
             setAplicando(false)
         }
     }
+
+    /**
+     * Lo mismo, pero orden por orden.
+     *
+     * El resumen por material dice cuanto vinil sale del rollo, y eso sirve
+     * para el balance. Pero para REVISAR antes de escribir hace falta lo otro:
+     * ver una orden entera y comprobar que a sus renglones les toco lo que
+     * les tocaba. En una tabla corrida de 118 renglones eso no se puede.
+     *
+     * Van de mas nueva a mas vieja: si algo esta mal, lo mas probable es que
+     * este en lo de ayer.
+     */
+    const porOrden = useMemo(() => {
+        if (!plan) return []
+
+        const mapa = new Map<string, {
+            ordenId: string
+            numero: string | number
+            fecha: string
+            cliente: string
+            renglones: (RenglonAuditado & { auto: boolean })[]
+            m2: number
+            sinMaterial: number
+        }>()
+
+        const meter = (r: RenglonAuditado, auto: boolean) => {
+            let g = mapa.get(r.ordenId)
+            if (!g) {
+                g = { ordenId: r.ordenId, numero: r.ordenNumero, fecha: r.fecha,
+                      cliente: r.cliente, renglones: [], m2: 0, sinMaterial: 0 }
+                mapa.set(r.ordenId, g)
+            }
+            g.renglones.push({ ...r, auto })
+            g.m2 += r.m2
+            if (!auto) g.sinMaterial++
+        }
+
+        plan.automaticos.forEach(r => meter(r, true))
+        plan.manuales.forEach(r => meter(r, false))
+
+        return Array.from(mapa.values())
+            .map(g => ({ ...g, m2: Math.round(g.m2 * 100) / 100 }))
+            .sort((a, b) => Number(b.numero) - Number(a.numero))
+    }, [plan])
 
     const pendientes = plan ? plan.automaticos.filter(r => !r.yaAuditado).length : 0
     const yaHechos = plan ? plan.automaticos.filter(r => r.yaAuditado).length : 0
@@ -161,6 +235,83 @@ export function AuditoriaMaterialesPanel() {
                                     </span>
                                 </div>
                             ))}
+                        </div>
+                    )}
+
+                    {porOrden.length > 0 && (
+                        <div className="rounded-2xl border border-slate-100 dark:border-white/5 overflow-hidden">
+                            <button
+                                type="button"
+                                onClick={() => setVerOrdenes(v => !v)}
+                                className="w-full flex items-center gap-2.5 p-3.5 text-left"
+                            >
+                                <ListTree className="w-4 h-4 shrink-0 text-slate-400" />
+                                <span className="flex-1 min-w-0 text-[11px] font-black uppercase tracking-widest text-slate-500">
+                                    Ver las {porOrden.length} órdenes, una por una
+                                </span>
+                                <ChevronDown className={cn("w-4 h-4 shrink-0 text-slate-400 transition-transform", verOrdenes && "rotate-180")} />
+                            </button>
+
+                            <AnimatePresence initial={false}>
+                                {verOrdenes && (
+                                    <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        className="overflow-hidden"
+                                    >
+                                        <div className="px-3.5 pb-3.5 max-h-[26rem] overflow-y-auto custom-scrollbar space-y-2.5">
+                                            {porOrden.map(o => (
+                                                <div key={o.ordenId} className="rounded-xl bg-slate-50 dark:bg-white/5 overflow-hidden">
+                                                    <div className="flex items-center gap-2 px-3 py-2 border-b border-black/5 dark:border-white/5">
+                                                        <span className="font-black tabular-nums text-xs shrink-0">#{o.numero}</span>
+                                                        <span className="flex-1 min-w-0 truncate text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                                                            {o.cliente}
+                                                        </span>
+                                                        {o.sinMaterial > 0 && (
+                                                            <span className="shrink-0 text-[9px] font-black uppercase text-amber-600 bg-amber-100 dark:bg-amber-500/15 rounded-full px-2 py-0.5">
+                                                                {o.sinMaterial} a mano
+                                                            </span>
+                                                        )}
+                                                        <span className="shrink-0 text-[11px] font-black tabular-nums text-indigo-600 w-20 text-right">
+                                                            {o.m2 > 0 ? `${n2(o.m2)} m²` : <span className="text-slate-300">—</span>}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="divide-y divide-black/5 dark:divide-white/5">
+                                                        {o.renglones.map((r, i) => (
+                                                            <div key={`${r.ordenId}-${r.indice}-${i}`} className="flex items-center gap-2 px-3 py-1.5 text-[11px]">
+                                                                <span className="flex-1 min-w-0 truncate font-bold text-slate-600 dark:text-slate-300">
+                                                                    {r.descripcion || <span className="text-slate-400 italic">sin descripción</span>}
+                                                                </span>
+
+                                                                {r.laminado && (
+                                                                    <span className="shrink-0 text-[8px] font-black uppercase text-sky-600 bg-sky-100 dark:bg-sky-500/15 rounded-full px-1.5">
+                                                                        laminado
+                                                                    </span>
+                                                                )}
+
+                                                                <span className={cn(
+                                                                    "shrink-0 text-[9px] font-black uppercase rounded-full px-2 py-0.5 w-32 text-center truncate",
+                                                                    r.yaAuditado ? "text-emerald-600 bg-emerald-100 dark:bg-emerald-500/15"
+                                                                        : r.auto ? "text-indigo-600 bg-indigo-100 dark:bg-indigo-500/15"
+                                                                        : "text-amber-600 bg-amber-100 dark:bg-amber-500/15"
+                                                                )}>
+                                                                    {r.yaAuditado ? 'ya auditado' : (r.material || 'a mano')}
+                                                                </span>
+
+                                                                <span className="shrink-0 tabular-nums text-slate-400 w-16 text-right">
+                                                                    {r.m2 > 0 ? `${n2(r.m2)} m²` : (r.tiempo || '—')}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
                         </div>
                     )}
 

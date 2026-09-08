@@ -26,28 +26,52 @@ import { db } from "@/lib/firebase";
 import { collection, getDocs, writeBatch, doc } from "firebase/firestore";
 
 /**
- * Palabras que SÍ nombran un material.
+ * Palabras que SÍ nombran un material, y a qué producto del catálogo van.
+ *
+ * `material` es el NOMBRE EXACTO del producto en el catálogo. Antes eran
+ * etiquetas inventadas aquí ("Vinil Adhesivo Blanco Brillante", "Banner /
+ * Lona") y el balance las agrupaba por nombre, así que el mismo rollo salía
+ * dos veces: una por lo que consume el catálogo y otra por lo que decía la
+ * auditoría. Dos filas para un solo material es peor que ninguna.
  *
  * Están ordenadas de más específica a más general: "corte mdf 5mm" tiene que
  * caer en MDF, no en el genérico de corte. Con el orden al revés, todo lo que
  * empieza por "corte" acababa en acrílico — incluidos el MDF y la cartulina.
  */
 const REGLAS: { patron: RegExp; material: string }[] = [
-    { patron: /\bmdf\b|madera|plywood/i,          material: "MDF" },
-    { patron: /cartulina/i,                        material: "Cartulina" },
-    { patron: /banner|lona|mesh/i,                 material: "Banner / Lona" },
-    { patron: /\bclear\b/i,                        material: "Vinil Clear" },
-    { patron: /microperforado/i,                   material: "Microperforado" },
-    { patron: /esmerilado/i,                       material: "Vinil Esmerilado" },
-    { patron: /sticker|stiker|calcomania/i,        material: "Vinil Adhesivo Blanco Brillante" },
-    { patron: /vinil|vinilo|rotulad|impresi[oó]n/i, material: "Vinil Adhesivo Blanco Brillante" },
-    { patron: /acr[ií]lic|trofeo|medalla/i,        material: "Acrilico" },
-    { patron: /ojal/i,                             material: "Ojales" },
+    { patron: /\bmdf\b|madera|plywood/i,           material: "MDF" },
+    { patron: /cartulina/i,                         material: "Cartulina" },
+    { patron: /banner|lona|mesh/i,                  material: "Banner" },
+    { patron: /\bclear\b/i,                         material: "Clear" },
+    { patron: /microperforado/i,                    material: "Microperforado" },
+    { patron: /esmerilado/i,                        material: "Vinil Esmerilado" },
+    { patron: /sticker|stiker|calcomania/i,         material: "Vinil" },
+    { patron: /vinil|vinilo|rotulad|impresi[oó]n/i, material: "Vinil" },
+    { patron: /acr[ií]lic|trofeo|medalla/i,         material: "Acrilico" },
+    { patron: /ojal/i,                              material: "Ojales" },
 ];
 
 /** El material que nombra una descripción, o null si no nombra ninguno. */
 export const materialDeDescripcion = (descripcion: string): string | null =>
     REGLAS.find(r => r.patron.test(descripcion || ""))?.material ?? null;
+
+/**
+ * El id del producto del catálogo que se llama así.
+ *
+ * Sin id, el balance agrupa por nombre y basta con que alguien renombre el
+ * producto para que el histórico se parta en dos. Con id aguanta el cambio de
+ * nombre. Un material que todavía no está dado de alta se queda sin id y se
+ * cuenta igual, por nombre: es peor perderlo que contarlo sin enlazar.
+ */
+const idDeCatalogo = (
+    material: string | null,
+    catalogo: { __id?: string; id?: string; nombre?: string }[]
+): string | null => {
+    if (!material) return null;
+    const limpio = material.trim().toLowerCase();
+    const p = catalogo.find(c => (c.nombre || "").trim().toLowerCase() === limpio);
+    return p?.__id || p?.id || null;
+};
 
 export interface RenglonAuditado {
     ordenId: string;
@@ -57,6 +81,8 @@ export interface RenglonAuditado {
     indice: number;
     descripcion: string;
     material: string | null;
+    /** El producto del catálogo, cuando el material está dado de alta. */
+    productoId: string | null;
     m2: number;
     laminado: boolean;
     unidad?: string;
@@ -111,6 +137,16 @@ export async function planificarAuditoria(anio: number, mes: number): Promise<Pl
         snap = await getDocs(ref);
     }
 
+    // El catálogo, para enlazar cada material con su producto.
+    const catSnap = await (async () => {
+        const ref2 = collection(db, "catalogo_productos");
+        try {
+            const c = await getDocsFromCache(ref2);
+            return c.empty ? await getDocs(ref2) : c;
+        } catch { return await getDocs(ref2); }
+    })();
+    const catalogo = catSnap.docs.map(d => ({ __id: d.id, ...(d.data() as any) }));
+
     const automaticos: RenglonAuditado[] = [];
     const manuales: RenglonAuditado[] = [];
 
@@ -131,6 +167,7 @@ export async function planificarAuditoria(anio: number, mes: number): Promise<Pl
                 indice,
                 descripcion,
                 material,
+                productoId: idDeCatalogo(material, catalogo),
                 m2: m2De(item),
                 laminado: /laminado/i.test(item?.materialDetalleCorte || ""),
                 unidad: item?.unidad,
@@ -207,6 +244,7 @@ export async function aplicarAuditoria(plan: PlanAuditoria): Promise<number> {
                     ...item,
                     materialAuditado: {
                         nombre: r.material,
+                        productoId: r.productoId,
                         m2: r.m2,
                         laminado: r.laminado,
                         auditadoEn: marca,
