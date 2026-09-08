@@ -58,6 +58,7 @@ export function ConsumoMaterialesPanel({ datos, cargando, area, embebido }: Prop
     const totalM2 = datos.m2Totales
     const sinClasificarEnPeriodo = datos.presupuestosSinDesglosar
     const sinAuditar = datos.ordenesSinAuditar
+    const estimados = datos.m2Estimados || 0
     const categoriasSinArea = datos.categoriasSinArea
 
     // Mas y menos pedidos. Solo tiene sentido enfrentarlos cuando hay al menos
@@ -126,12 +127,14 @@ export function ConsumoMaterialesPanel({ datos, cargando, area, embebido }: Prop
                 </div>
             )}
 
-            {sinAuditar > 0 && (
-                <div className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50/70 dark:bg-amber-500/5 p-3 flex items-start gap-2.5">
-                    <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
-                    <p className="text-[11px] font-bold text-amber-700 dark:text-amber-500 leading-snug">
-                        {sinAuditar} {sinAuditar === 1 ? 'renglón de órdenes no dice' : 'renglones de órdenes no dicen'} qué
-                        material gastaron. Sus metros no están contados aquí.
+            {estimados > 0.005 && (
+                <div className="rounded-2xl border border-sky-200 dark:border-sky-500/20 bg-sky-50/70 dark:bg-sky-500/5 p-3 flex items-start gap-2.5">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-sky-500 mt-0.5" />
+                    <p className="text-[11px] font-bold text-sky-700 dark:text-sky-400 leading-snug">
+                        {estimados.toLocaleString(undefined, { maximumFractionDigits: 2 })} m² de este
+                        total salen de leer la descripción de {sinAuditar}{' '}
+                        {sinAuditar === 1 ? 'renglón sin auditar' : 'renglones sin auditar'}, no de un
+                        material confirmado. Audítalos en Auditoría de Pagos → Materiales.
                     </p>
                 </div>
             )}
@@ -143,7 +146,7 @@ export function ConsumoMaterialesPanel({ datos, cargando, area, embebido }: Prop
                         {sinClasificarEnPeriodo === 1
                             ? 'Hay 1 presupuesto de este periodo sin desglosar.'
                             : `Hay ${sinClasificarEnPeriodo} presupuestos de este periodo sin desglosar.`}
-                        {' '}Sus metros no están contados aquí, así que este total se queda corto.
+                        {' '}Sus metros no cuentan hasta que se facturen, así que este total se queda corto.
                     </p>
                 </div>
             )}

@@ -1373,12 +1373,21 @@ export function EstadisticasDashboard({
                             {variacionM2Real >= 0 ? <TrendingUp size={14}/> : <TrendingDown size={14}/>}
                             <span className="text-xs font-bold">{Math.abs(variacionM2Real).toFixed(1)}% vs mes ant.</span>
                         </div>
-                        {(consumoImpresion.ordenesSinAuditar > 0 || consumoImpresion.presupuestosSinDesglosar > 0) && (
+                        {/* Antes esto decia "falta por auditar, el volumen real es
+                            mayor" junto a un 0,00: un aviso al lado de un numero que
+                            no servia. Ahora el numero ya incluye lo deducido de las
+                            descripciones y aqui se dice que parte es deducida. */}
+                        {consumoImpresion.m2Estimados > 0.005 && (
                             <p className="text-[10px] font-bold opacity-70 mt-2 leading-snug">
-                                Falta por auditar: {[
-                                    consumoImpresion.ordenesSinAuditar > 0 && `${consumoImpresion.ordenesSinAuditar} renglones de órdenes`,
-                                    consumoImpresion.presupuestosSinDesglosar > 0 && `${consumoImpresion.presupuestosSinDesglosar} presupuestos`,
-                                ].filter(Boolean).join(' y ')}. El volumen real es mayor.
+                                {consumoImpresion.m2Estimados.toFixed(2)} m² salen de leer la descripción de
+                                {' '}{consumoImpresion.ordenesSinAuditar} renglones sin auditar. Audítalos
+                                para confirmarlos.
+                            </p>
+                        )}
+                        {consumoImpresion.presupuestosSinDesglosar > 0 && (
+                            <p className="text-[10px] font-bold opacity-70 mt-1 leading-snug">
+                                {consumoImpresion.presupuestosSinDesglosar} presupuestos sin desglosar; sus
+                                metros no cuentan hasta que se facturen.
                             </p>
                         )}
                     </div>

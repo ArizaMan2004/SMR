@@ -25,6 +25,7 @@
 //      sin clasificar se puede clasificar hoy y el balance se corrige.
 
 import type { ConsumoMaterial } from "@/lib/services/catalog-service";
+import { materialDeDescripcion } from "@/lib/services/auditoria-materiales";
 
 export interface SubItemInterno {
     id: string;
@@ -154,6 +155,10 @@ export const unirConsumos = (...listas: ConsumoMaterial[][]): ConsumoMaterial[] 
         acumulado.m2Totales += entrada.m2Totales;
         acumulado.unidadesTotales += entrada.unidadesTotales;
         acumulado.ingresosUSD += entrada.ingresosUSD;
+        // Lo estimado se arrastra al unir: si se pierde aqui, el balance
+        // presenta como confirmado un numero que en parte esta deducido.
+        acumulado.m2Estimados = (acumulado.m2Estimados || 0) + (entrada.m2Estimados || 0);
+        acumulado.renglonesEstimados = (acumulado.renglonesEstimados || 0) + (entrada.renglonesEstimados || 0);
 
         entrada.porServicio.forEach(s => {
             const previo = acumulado.porServicio.find(x => x.varianteId === s.varianteId);
@@ -185,35 +190,68 @@ export const consumoDesdeOrdenes = (ordenes: { items?: any[] }[]): ConsumoMateri
 
     ordenes.forEach(orden => {
         (orden?.items || []).forEach((item: any) => {
+            /**
+             * QUE MATERIAL GASTO ESTE RENGLON.
+             *
+             * Primero lo confirmado. Si nadie lo confirmo, se deduce de la
+             * descripcion con las mismas reglas de la auditoria y se marca
+             * como estimado.
+             *
+             * Antes se descartaba: un renglon sin auditar valia cero. Como
+             * casi ninguno esta auditado, el balance ensenaba 0,00 m2 teniendo
+             * "banner matte quince años, 90x170" delante. Un cero es una
+             * afirmacion —"no se imprimio nada"— y era falsa; un estimado
+             * marcado dice lo que sabe y lo que no.
+             *
+             * Auditar no cambia el numero: lo confirma.
+             */
             const aud = item?.materialAuditado;
-            if (!aud?.nombre) return;
+            const estimado = !aud?.nombre;
+
+            const nombreMaterial = aud?.nombre || materialDeDescripcion(item?.nombre || item?.descripcion || "");
+            if (!nombreMaterial) return;
+
+            const m2Deducido = (() => {
+                const x = Number(item?.medidaXCm) || 0;
+                const y = Number(item?.medidaYCm) || 0;
+                const c = Number(item?.cantidad) || 0;
+                if (x <= 0 || y <= 0 || c <= 0) return 0;
+                return Math.round((x / 100) * (y / 100) * c * 10000) / 10000;
+            })();
 
             // Sin id de catalogo se agrupa por nombre: el material puede no
             // estar dado de alta todavia y aun asi hay que contarlo.
-            const clave = aud.productoId || `nombre:${aud.nombre}`;
+            const clave = aud?.productoId || `nombre:${nombreMaterial}`;
 
             if (!mapa.has(clave)) {
                 mapa.set(clave, {
                     productoId: clave,
-                    productoNombre: aud.nombre,
+                    productoNombre: nombreMaterial,
                     m2Totales: 0,
                     unidadesTotales: 0,
                     ingresosUSD: 0,
+                    m2Estimados: 0,
+                    renglonesEstimados: 0,
                     porServicio: [],
                 });
             }
 
             const material = mapa.get(clave)!;
-            const m2 = Number(aud.m2) || 0;
+            const m2 = estimado ? m2Deducido : (Number(aud.m2) || 0);
             const uds = Number(item.cantidad) || 0;
 
             material.m2Totales += m2;
             material.unidadesTotales += uds;
             material.ingresosUSD += Number(item.subtotal) || 0;
 
+            if (estimado) {
+                material.m2Estimados = (material.m2Estimados || 0) + m2;
+                material.renglonesEstimados = (material.renglonesEstimados || 0) + 1;
+            }
+
             // El laminado se sigue como servicio aparte del material base: son
             // los mismos metros de vinil, pero gastan ademas rollo de laminado.
-            const nombreServicio = aud.laminado ? "Con laminado" : "Impresion";
+            const nombreServicio = aud?.laminado ? "Con laminado" : "Impresion";
             let servicio = material.porServicio.find(x => x.nombre === nombreServicio);
             if (!servicio) {
                 servicio = { varianteId: nombreServicio, nombre: nombreServicio, m2: 0, unidades: 0, ingresosUSD: 0 };

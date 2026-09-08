@@ -63,10 +63,24 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
     const [verManuales, setVerManuales] = useState(false)
     const [verOrdenes, setVerOrdenes] = useState(false)
 
+    /**
+     * Lo que una persona decidio para los renglones que la maquina no supo
+     * leer, mientras no se guarda.
+     *
+     * La clave lleva la orden y la posicion del renglon dentro de ella: es lo
+     * mismo con lo que se escribe despues, asi que no se pueden cruzar.
+     */
+    const [aMano, setAMano] = useState<Record<string, string>>({})
+
+    const clave = (r: RenglonAuditado) => `${r.ordenId}:${r.indice}`
+
     const calcular = useCallback(async (fecha: Date) => {
         setCalculando(true)
         try {
             setPlan(await planificarAuditoria(fecha.getFullYear(), fecha.getMonth()))
+            // Lo elegido a mano era de otro mes: arrastrarlo escribiria
+            // material en renglones que nadie miro.
+            setAMano({})
         } catch (e) {
             console.error(e)
             toast.error('No se pudo leer las órdenes del mes')
@@ -89,20 +103,41 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
         else setRefPropia(destino)
     }
 
+    /**
+     * El plan que de verdad se va a escribir: lo que leyo la maquina mas lo
+     * que resolvio una persona.
+     *
+     * Los de a mano entran como los otros, pero marcados: en la orden queda
+     * escrito quien puso el material.
+     */
+    const planFinal = useMemo(() => {
+        if (!plan) return null
+
+        const resueltos: RenglonAuditado[] = plan.manuales
+            .filter(r => aMano[clave(r)])
+            .map(r => {
+                const nombre = aMano[clave(r)]
+                const op = plan.opciones.find(o => o.nombre === nombre)
+                return { ...r, material: nombre, productoId: op?.productoId ?? null, origen: 'manual' as const }
+            })
+
+        return { ...plan, automaticos: [...plan.automaticos, ...resueltos] }
+    }, [plan, aMano])
+
     const aplicar = async () => {
-        if (!plan) return
-        const pendientes = plan.automaticos.filter(r => !r.yaAuditado).length
+        if (!planFinal) return
+        const pendientes = planFinal.automaticos.filter(r => !r.yaAuditado).length
         if (!pendientes) return toast.info('No hay nada nuevo que auditar en este mes')
 
         const ok = window.confirm(
-            `Se va a escribir el material en ${pendientes} renglones de ${plan.ordenes} órdenes.\n\n` +
+            `Se va a escribir el material en ${pendientes} renglones de ${planFinal.ordenes} órdenes.\n\n` +
             `No se toca ningún precio ni ningún otro dato.\n\n¿Continuar?`
         )
         if (!ok) return
 
         setAplicando(true)
         try {
-            const n = await aplicarAuditoria(plan)
+            const n = await aplicarAuditoria(planFinal)
             olvidarPresupuestosEnCache()
             toast.success(`${n} órdenes auditadas`)
             await calcular(new Date(anioRef, mesRef, 1))
@@ -158,8 +193,9 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
             .sort((a, b) => Number(b.numero) - Number(a.numero))
     }, [plan])
 
-    const pendientes = plan ? plan.automaticos.filter(r => !r.yaAuditado).length : 0
+    const pendientes = planFinal ? planFinal.automaticos.filter(r => !r.yaAuditado).length : 0
     const yaHechos = plan ? plan.automaticos.filter(r => r.yaAuditado).length : 0
+    const resueltosAMano = Object.keys(aMano).length
 
     return (
         <Card className="rounded-[2rem] sm:rounded-[2.5rem] border-none shadow-xl bg-white dark:bg-[#1c1c1e] p-5 sm:p-7 space-y-5">
@@ -331,8 +367,11 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
                             >
                                 <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500" />
                                 <span className="flex-1 min-w-0 text-[11px] font-bold text-amber-700 dark:text-amber-500 leading-snug">
-                                    {plan.manuales.length} renglones no dicen de qué material son
-                                    («corte», «negro», «separadores»). Hay que ponérselo a mano.
+                                    {plan.manuales.length - resueltosAMano} de {plan.manuales.length} renglones
+                                    no dicen de qué material son («corte», «negro», «separadores»).
+                                    {resueltosAMano > 0
+                                        ? ` Ya le pusiste material a ${resueltosAMano}; se guardan junto con el resto.`
+                                        : ' Ábrelo y elige el material de cada uno.'}
                                 </span>
                                 <ChevronDown className={cn("w-4 h-4 shrink-0 text-amber-500 transition-transform", verManuales && "rotate-180")} />
                             </button>
@@ -345,15 +384,48 @@ export function AuditoriaMaterialesPanel({ anio, mes, onCambiarMes }: Props = {}
                                         exit={{ height: 0, opacity: 0 }}
                                         className="overflow-hidden"
                                     >
-                                        <div className="px-3.5 pb-3.5 max-h-64 overflow-y-auto custom-scrollbar space-y-1">
-                                            {plan.manuales.map((r, i) => (
-                                                <div key={`${r.ordenId}-${r.indice}-${i}`} className="flex items-center gap-2 text-[11px] bg-white/70 dark:bg-black/20 rounded-lg px-2.5 py-1.5">
-                                                    <span className="font-black tabular-nums shrink-0 w-12">#{r.ordenNumero}</span>
-                                                    <span className="flex-1 min-w-0 truncate font-bold text-slate-600 dark:text-slate-300">{r.descripcion}</span>
-                                                    {r.tiempo && <span className="shrink-0 text-slate-400 tabular-nums">{r.tiempo}</span>}
-                                                    <span className="shrink-0 tabular-nums text-slate-500 w-14 text-right">${n2(r.montoUSD)}</span>
-                                                </div>
-                                            ))}
+                                        <div className="px-3.5 pb-3.5 max-h-96 overflow-y-auto custom-scrollbar space-y-1">
+                                            {plan.manuales.map((r, i) => {
+                                                const k = clave(r)
+                                                const elegido = aMano[k] || ''
+                                                return (
+                                                    <div key={`${r.ordenId}-${r.indice}-${i}`} className={cn(
+                                                        "flex flex-wrap items-center gap-2 text-[11px] rounded-lg px-2.5 py-1.5 transition-colors",
+                                                        elegido ? "bg-emerald-50 dark:bg-emerald-500/10" : "bg-white/70 dark:bg-black/20"
+                                                    )}>
+                                                        <span className="font-black tabular-nums shrink-0 w-12">#{r.ordenNumero}</span>
+                                                        <span className="flex-1 min-w-[8rem] truncate font-bold text-slate-600 dark:text-slate-300">
+                                                            {r.descripcion || <span className="italic text-slate-400">sin descripción</span>}
+                                                        </span>
+
+                                                        {/* Lista y no texto libre: un nombre inventado no cuadra
+                                                            con nada y ensucia el balance sin que se note. */}
+                                                        <select
+                                                            value={elegido}
+                                                            onChange={e => setAMano(prev => {
+                                                                const copia = { ...prev }
+                                                                if (e.target.value) copia[k] = e.target.value
+                                                                else delete copia[k]
+                                                                return copia
+                                                            })}
+                                                            className={cn(
+                                                                "shrink-0 h-7 rounded-lg px-2 text-[10px] font-black uppercase border outline-none w-40",
+                                                                elegido
+                                                                    ? "border-emerald-300 bg-white dark:bg-black/30 text-emerald-700 dark:text-emerald-400"
+                                                                    : "border-amber-200 bg-white/80 dark:bg-black/30 text-amber-700 dark:text-amber-500"
+                                                            )}
+                                                        >
+                                                            <option value="">¿Qué material?</option>
+                                                            {plan.opciones.map(o => (
+                                                                <option key={o.nombre} value={o.nombre}>{o.nombre}</option>
+                                                            ))}
+                                                        </select>
+
+                                                        {r.tiempo && <span className="shrink-0 text-slate-400 tabular-nums">{r.tiempo}</span>}
+                                                        <span className="shrink-0 tabular-nums text-slate-500 w-14 text-right">${n2(r.montoUSD)}</span>
+                                                    </div>
+                                                )
+                                            })}
                                         </div>
                                     </motion.div>
                                 )}

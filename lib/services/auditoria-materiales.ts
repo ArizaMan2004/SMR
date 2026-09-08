@@ -90,6 +90,14 @@ export interface RenglonAuditado {
     montoUSD: number;
     /** Ya tenía material auditado de antes. */
     yaAuditado: boolean;
+    /**
+     * Quién decidió el material.
+     *
+     * 'auto' lo leyó la máquina de la descripción; 'manual' lo puso una
+     * persona. Queda escrito en la orden porque no valen lo mismo: si mañana
+     * hay que revisar un número raro, importa saber cuál de los dos lo puso.
+     */
+    origen?: "auto" | "manual";
 }
 
 export interface PlanAuditoria {
@@ -102,6 +110,15 @@ export interface PlanAuditoria {
     /** Metros y renglones que aporta cada material. */
     porMaterial: { material: string; renglones: number; m2: number }[];
     m2Totales: number;
+    /**
+     * Lo que se puede elegir a mano para los renglones que la máquina no supo
+     * leer.
+     *
+     * Sale del catálogo real más los materiales que las reglas saben nombrar,
+     * para que quien resuelva a mano no tenga que escribir el nombre y
+     * arriesgarse a inventar uno que no cuadre con nada.
+     */
+    opciones: { nombre: string; productoId: string | null }[];
 }
 
 const m2De = (item: any): number => {
@@ -174,6 +191,7 @@ export async function planificarAuditoria(anio: number, mes: number): Promise<Pl
                 tiempo: typeof item?.tiempoCorte === "string" ? item.tiempoCorte : undefined,
                 montoUSD: Number(item?.subtotal) || 0,
                 yaAuditado: !!item?.materialAuditado?.nombre,
+                origen: material ? "auto" : undefined,
             };
 
             (material ? automaticos : manuales).push(fila);
@@ -188,6 +206,24 @@ export async function planificarAuditoria(anio: number, mes: number): Promise<Pl
         agrupado.set(r.material!, previo);
     });
 
+    // Lo que se puede elegir a mano: primero el catálogo —es lo que de verdad
+    // se compra— y detrás los materiales que las reglas nombran pero que
+    // todavía no están dados de alta.
+    const opciones: { nombre: string; productoId: string | null }[] = [];
+    const vistos = new Set<string>();
+
+    const anotar = (nombre: string, productoId: string | null) => {
+        const clave = nombre.trim().toLowerCase();
+        if (!clave || vistos.has(clave)) return;
+        vistos.add(clave);
+        opciones.push({ nombre: nombre.trim(), productoId });
+    };
+
+    catalogo
+        .filter((c: any) => c.activo !== false)
+        .forEach((c: any) => anotar(String(c.nombre || ""), c.__id));
+    REGLAS.forEach(r => anotar(r.material, idDeCatalogo(r.material, catalogo)));
+
     const ordenesTocadas = new Set([...automaticos, ...manuales].map(r => r.ordenId));
 
     return {
@@ -199,6 +235,7 @@ export async function planificarAuditoria(anio: number, mes: number): Promise<Pl
             .map(g => ({ ...g, m2: Math.round(g.m2 * 100) / 100 }))
             .sort((a, b) => b.m2 - a.m2 || b.renglones - a.renglones),
         m2Totales: Math.round(automaticos.reduce((t, r) => t + r.m2, 0) * 100) / 100,
+        opciones,
     };
 }
 
@@ -248,7 +285,7 @@ export async function aplicarAuditoria(plan: PlanAuditoria): Promise<number> {
                         m2: r.m2,
                         laminado: r.laminado,
                         auditadoEn: marca,
-                        origen: "auto",
+                        origen: r.origen === "manual" ? "manual" : "auto",
                     },
                 };
             });

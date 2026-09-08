@@ -68,6 +68,15 @@ export interface ConsumoDelPeriodo {
     presupuestosSinDesglosar: number;
     /** Renglones de órdenes del periodo que aún no dicen qué material gastaron. */
     ordenesSinAuditar: number;
+    /**
+     * De los metros de arriba, cuántos salen de leer la descripción en vez de
+     * un material confirmado.
+     *
+     * Se enseñan igual: esconderlos dejaba el balance en cero teniendo la
+     * respuesta delante. Pero se dicen aparte, porque no es lo mismo medido
+     * que deducido.
+     */
+    m2Estimados: number;
     /** Categorías en uso a las que no se les ha dicho el área todavía. */
     categoriasSinArea: string[];
 }
@@ -130,6 +139,7 @@ export function useConsumoMateriales(ventasCatalogo: any[] = [], ordenes: any[] 
         return {
             materiales,
             m2Totales: materiales.reduce((t, m) => t + m.m2Totales, 0),
+            m2Estimados: materiales.reduce((t, m) => t + (m.m2Estimados || 0), 0),
             unidadesTotales: materiales.reduce((t, m) => t + m.unidadesTotales, 0),
             // Se siguen contando para avisar: un presupuesto sin desglosar es
             // trabajo que costara auditar cuando se facture.

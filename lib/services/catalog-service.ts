@@ -358,6 +358,16 @@ export interface ConsumoMaterial {
     m2Totales: number
     unidadesTotales: number
     ingresosUSD: number
+    /**
+     * De esos metros, cuantos son un calculo y no un dato confirmado.
+     *
+     * Salen de leer la descripcion del renglon en vez de un material que
+     * alguien confirmo. Se cuentan —esconderlos deja el balance en cero
+     * teniendo la respuesta delante— pero se dicen aparte, para que nadie
+     * tome por medido algo que esta deducido.
+     */
+    m2Estimados?: number
+    renglonesEstimados?: number
     /** Desglose por servicio derivado, de mayor a menor consumo. */
     porServicio: {
         varianteId: string
