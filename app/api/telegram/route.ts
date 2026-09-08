@@ -19,6 +19,67 @@ import { NextResponse } from "next/server";
 /** Telegram corta por ahí; se avisa antes en vez de mandar algo cortado. */
 const LIMITE_TEXTO = 4096;
 
+/**
+ * LOS GRUPOS EN LOS QUE ESTÁ EL BOT.
+ *
+ * Sacar el id de un grupo a mano es el paso donde todo el mundo se equivoca:
+ * hay que meter otro bot, leer un JSON y copiar un número negativo largo. Esto
+ * lo pregunta y devuelve la lista con sus nombres, para poder elegir.
+ *
+ * Telegram solo guarda los mensajes recientes sin leer (unas 24 horas), así
+ * que el grupo tiene que haber recibido algo. Por eso la pantalla pide
+ * escribir cualquier cosa en el grupo antes de buscar.
+ */
+export async function GET() {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+
+    if (!token) {
+        return NextResponse.json(
+            { error: "Falta TELEGRAM_BOT_TOKEN en el servidor. Se configura en .env.local." },
+            { status: 503 }
+        );
+    }
+
+    try {
+        const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates`, {
+            cache: "no-store",
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || data?.ok === false) {
+            return NextResponse.json(
+                { error: data?.description || `Telegram respondió ${res.status}` },
+                { status: 502 }
+            );
+        }
+
+        // Un mismo grupo aparece en cada mensaje: se queda uno por id.
+        const vistos = new Map<string, { id: string; nombre: string; tipo: string }>();
+
+        for (const u of (data?.result || [])) {
+            const chat = u?.message?.chat || u?.channel_post?.chat
+                || u?.my_chat_member?.chat || u?.edited_message?.chat;
+            if (!chat?.id) continue;
+
+            const id = String(chat.id);
+            if (vistos.has(id)) continue;
+
+            vistos.set(id, {
+                id,
+                nombre: chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(" ") || id,
+                tipo: chat.type || "",
+            });
+        }
+
+        return NextResponse.json({ ok: true, chats: [...vistos.values()] });
+    } catch (e: any) {
+        return NextResponse.json(
+            { error: `No se pudo hablar con Telegram: ${e?.message || e}` },
+            { status: 502 }
+        );
+    }
+}
+
 export async function POST(req: Request) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
 

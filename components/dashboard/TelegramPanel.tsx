@@ -17,15 +17,15 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Send, Loader2, Save, ShieldAlert, Check, X, MessageCircle } from 'lucide-react'
+import { Send, Loader2, Save, ShieldAlert, Check, X, MessageCircle, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 import { useAuth } from '@/lib/auth-context'
 import { esAdmin } from '@/lib/roles'
 import {
-    subscribeToTelegram, guardarTelegram, enviarTelegram, AREAS_TELEGRAM,
-    type ConfigTelegram, type AreaTelegram,
+    subscribeToTelegram, guardarTelegram, enviarTelegram, descubrirChats, AREAS_TELEGRAM,
+    type ConfigTelegram, type AreaTelegram, type ChatDescubierto,
 } from '@/lib/services/telegram-service'
 
 export function TelegramPanel() {
@@ -38,6 +38,21 @@ export function TelegramPanel() {
     const [tocado, setTocado] = useState(false)
     const [guardando, setGuardando] = useState(false)
     const [probando, setProbando] = useState<string | null>(null)
+
+    const [buscando, setBuscando] = useState(false)
+    const [encontrados, setEncontrados] = useState<ChatDescubierto[] | null>(null)
+
+    const buscarGrupos = async () => {
+        setBuscando(true)
+        const r = await descubrirChats()
+        setBuscando(false)
+
+        if (r.error) return toast.error(r.error)
+        setEncontrados(r.chats)
+        if (!r.chats.length) {
+            toast.error('No apareció ninguno. Escribe algo en el grupo y vuelve a buscar.')
+        }
+    }
 
     useEffect(() => subscribeToTelegram(setCfg), [])
 
@@ -143,11 +158,53 @@ export function TelegramPanel() {
                     <li>En Telegram, escribe a <span className="font-black text-sky-600">@BotFather</span> y manda <span className="font-mono">/newbot</span>. Te da un token.</li>
                     <li>Ese token va en el archivo <span className="font-mono">.env.local</span> del servidor, así:<br /><span className="font-mono text-[10px]">TELEGRAM_BOT_TOKEN=el_token_que_te_dio</span></li>
                     <li>Arma un grupo por área y mete al bot en cada uno.</li>
-                    <li>En el grupo, manda <span className="font-mono">/start@tu_bot</span> y luego escribe a{' '}
-                        <span className="font-black text-sky-600">@RawDataBot</span> dentro del grupo: te dice el id, que empieza por <span className="font-mono">-100</span>.</li>
-                    <li>Pega ese id aquí abajo y dale a Probar.</li>
+                    <li>Escribe cualquier cosa en cada grupo (un "hola" basta) para que exista la conversación.</li>
+                    <li>Dale a <span className="font-black text-sky-600">Buscar grupos</span> aquí abajo y elige cuál va en cada área.</li>
                 </ol>
             </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+                <Button
+                    variant="outline"
+                    onClick={buscarGrupos}
+                    disabled={buscando}
+                    className="h-11 rounded-2xl font-black uppercase text-[10px] tracking-widest gap-2"
+                >
+                    {buscando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                    Buscar grupos
+                </Button>
+                <p className="text-[10px] font-bold text-slate-400 leading-snug flex-1 min-w-[12rem]">
+                    Mete el bot en cada grupo, escribe algo ahí, y aparecerán aquí para elegirlos
+                    sin copiar números.
+                </p>
+            </div>
+
+            {encontrados && encontrados.length > 0 && (
+                <div className="rounded-2xl border border-sky-200 dark:border-sky-500/20 bg-sky-50/60 dark:bg-sky-500/5 p-3 space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-sky-600">
+                        Grupos encontrados — toca uno y elige su área
+                    </p>
+                    {encontrados.map(c => (
+                        <div key={c.id} className="flex flex-wrap items-center gap-2 bg-white dark:bg-black/20 rounded-xl px-3 py-2">
+                            <span className="font-black text-xs flex-1 min-w-[8rem] truncate">{c.nombre}</span>
+                            <span className="text-[9px] font-bold text-slate-400 font-mono shrink-0">{c.id}</span>
+                            <select
+                                defaultValue=""
+                                onChange={e => {
+                                    if (!e.target.value) return
+                                    setChats(p => ({ ...p, [e.target.value as AreaTelegram]: c.id }))
+                                    setTocado(true)
+                                    toast.success(`Puesto en ${AREAS_TELEGRAM.find(a => a.id === e.target.value)?.label}`)
+                                }}
+                                className="h-8 rounded-lg bg-slate-50 dark:bg-white/5 border-none text-[10px] font-black uppercase px-2 outline-none shrink-0"
+                            >
+                                <option value="">Usar en...</option>
+                                {AREAS_TELEGRAM.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+                            </select>
+                        </div>
+                    ))}
+                </div>
+            )}
 
             <div className="space-y-3">
                 {AREAS_TELEGRAM.map(a => {

@@ -121,6 +121,29 @@ export const avisarAlArea = async (
     return enviarTelegram(chatId, texto);
 };
 
+export interface ChatDescubierto {
+    id: string;
+    nombre: string;
+    tipo: string;
+}
+
+/**
+ * Los grupos donde el bot ya recibió algo.
+ *
+ * Copiar el id de un grupo a mano es donde todo el mundo se equivoca. Esto lo
+ * pregunta y devuelve la lista con sus nombres, para elegir en vez de teclear.
+ */
+export const descubrirChats = async (): Promise<{ chats: ChatDescubierto[]; error?: string }> => {
+    try {
+        const res = await fetch("/api/telegram", { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return { chats: [], error: data?.error || `Error ${res.status}` };
+        return { chats: data?.chats || [] };
+    } catch (e: any) {
+        return { chats: [], error: e?.message || "Sin conexión" };
+    }
+};
+
 /** El envío en crudo. Pasa por el servidor porque el token no sale de ahí. */
 export const enviarTelegram = async (
     chatId: string,
