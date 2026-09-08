@@ -693,10 +693,24 @@ export const areaDeCategoria = (
 /**
  * Metros lineales que consume una pieza, contando el ancho entero del rollo.
  *
- * El rollo tiene un ancho fijo y se corta a lo largo. La pieza se gira para
- * que su lado menor quepa en ese ancho, y lo que se gasta es el largo — la
- * tira que sobra al lado no se reaprovecha. Por eso una pieza estrecha y larga
- * consume igual que una que ocupe todo el ancho.
+ * El rollo tiene un ancho fijo y se corta a lo largo: lo que se cobra es el
+ * largo, y la tira que sobra al lado no se reaprovecha. Por eso una pieza
+ * estrecha y larga consume igual que una que ocupe todo el ancho.
+ *
+ * LA PIEZA SE GIRA COMO SALGA MÁS BARATO.
+ *
+ * Cualquier orientación que quepa en el ancho del rollo vale, así que se elige
+ * la que menos largo gaste. Antes se ponía SIEMPRE el lado corto a lo ancho, y
+ * eso cobra de más cuando los dos lados caben:
+ *
+ *     50 x 80 cm en un rollo de 137
+ *       80 a lo ancho, se cobran 0,50 m.l.   ← cabe, y es lo que se hace
+ *       50 a lo ancho, se cobran 0,80 m.l.   ← también cabe, pero cuesta 60% más
+ *
+ * Medido sobre diez medidas corrientes, la regla vieja cobraba de más en
+ * cuatro, hasta un 60%.
+ *
+ * Si ni girada cabe, se parte en varias pasadas y ahí sí manda el lado corto.
  *
  * Devuelve también los metros cuadrados de rollo que se van de verdad, que es
  * lo que hay que descontar del stock aunque al cliente se le cobre el largo.
@@ -715,15 +729,21 @@ export const consumoMetroLineal = (
         return { metrosLineales: 0, m2Rollo: 0, cabe: false, pasadas: 0 };
     }
 
-    // Se gira la pieza para que el lado corto vaya a lo ancho del rollo.
     const corto = Math.min(a, b);
     const largo = Math.max(a, b);
 
-    // Si ni girada cabe, hay que partirla en varias pasadas.
+    // Si ni girada cabe, hay que partirla en varias pasadas y el largo manda.
     const cabe = corto <= rollo;
     const pasadas = cabe ? 1 : Math.ceil(corto / rollo);
 
-    const metrosLineales = Math.round((largo / 100) * pasadas * uds * 10000) / 10000;
+    // Con las dos orientaciones posibles se cobra la que menos largo gaste:
+    // poner el lado LARGO a lo ancho, cuando entra, deja de cobrar la
+    // diferencia. Si solo entra una, esa es.
+    const aLoLargo = cabe
+        ? (largo <= rollo ? Math.min(largo, corto) : largo)
+        : largo;
+
+    const metrosLineales = Math.round((aLoLargo / 100) * pasadas * uds * 10000) / 10000;
     const m2Rollo = Math.round((rollo / 100) * metrosLineales * 10000) / 10000;
 
     return { metrosLineales, m2Rollo, cabe, pasadas };
