@@ -13,6 +13,9 @@
 
 "use client"
 
+import { MuestraMaterial } from "@/components/taller/MuestraMaterial"
+import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
+import { FAMILIAS_COLOR, tonoDeColor, type ColorMaterial, type FamiliaColor } from "@/lib/services/materiales-taller"
 import React, { useEffect, useState } from 'react'
 
 import { Card } from '@/components/ui/card'
@@ -21,6 +24,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
     Layers, Plus, X, Save, Loader2, Scissors, Box, ShieldAlert, Palette, Ruler,
+    ImagePlus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -175,6 +179,22 @@ function MaterialFila({ m, onEditar, onBorrar }: {
 }) {
     const [color, setColor] = useState('')
     const [grosor, setGrosor] = useState('')
+    const [subiendo, setSubiendo] = useState(false)
+
+    const anadirColor = (nombre: string) => {
+        const limpio = nombre.trim()
+        if (!limpio) return
+        // El tono y la familia se deducen del nombre al crearlo: escribir
+        // "Dorado" ya deja un dorado, y se retoca solo si hace falta.
+        const { hex, familia } = tonoDeColor({ id: '', nombre: limpio })
+        onEditar(m.id, {
+            colores: [...(m.colores || []), { id: nuevoIdMaterial('co'), nombre: limpio, hex, familia }],
+        })
+        setColor('')
+    }
+
+    const editarColor = (id: string, cambio: Partial<ColorMaterial>) =>
+        onEditar(m.id, { colores: (m.colores || []).map(c => c.id === id ? { ...c, ...cambio } : c) })
 
     return (
         <div className="rounded-2xl border border-black/5 dark:border-white/5 p-4 space-y-4">
@@ -210,6 +230,62 @@ function MaterialFila({ m, onEditar, onBorrar }: {
                 <button onClick={onBorrar} className="h-11 w-11 rounded-xl text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 flex items-center justify-center shrink-0">
                     <X className="w-4 h-4" />
                 </button>
+            </div>
+
+            {/* LA FOTO: UNA SOLA PARA TODOS LOS COLORES.
+
+                No se sube una por color. Se sube la del material en BLANCO y
+                cada color la tine. Veinte colores de acrilico se ensenan con
+                una imagen en vez de veinte, y un color nuevo no hay que
+                fotografiarlo para poder venderlo.
+
+                Tiene que ser clara: el tenido multiplica, asi que lo oscuro se
+                queda oscuro y sobre una foto negra no sale un amarillo. */}
+            <div className="flex items-center gap-3 rounded-2xl bg-slate-50 dark:bg-white/5 p-3">
+                <MuestraMaterial material={m} color={(m.colores || [])[0]} tam={52} />
+                <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                        Muestra del material
+                    </p>
+                    <p className="text-[10px] text-slate-400 leading-snug">
+                        Una foto en blanco o gris claro. El sistema la pinta de cada color.
+                    </p>
+                </div>
+                <label className={cn(
+                    'h-9 px-3 rounded-xl border border-dashed border-black/15 dark:border-white/15 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 cursor-pointer shrink-0',
+                    subiendo ? 'opacity-50 pointer-events-none' : 'hover:bg-white dark:hover:bg-white/10'
+                )}>
+                    <ImagePlus className="w-3.5 h-3.5" />
+                    {subiendo ? 'Subiendo...' : m.fotoUrl ? 'Cambiar' : 'Subir foto'}
+                    <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async e => {
+                            const f = e.target.files?.[0]
+                            e.target.value = ''
+                            if (!f) return
+                            setSubiendo(true)
+                            try {
+                                onEditar(m.id, { fotoUrl: await uploadFileToCloudinary(f) })
+                                toast.success('Muestra actualizada')
+                            } catch (err: any) {
+                                toast.error(err?.message || 'No se pudo subir la imagen')
+                            } finally {
+                                setSubiendo(false)
+                            }
+                        }}
+                    />
+                </label>
+                {m.fotoUrl && (
+                    <button
+                        onClick={() => onEditar(m.id, { fotoUrl: '' })}
+                        title="Quitar la foto y volver al color plano"
+                        className="h-9 w-9 rounded-xl text-slate-400 hover:text-red-500 flex items-center justify-center shrink-0"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                )}
             </div>
 
             {/* GROSORES.
@@ -291,27 +367,56 @@ function MaterialFila({ m, onEditar, onBorrar }: {
                 </Label>
 
                 <div className="flex flex-wrap gap-2">
-                    {(m.colores || []).map(c => (
-                        <div key={c.id} className="flex items-center gap-1 rounded-full bg-slate-50 dark:bg-white/5 pl-3 pr-1 h-8">
-                            <span className="text-[10px] font-black uppercase">{c.nombre}</span>
-                            <button
-                                onClick={() => onEditar(m.id, { colores: m.colores.filter(x => x.id !== c.id) })}
-                                className="text-slate-300 hover:text-red-500 p-1"
-                            >
-                                <X className="w-3 h-3" />
-                            </button>
-                        </div>
-                    ))}
+                    {(m.colores || []).map(c => {
+                        const { hex, familia } = tonoDeColor(c)
+                        return (
+                            <div key={c.id} className="flex items-center gap-1.5 rounded-full bg-slate-50 dark:bg-white/5 pl-1.5 pr-1 h-9">
+                                <MuestraMaterial material={m} color={c} tam={24} className="rounded-full" />
+
+                                {/* El selector nativo: sin dependencias y con el
+                                    cuentagotas del sistema, que es como se saca
+                                    el tono exacto de una plancha real. */}
+                                <input
+                                    type="color"
+                                    value={hex}
+                                    onChange={e => editarColor(c.id, { hex: e.target.value })}
+                                    title={`Tono de ${c.nombre}`}
+                                    className="w-5 h-5 rounded cursor-pointer bg-transparent border-none p-0 shrink-0"
+                                />
+
+                                <span className="text-[10px] font-black uppercase">{c.nombre}</span>
+
+                                {/* Solido, translucido o metalizado. No es
+                                    decoracion: un translucido deja pasar la luz
+                                    y eso cambia el trabajo, no el aspecto. */}
+                                <select
+                                    value={familia}
+                                    onChange={e => editarColor(c.id, { familia: e.target.value as FamiliaColor })}
+                                    className="h-6 rounded-full bg-white dark:bg-black/30 border border-black/10 dark:border-white/10 text-[9px] font-black uppercase px-1 cursor-pointer"
+                                >
+                                    {FAMILIAS_COLOR.map(f => (
+                                        <option key={f.id} value={f.id}>{f.label}</option>
+                                    ))}
+                                </select>
+
+                                <button
+                                    onClick={() => onEditar(m.id, { colores: m.colores.filter(x => x.id !== c.id) })}
+                                    className="text-slate-300 hover:text-red-500 p-1"
+                                >
+                                    <X className="w-3 h-3" />
+                                </button>
+                            </div>
+                        )
+                    })}
 
                     <div className="flex items-center gap-1">
                         <Input
                             value={color}
                             onChange={e => setColor(e.target.value)}
                             onKeyDown={e => {
-                                if (e.key !== 'Enter' || !color.trim()) return
+                                if (e.key !== 'Enter') return
                                 e.preventDefault()
-                                onEditar(m.id, { colores: [...(m.colores || []), { id: nuevoIdMaterial('co'), nombre: color.trim() }] })
-                                setColor('')
+                                anadirColor(color)
                             }}
                             placeholder="Turquesa"
                             className="h-8 w-28 rounded-full bg-white dark:bg-black/20 border border-dashed text-[10px] font-bold"
@@ -319,11 +424,7 @@ function MaterialFila({ m, onEditar, onBorrar }: {
                         <Button
                             size="icon"
                             variant="ghost"
-                            onClick={() => {
-                                if (!color.trim()) return
-                                onEditar(m.id, { colores: [...(m.colores || []), { id: nuevoIdMaterial('co'), nombre: color.trim() }] })
-                                setColor('')
-                            }}
+                            onClick={() => anadirColor(color)}
                             className="h-8 w-8 rounded-full"
                         >
                             <Plus className="w-3.5 h-3.5" />

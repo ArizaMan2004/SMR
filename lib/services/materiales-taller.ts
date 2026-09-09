@@ -41,9 +41,34 @@ export interface GrosorMaterial {
     activo?: boolean;
 }
 
+/**
+ * De que tipo es el color, que no es lo mismo que cual es.
+ *
+ * Un acrilico rojo solido y un rojo translucido son el mismo color y dos
+ * materiales distintos: uno tapa y el otro deja pasar la luz. En un aviso con
+ * luz detras esa diferencia es TODO el trabajo, asi que separarlos no es
+ * cosmetica.
+ */
+export type FamiliaColor = "solido" | "translucido" | "metalico";
+
+export const FAMILIAS_COLOR: { id: FamiliaColor; label: string }[] = [
+    { id: "solido", label: "Solido" },
+    { id: "translucido", label: "Translucido" },
+    { id: "metalico", label: "Metalizado / Espejo" },
+];
+
 export interface ColorMaterial {
     id: string;
     nombre: string;
+    /**
+     * El color con el que se tine la muestra, en hexadecimal.
+     *
+     * NO se sube una foto por color. Se sube UNA sola del material en blanco y
+     * se pinta con este valor: la textura, los brillos y las sombras son los
+     * mismos, y de Cloudinary sale una imagen en vez de dieciseis.
+     */
+    hex?: string;
+    familia?: FamiliaColor;
     activo?: boolean;
 }
 
@@ -59,6 +84,14 @@ export interface MaterialTaller {
      */
     seCorta?: boolean;
     sePega?: boolean;
+    /**
+     * UNA foto del material en BLANCO o gris muy claro.
+     *
+     * Se reutiliza para todos sus colores tinendola (ver `hex`). Tiene que ser
+     * clara: al tenir por multiplicacion, lo oscuro se queda oscuro y un negro
+     * no se puede volver amarillo.
+     */
+    fotoUrl?: string;
     colores: ColorMaterial[];
     grosores: GrosorMaterial[];
     activo?: boolean;
@@ -89,10 +122,65 @@ const g = (nombre: string, precioPegadoM2?: number): GrosorMaterial => ({
     ...(precioPegadoM2 != null ? { precioPegadoM2 } : {}),
 });
 
-const c = (nombre: string): ColorMaterial => ({
+const c = (nombre: string, hex?: string, familia: FamiliaColor = "solido"): ColorMaterial => ({
     id: `co_${nombre.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\W/g, "")}`,
     nombre,
+    ...(hex ? { hex } : {}),
+    familia,
 });
+
+/**
+ * Tonos y familias de los colores que ya estan escritos en las ordenes.
+ *
+ * Hay instalaciones con los colores guardados de antes, sin tono ni familia.
+ * En vez de obligar a reconfigurarlos uno a uno, se deducen del nombre: lo
+ * que se lee "Dorado" se pinta dorado. Lo que no este aqui sale en gris, que
+ * es honesto —no sabemos de que color es— y se arregla editandolo.
+ */
+const TONOS: Record<string, { hex: string; familia: FamiliaColor }> = {
+    blanco: { hex: "#FFFFFF", familia: "solido" },
+    negro: { hex: "#1A1A1A", familia: "solido" },
+    gris: { hex: "#8A8F94", familia: "solido" },
+    rojo: { hex: "#C4262E", familia: "solido" },
+    azul: { hex: "#1E5AA8", familia: "solido" },
+    verde: { hex: "#2E7D32", familia: "solido" },
+    amarillo: { hex: "#F2C300", familia: "solido" },
+    naranja: { hex: "#EE7B21", familia: "solido" },
+    turquesa: { hex: "#12A5A5", familia: "solido" },
+    fucsia: { hex: "#D4157E", familia: "solido" },
+    rosado: { hex: "#E88BAE", familia: "solido" },
+    morado: { hex: "#6A3FA0", familia: "solido" },
+    madera: { hex: "#B98A55", familia: "solido" },
+    kraft: { hex: "#C8A87C", familia: "solido" },
+    transparente: { hex: "#DCEAF2", familia: "translucido" },
+    ambar: { hex: "#E0A03A", familia: "translucido" },
+    humo: { hex: "#6E6E73", familia: "translucido" },
+    dorado: { hex: "#C9A227", familia: "metalico" },
+    plateado: { hex: "#C0C5CB", familia: "metalico" },
+    espejo: { hex: "#C7CDD4", familia: "metalico" },
+    bronce: { hex: "#9C6B3F", familia: "metalico" },
+};
+
+const sinTildes = (t: string) =>
+    t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+
+/** Lo que hay que saber para pintar la muestra de un color. */
+export const tonoDeColor = (
+    color?: ColorMaterial
+): { hex: string; familia: FamiliaColor } => {
+    if (!color) return { hex: "#9AA0A6", familia: "solido" };
+    if (color.hex) return { hex: color.hex, familia: color.familia || "solido" };
+
+    const limpio = sinTildes(color.nombre || "");
+    // Por palabras, para que "Rojo translucido" encuentre a "rojo" y a
+    // "translucido" sin tener que estar los dos juntos en la tabla.
+    const esTranslucido = /translucid|transparent/.test(limpio);
+    for (const palabra of limpio.split(/\s+/)) {
+        const t = TONOS[palabra];
+        if (t) return { hex: t.hex, familia: esTranslucido ? "translucido" : t.familia };
+    }
+    return { hex: "#9AA0A6", familia: esTranslucido ? "translucido" : (color.familia || "solido") };
+};
 
 /**
  * Lo que hay mientras nadie configure nada.
@@ -107,12 +195,24 @@ export const MATERIALES_POR_DEFECTO: MaterialTaller[] = [
         nombre: "Acrílico",
         seCorta: true,
         sePega: true,
-        grosores: [g("2mm"), g("3mm"), g("5mm"), g("6mm"), g("9mm")],
+        grosores: [g("1mm"), g("2mm"), g("3mm"), g("5mm"), g("9mm"), g("12mm")],
         colores: [
-            c("Transparente"), c("Blanco"), c("Negro"), c("Espejo"),
-            c("Dorado"), c("Azul"), c("Rojo"), c("Verde"), c("Amarillo"),
-            c("Turquesa"), c("Fucsia"), c("Rosado"), c("Morado"),
-            c("Naranja"), c("Gris"), c("Bronce"),
+            // Solidos: tapan la luz.
+            c("Blanco", "#FFFFFF"), c("Negro", "#1A1A1A"), c("Gris", "#8A8F94"),
+            c("Azul", "#1E5AA8"), c("Rojo", "#C4262E"), c("Verde", "#2E7D32"),
+            c("Amarillo", "#F2C300"), c("Naranja", "#EE7B21"),
+            c("Turquesa", "#12A5A5"), c("Fucsia", "#D4157E"),
+            c("Rosado", "#E88BAE"), c("Morado", "#6A3FA0"),
+            // Translucidos: dejan pasar la luz. En un aviso retroiluminado no
+            // son un capricho de color, son otro trabajo.
+            c("Transparente", "#DCEAF2", "translucido"),
+            c("Ambar", "#E0A03A", "translucido"),
+            c("Humo", "#6E6E73", "translucido"),
+            // Metalizados: no se tinen como los demas, llevan reflejo.
+            c("Dorado", "#C9A227", "metalico"),
+            c("Plateado", "#C0C5CB", "metalico"),
+            c("Espejo", "#C7CDD4", "metalico"),
+            c("Bronce", "#9C6B3F", "metalico"),
         ],
     },
     {
@@ -120,7 +220,7 @@ export const MATERIALES_POR_DEFECTO: MaterialTaller[] = [
         nombre: "MDF",
         seCorta: true,
         // El MDF crudo no viene en colores: pedirlos sería inventarse un dato.
-        grosores: [g("3mm"), g("5mm"), g("9mm"), g("12mm")],
+        grosores: [g("2mm"), g("3mm"), g("5mm"), g("9mm"), g("12mm")],
         colores: [],
     },
     {
@@ -128,7 +228,7 @@ export const MATERIALES_POR_DEFECTO: MaterialTaller[] = [
         nombre: "Melamina",
         seCorta: true,
         grosores: [g("3mm"), g("5mm"), g("9mm")],
-        colores: [c("Blanco"), c("Negro"), c("Madera")],
+        colores: [c("Blanco", "#FFFFFF"), c("Negro", "#1A1A1A"), c("Madera", "#B98A55")],
     },
     {
         id: "mat_cartulina",
@@ -136,23 +236,28 @@ export const MATERIALES_POR_DEFECTO: MaterialTaller[] = [
         seCorta: true,
         // Se mide en gramos, no en milímetros; el formulario no pide grosor.
         grosores: [],
-        colores: [c("Blanco"), c("Negro"), c("Kraft")],
+        colores: [c("Blanco", "#FFFFFF"), c("Negro", "#1A1A1A"), c("Kraft", "#C8A87C")],
     },
     {
         id: "mat_pvc",
         nombre: "PVC (espumado)",
-        seCorta: true,
+        // AQUI NO SE CORTA PVC.
+        //
+        // Sigue existiendo porque se vende y porque es la base rigida de casi
+        // todo lo que se pega. Ofrecerlo en el formulario de corte solo serviria
+        // para que alguien lo eligiera y mandara al taller algo que no se hace.
+        seCorta: false,
         sePega: true,
         grosores: [g("3mm", 0), g("5mm", 0)],
-        colores: [c("Blanco"), c("Negro")],
+        colores: [c("Blanco", "#FFFFFF"), c("Negro", "#1A1A1A")],
     },
     {
         id: "mat_pvc_rigido",
         nombre: "PVC Rígido",
-        seCorta: true,
+        seCorta: false,
         sePega: true,
         grosores: [g("3mm", 0), g("5mm", 0)],
-        colores: [c("Blanco"), c("Transparente")],
+        colores: [c("Blanco", "#FFFFFF"), c("Transparente", "#DCEAF2", "translucido")],
     },
 ];
 
