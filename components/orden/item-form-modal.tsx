@@ -28,6 +28,7 @@ import {
     precioDeServicio, acabadosActivos, opcionesDe,
     consumoMetroLineal, unidadDe, tipoEntradaDe,
     type CatalogoCategoria,
+    materialesDelArea,
 } from "@/lib/services/catalog-service"
 import { SelectorCatalogo } from "@/components/orden/SelectorCatalogo"
 import {
@@ -110,6 +111,9 @@ const getInitialState = () => ({
   medidaYCm: 0,
   empleadoAsignado: "N/A", 
   suministrarMaterial: false,
+  // Null y no false: "todavia nadie lo ha dicho" no es lo mismo que "es
+  // nuestro", y las estadisticas de corte necesitan poder distinguirlo.
+  materialDelCliente: null,
   costoMaterialExtra: 0,
   subtotal: 0,
 });
@@ -185,6 +189,24 @@ export function ItemFormModal({
   )
   const grosoresCorte = useMemo(() => grosoresDe(materialCorte), [materialCorte])
   const coloresCorte = useMemo(() => coloresDe(materialCorte), [materialCorte])
+
+  /**
+   * EL CATALOGO QUE SE OFRECE ES EL DEL AREA DEL ITEM.
+   *
+   * Un item de corte no tiene por que ver los rollos de vinil, y uno de
+   * impresion no tiene por que ver las planchas de acrilico. Mezclarlos no es
+   * solo ruido: es como acaban las medallas contadas como impresion y los
+   * metros del balance repartidos donde no van.
+   *
+   * Solo se filtra cuando el item DICE de que area es. En "Venta", "Diseno" u
+   * "Otros" no hay area que deducir, asi que se ofrece todo en vez de
+   * inventarse una.
+   */
+  const productosOfrecidos = useMemo(() => {
+      if (state.tipoServicio === 'CORTE') return materialesDelArea(catalogProductos, catalogCategorias, 'CORTE')
+      if (state.tipoServicio === 'IMPRESION') return materialesDelArea(catalogProductos, catalogCategorias, 'IMPRESION')
+      return catalogProductos
+  }, [catalogProductos, catalogCategorias, state.tipoServicio])
 
   // El desplegable compara textos tal cual, asi que "Acrilico" y "Acrilico"
   // con tilde son dos cosas distintas y el campo sale vacio aunque el material
@@ -741,7 +763,18 @@ export function ItemFormModal({
                                     <button
                                         key={String(o.propio)}
                                         type="button"
-                                        onClick={() => setState({ ...state, suministrarMaterial: o.propio })}
+                                        onClick={() => setState({
+                                            ...state,
+                                            // Dos campos porque responden a dos cosas:
+                                            // `suministrarMaterial` decide el precio y ya
+                                            // existia; `materialDelCliente` deja constancia
+                                            // de que alguien lo eligio, y sin el las
+                                            // estadisticas no pueden distinguir "lo trajo
+                                            // el cliente" de "esto es de antes de que se
+                                            // preguntara".
+                                            suministrarMaterial: o.propio,
+                                            materialDelCliente: !o.propio,
+                                        })}
                                         className={cn(
                                             'p-3 rounded-2xl border text-left transition-all',
                                             !!state.suministrarMaterial === o.propio
@@ -864,10 +897,10 @@ export function ItemFormModal({
                                         elegir solo copiaba el precio: la orden no guardaba
                                         qué se había vendido, así que no descontaba stock ni
                                         salía en las estadísticas. */}
-                                    {catalogProductos.some((p: any) => p.activo !== false && tipoEntradaDe(p) !== 'material') && (
+                                    {productosOfrecidos.some((p: any) => p.activo !== false && tipoEntradaDe(p) !== 'material') && (
                                         <div className="mb-3">
                                             <SelectorCatalogo
-                                                productos={catalogProductos}
+                                                productos={productosOfrecidos}
                                                 categorias={catalogCategorias}
                                                 seleccionadoId={ventaProductoId}
                                                 onElegir={seleccionarProductoVenta}
@@ -1004,7 +1037,7 @@ export function ItemFormModal({
                                                 creciendo, una rejilla sin filtro deja de
                                                 servir en cuanto pasa de diez materiales. */}
                                             <SelectorCatalogo
-                                                productos={catalogProductos}
+                                                productos={productosOfrecidos}
                                                 categorias={catalogCategorias}
                                                 seleccionadoId={catalogMaterialId}
                                                 onElegir={(prod: any) => seleccionarMaterialCatalogo(prod)}

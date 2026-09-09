@@ -34,6 +34,8 @@ import { cn } from "@/lib/utils"
 
 import { OrderDetailModal } from "@/components/orden/order-detail-modal"
 import { ConsumoMaterialesPanel } from "@/components/dashboard/ConsumoMaterialesPanel"
+import { ConsumoCortePanel } from "@/components/dashboard/ConsumoCortePanel"
+import { consumoDeCorte } from "@/lib/services/corte-service"
 import { useConsumoMateriales } from "@/lib/hooks/use-consumo-materiales"
 
 // El orden importa: 'melamina' contiene 'mdf' en algunas escrituras y
@@ -324,6 +326,21 @@ export function EstadisticasDashboard({
       () => materiales.consumoDe('CORTE', fechas.inicio, fechas.fin),
       [materiales, fechas]
   );
+
+  /**
+   * Lo que la maquina de corte estuvo haciendo, por material.
+   *
+   * Sale de los items de la orden y no del desglose de materiales porque son
+   * dos preguntas distintas: aquella responde cuantos metros cuadrados se
+   * gastaron, esta cuanto tiempo estuvo el laser encendido y sobre que.
+   */
+  const consumoMaquinaCorte = useMemo(() => {
+      const dentro = (localOrdenes || []).filter((o: any) => {
+          const f = new Date(o?.fecha);
+          return !isNaN(f.getTime()) && f >= fechas.inicio && f <= fechas.fin;
+      });
+      return consumoDeCorte(dentro as any);
+  }, [localOrdenes, fechas]);
 
   /** Variacion de metros impresos contra el mes anterior. */
   const variacionM2Real = useMemo(() => {
@@ -1478,6 +1495,7 @@ export function EstadisticasDashboard({
                     <Tabs defaultValue="materiales" className="flex-1 flex flex-col">
                         <TabsList className="w-full bg-slate-100 dark:bg-white/5 p-1 rounded-xl mb-3">
                             <TabsTrigger value="materiales" className="flex-1 text-[9px] uppercase font-black">Materiales</TabsTrigger>
+                            <TabsTrigger value="maquina" className="flex-1 text-[9px] uppercase font-black">Maquina</TabsTrigger>
                             <TabsTrigger value="colores" className="flex-1 text-[9px] uppercase font-black">Colores</TabsTrigger>
                         </TabsList>
 
@@ -1493,6 +1511,14 @@ export function EstadisticasDashboard({
                                 area="CORTE"
                                 embebido
                             />
+                        </TabsContent>
+
+                        {/* Cuanto tiempo ocupo cada material la maquina y cuantas
+                            piezas se pidieron. Son dos preguntas distintas: la
+                            primera dice que cuesta la hora de laser, la segunda
+                            que plancha hay que reponer. */}
+                        <TabsContent value="maquina" className="flex-1 mt-0">
+                            <ConsumoCortePanel datos={consumoMaquinaCorte} embebido />
                         </TabsContent>
 
                         <TabsContent value="colores" className="flex-1 mt-0">
