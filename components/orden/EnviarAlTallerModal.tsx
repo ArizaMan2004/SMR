@@ -18,6 +18,7 @@
 
 "use client"
 
+import { marcarEnProceso } from "@/lib/services/estado-orden-service"
 import React, { useEffect, useMemo, useState } from 'react'
 
 import {
@@ -250,6 +251,9 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
         setEnviando(true)
         try {
             const datos = {
+                // El id ademas del numero: el numero se ha repetido alguna vez
+                // en el historico, asi que buscar la factura por el es adivinar.
+                ordenId: orden?.id ?? null,
                 ordenNumero: orden?.ordenNumero ?? null,
                 cliente: orden?.cliente?.nombreRazonSocial || 'Sin cliente',
                 telefono: orden?.cliente?.telefono || '',
@@ -278,6 +282,13 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
                 })
                 toast.success(`Orden #${orden?.ordenNumero ?? ''} enviada al taller`)
             }
+
+            // LA FACTURA PASA A "EN PROCESO".
+            //
+            // `EstadoOrden` existia y no lo escribia nadie: todo nacia
+            // PENDIENTE y ahi se quedaba. Que el trabajo entre al taller es
+            // exactamente el momento en que deja de estar pendiente.
+            await marcarEnProceso(orden?.id, orden?.ordenNumero)
 
             // El aviso va DESPUES de guardar y no puede tumbar nada: si
             // Telegram falla, el trabajo ya esta en la mesa igual. Perder un

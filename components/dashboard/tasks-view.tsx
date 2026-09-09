@@ -1,6 +1,8 @@
 // @/components/dashboard/tasks-view.tsx
 "use client"
 
+import { EntregasPorCliente } from "@/components/dashboard/EntregasPorCliente"
+import { marcarTerminadaSiYaNoQuedaNada } from "@/lib/services/estado-orden-service"
 import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useAuth } from "@/lib/auth-context"
@@ -24,7 +26,7 @@ import { toast } from "sonner"
 import { 
   ClipboardList, Plus, User, Phone, PenTool, 
   Ruler, Printer, Scissors, Eye,
-  CheckCircle2, Clock, Trash2, Layers, Search, X, Filter, ChevronDown
+  CheckCircle2, Clock, Trash2, Layers, Search, X, Filter, ChevronDown, Users,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -234,6 +236,26 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
         try {
             await updateDoc(doc(db, "ordenes_servicio", id), { estado: "COMPLETADO" });
             toast.success("Trabajo marcado como finalizado");
+
+            // LA FACTURA PASA A "TERMINADO", PERO SOLO SI YA NO QUEDA NADA.
+            //
+            // Una factura puede repartirse en varios trabajos —se imprime,
+            // pasa a produccion que lo pega, y de ahi sale—. Darla por
+            // terminada al cerrar el primero diria que esta lista cuando le
+            // falta la mitad, que es justo la confusion de "aqui dice todo
+            // listo" y luego se entregan solo algunos.
+            const cierre = await marcarTerminadaSiYaNoQuedaNada(
+                id, (orden as any)?.ordenId, orden?.ordenNumero
+            );
+            if (cierre.terminada) {
+                toast.success(`Orden #${orden?.ordenNumero ?? ''} completa`);
+            } else if (cierre.quedan > 0) {
+                toast.info(
+                    cierre.quedan === 1
+                        ? `Queda 1 trabajo mas de la orden #${orden?.ordenNumero ?? ''}`
+                        : `Quedan ${cierre.quedan} trabajos mas de la orden #${orden?.ordenNumero ?? ''}`
+                );
+            }
 
             // Al final de la cadena esta quien atiende al cliente: si no se
             // entera, el trabajo se queda hecho en la mesa esperando a que
@@ -450,7 +472,29 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
                             </TabsTrigger>
                         )
                     })}
+
+                    {/* POR CLIENTE, NO POR AREA.
+
+                        El taller se mira por area porque asi se trabaja, pero el
+                        cliente no viene a preguntar por un area: viene a
+                        preguntar por lo suyo, y lo suyo esta repartido en varias
+                        pestanas. De ahi salia el "aqui dice que esta todo listo"
+                        mirando solo una. */}
+                    <TabsTrigger
+                        value="__cliente"
+                        className="rounded-lg sm:rounded-xl px-3 sm:px-6 py-2 sm:py-3 font-black uppercase text-[9px] sm:text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm flex items-center gap-1.5 sm:gap-2"
+                    >
+                        <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Por cliente
+                    </TabsTrigger>
                 </TabsList>
+
+                <TabsContent value="__cliente" className="mt-0 focus-visible:outline-none">
+                    <EntregasPorCliente
+                        trabajos={ordenesServicio as any}
+                        areas={AREAS_TALLER}
+                        onVer={(t: any) => { setViendo(t); setIsModalOpen(false); }}
+                    />
+                </TabsContent>
 
                 {visibleAreas.map(area => {
                     const terminadas = terminadasDe(area.id)
