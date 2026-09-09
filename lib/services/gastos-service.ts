@@ -36,7 +36,7 @@ const mapSnapshot = (doc: any) => {
     }
   });
   
-  return { id: doc.id, ...data };
+  return { ...data, id: doc.id };
 };
 
 // ==========================================

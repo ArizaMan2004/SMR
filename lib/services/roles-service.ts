@@ -88,7 +88,7 @@ export const subscribeToRoles = (callback: (roles: RolDefinicion[]) => void) => 
     return onSnapshot(
         collection(db, COLECCION_ROLES),
         snapshot => {
-            const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            const docs = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
             callback(combinarConDefaults(docs));
         },
         error => {
@@ -102,7 +102,7 @@ export const subscribeToRoles = (callback: (roles: RolDefinicion[]) => void) => 
 export const cargarRoles = async (): Promise<RolDefinicion[]> => {
     try {
         const snap = await getDocs(collection(db, COLECCION_ROLES));
-        return combinarConDefaults(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        return combinarConDefaults(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     } catch (error) {
         console.error("Error al cargar roles:", error);
         return ROLES_SISTEMA;

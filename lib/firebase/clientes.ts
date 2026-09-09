@@ -50,7 +50,7 @@ export async function getFrequentClients(): Promise<ClienteFirestore[]> {
         
         const clientes: ClienteFirestore[] = [];
         snapshot.forEach((doc) => {
-            clientes.push({ id: doc.id, ...doc.data() } as ClienteFirestore);
+            clientes.push({ ...doc.data(), id: doc.id } as ClienteFirestore);
         });
         
         return clientes;

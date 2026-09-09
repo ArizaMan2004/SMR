@@ -50,10 +50,7 @@ export const getAreaHistory = async () => {
     try {
         const q = query(collection(db, "calculos_area"), orderBy("createdAt", "desc"));
         const querySnapshot = await getDocs(q);
-        return querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        })) as AreaCalculation[];
+        return querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as AreaCalculation[];
     } catch (e) {
         console.error("Error leyendo historial área:", e);
         return [];
@@ -84,10 +81,7 @@ export const getLaserHistory = async () => {
     try {
         const q = query(collection(db, "calculos_laser"), orderBy("createdAt", "desc"));
         const querySnapshot = await getDocs(q);
-        return querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        })) as LaserCalculation[];
+        return querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as LaserCalculation[];
     } catch (e) {
         console.error("Error leyendo historial láser:", e);
         return [];

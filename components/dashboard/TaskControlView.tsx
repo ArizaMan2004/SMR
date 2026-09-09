@@ -181,7 +181,7 @@ export function TaskControlView({ currentUser, empleadosDb, rates }: TaskControl
             : query(tareasRef, where('usuarioId', '==', currentUser.uid))
 
         const unsub = onSnapshot(q, (snap) => {
-            const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as TareaEmpleado))
+            const docs = snap.docs.map(d => ({ ...d.data(), id: d.id } as TareaEmpleado))
             docs.sort((a, b) => {
                 const aDate = a.fechaRegistro?.toDate ? a.fechaRegistro.toDate() : new Date(a.fechaRegistro || 0)
                 const bDate = b.fechaRegistro?.toDate ? b.fechaRegistro.toDate() : new Date(b.fechaRegistro || 0)

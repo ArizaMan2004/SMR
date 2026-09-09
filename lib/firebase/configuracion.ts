@@ -14,10 +14,7 @@ export interface CustomColor {
 export const subscribeToColors = (callback: (colors: CustomColor[]) => void) => {
     const q = query(collection(db, "colores_personalizados"), orderBy("label", "asc"));
     return onSnapshot(q, (snapshot) => {
-        const colors = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        })) as CustomColor[];
+        const colors = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as CustomColor[];
         callback(colors);
     });
 };

@@ -203,7 +203,7 @@ export function EstadisticasDashboard({
                 where("fecha", "<=", fin.toISOString())
             );
             const snapOrdenes = await getDocs(qOrdenes);
-            const fetchedOrdenes = snapOrdenes.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const fetchedOrdenes = snapOrdenes.docs.map(doc => ({ ...doc.data(), id: doc.id }));
 
             const startTs = Timestamp.fromDate(ventanaInicio);
             const endTs = Timestamp.fromDate(fin);

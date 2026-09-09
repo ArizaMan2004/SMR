@@ -47,7 +47,8 @@ const formatForDateTimeInput = (isoString: string) => {
 const INITIAL_FORM_DATA = {
     ordenNumero: '',
     nombreOrden: '',
-    fecha: new Date().toISOString(),
+    // Se rellena de verdad en formularioEnBlanco(): aqui solo marca la forma.
+    fecha: '',
     fechaEntrega: claveFechaLocal(),
     isMaster: false,
     cliente: {
@@ -59,8 +60,28 @@ const INITIAL_FORM_DATA = {
     descripcionDetallada: "",
 };
 
+/**
+ * UN FORMULARIO EN BLANCO DE VERDAD.
+ *
+ * Hacen falta dos cosas que un objeto constante no puede dar:
+ *
+ * 1. LA FECHA DEL MOMENTO. Estaba puesta en la constante, que se evalua UNA
+ *    vez al cargar el modulo. Todas las ordenes creadas en la misma sesion del
+ *    navegador nacian con el mismo milisegundo: hay grupos de dieciseis
+ *    ordenes, de clientes distintos, con la misma `fecha` exacta.
+ *
+ * 2. CLIENTE E ITEMS NUEVOS. Compartir la referencia hace que dos formularios
+ *    escriban en el mismo objeto.
+ */
+const formularioEnBlanco = () => ({
+    ...INITIAL_FORM_DATA,
+    fecha: new Date().toISOString(),
+    cliente: { ...INITIAL_FORM_DATA.cliente },
+    items: [],
+});
+
 export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, initialData, currentUserId, bcvRate = 0, eurRate = 0 }) => {
-    const [formData, setFormData] = useState<any>(INITIAL_FORM_DATA);
+    const [formData, setFormData] = useState<any>(formularioEnBlanco);
     const [isLoading, setIsLoading] = useState(false);
     const [isItemModalOpen, setIsItemModalOpen] = useState(false);
     const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
@@ -168,8 +189,18 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                     setClientSearchTerm(initialData.cliente.nombreRazonSocial);
                 }
             } else {
+                // EMPEZAR DE CERO, NO DESDE LA ANTERIOR.
+                //
+                // Aqui habia `...prev`, que conservaba el formulario entero de
+                // la orden que se acabase de editar —sus items, su cliente y su
+                // `id`— y solo le cambiaba el numero. Editabas una orden, la
+                // cerrabas, abrias "Nueva Orden" y te salia la anterior ya
+                // rellena con un numero nuevo; al guardar entraba por `onCreate`
+                // y nacia una orden duplicada que ademas se llevaba dentro el
+                // `id` de la vieja, asi que la tabla pintaba las dos con la
+                // misma clave y el cliente aparecia facturado dos veces.
                 const safeNum = await getNextSafeOrderNumber();
-                setFormData((prev: any) => ({ ...prev, ordenNumero: String(safeNum) }));
+                setFormData({ ...formularioEnBlanco(), ordenNumero: String(safeNum) });
             }
         };
         load();

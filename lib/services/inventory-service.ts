@@ -9,10 +9,7 @@ import {
 export const subscribeToInventory = (callback: (data: any[]) => void) => {
   const q = query(collection(db, "inventario"), orderBy("nombre", "asc"));
   return onSnapshot(q, (snapshot) => {
-    const items = snapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        ...doc.data() 
-    }));
+    const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
     callback(items);
   });
 };
@@ -21,10 +18,7 @@ export const subscribeToInventory = (callback: (data: any[]) => void) => {
 export const subscribeToMovements = (callback: (data: any[]) => void) => {
   const q = query(collection(db, "historial_inventario"), orderBy("fecha", "desc"));
   return onSnapshot(q, (snapshot) => {
-    const movimientos = snapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        ...doc.data() 
-    }));
+    const movimientos = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
     callback(movimientos);
   });
 };

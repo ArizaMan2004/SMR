@@ -215,7 +215,7 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
             collection(db, 'ordenes_servicio'),
             where('ordenNumero', '==', orden.ordenNumero)
         ))
-            .then(s => { if (vivo) setExistentes(s.docs.map(d => ({ id: d.id, ...d.data() }))) })
+            .then(s => { if (vivo) setExistentes(s.docs.map(d => ({ ...d.data(), id: d.id }))) })
             .catch(() => { if (vivo) setExistentes([]) })
         return () => { vivo = false }
     }, [open, orden?.ordenNumero])

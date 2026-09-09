@@ -716,7 +716,7 @@ export default function Dashboard() {
 
         if (["employees_mgmt", "my_finances", "task_control"].includes(activeView)) {
             unsubTareas = onSnapshot(collection(db, "empleado_tareas"), (snap) => {
-                setTareasControl(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+                setTareasControl(snap.docs.map(d => ({ ...d.data(), id: d.id })));
             });
         }
 
@@ -732,7 +732,7 @@ export default function Dashboard() {
 
         if (activeView === "wallets") {
             unsubMovimientosCaja = onSnapshot(collection(db, "movimientos_caja"), (snapshot) => {
-                setMovimientosCaja(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                setMovimientosCaja(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
             });
         }
 

@@ -23,7 +23,7 @@ export interface CategoryItem {
 export const subscribeToPrices = (callback: (prices: PriceItem[]) => void) => {
   const q = query(collection(db, "precios"), orderBy("nombre", "asc"));
   return onSnapshot(q, (snapshot) => {
-    const prices = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as PriceItem[];
+    const prices = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as PriceItem[];
     callback(prices);
   }, (error) => console.error("Error precios:", error));
 };
@@ -45,7 +45,7 @@ export const deletePriceItem = async (id: string) => {
 export const subscribeToCategories = (callback: (cats: CategoryItem[]) => void) => {
   const q = query(collection(db, "categoriaprecios"), orderBy("nombre", "asc"));
   return onSnapshot(q, (snapshot) => {
-    const cats = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as CategoryItem[];
+    const cats = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as CategoryItem[];
     callback(cats);
   }, (error) => console.error("Error categorías:", error));
 };

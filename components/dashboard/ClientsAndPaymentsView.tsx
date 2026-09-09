@@ -193,7 +193,7 @@ export function ClientsAndPaymentsView({
         const unsubs = historicasBusqueda.map(ord =>
             onSnapshot(doc(db, "ordenes", ord.id), (docSnap) => {
                 if (docSnap.exists()) {
-                    const dataActualizada = { id: docSnap.id, ...docSnap.data() };
+                    const dataActualizada = { ...docSnap.data(), id: docSnap.id };
                     setHistoricasBusqueda(prev => prev.map(o => o.id === ord.id ? dataActualizada : o));
                 }
             })
@@ -216,7 +216,7 @@ export function ClientsAndPaymentsView({
                 if (docSnap.exists()) {
                     const data = docSnap.data() as any;
                     const fecha = data.fecha?.toDate ? data.fecha.toDate().toISOString() : data.fecha;
-                    const actualizada = { id: docSnap.id, ...data, fecha };
+                    const actualizada = { ...data, fecha, id: docSnap.id };
                     setDeudasGlobales(prev => prev.map(o => o.id === ord.id ? actualizada : o));
                 }
             })
@@ -307,7 +307,7 @@ export function ClientsAndPaymentsView({
             const todas = snap.docs.map(d => {
                 const data: any = d.data();
                 const fecha = data.fecha?.toDate ? data.fecha.toDate().toISOString() : data.fecha;
-                return { id: d.id, ...data, fecha };
+                return { ...data, fecha, id: d.id };
             });
             setDeudasGlobales(todas);
             setDebtsAnalyzed(true);
@@ -339,7 +339,7 @@ export function ClientsAndPaymentsView({
             const todas = snap.docs.map(d => {
                 const data: any = d.data();
                 const fecha = data.fecha?.toDate ? data.fecha.toDate().toISOString() : data.fecha;
-                return { id: d.id, ...data, fecha };
+                return { ...data, fecha, id: d.id };
             });
             setPagadasHistoricas(todas);
             setPagadasHistoricasCargadas(true);
@@ -1513,7 +1513,7 @@ function GlobalPaymentHistoryModal({ isOpen, onClose, onDeleteBatch, onViewImage
         if (isOpen) {
             setIsLoadingHistory(true);
             getDocs(collection(db, "ordenes")).then(snap => {
-                setFullOrders(snap.docs.map(d => ({id: d.id, ...d.data()})));
+                setFullOrders(snap.docs.map(d => ({ ...d.data(), id: d.id })));
             }).catch(err => {
                 console.error(err);
                 toast.error("Error cargando el historial");

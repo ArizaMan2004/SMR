@@ -474,7 +474,7 @@ const VENTAS_COL = "ventas_catalogo"
 export const subscribeToCatalogoCategories = (cb: (cats: CatalogoCategoria[]) => void) =>
     onSnapshot(
         query(collection(db, CAT_COL), orderBy("orden", "asc")),
-        snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() } as CatalogoCategoria))),
+        snap => cb(snap.docs.map(d => ({ ...d.data(), id: d.id } as CatalogoCategoria))),
         err => console.error("[catalog] categorías:", err)
     )
 
@@ -495,7 +495,7 @@ export const deleteCatalogoCategory = async (id: string) =>
 export const subscribeToCatalogoProducts = (cb: (prods: CatalogoProducto[]) => void) =>
     onSnapshot(
         query(collection(db, PROD_COL), orderBy("nombre", "asc")),
-        snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() } as CatalogoProducto))),
+        snap => cb(snap.docs.map(d => ({ ...d.data(), id: d.id } as CatalogoProducto))),
         err => console.error("[catalog] productos:", err)
     )
 
@@ -527,7 +527,7 @@ export const updateStockVariante = async (productoId: string, varianteId: string
 export const subscribeToVentasCatalogo = (cb: (ventas: VentaCatalogo[]) => void) =>
     onSnapshot(
         query(collection(db, VENTAS_COL), orderBy("fecha", "desc")),
-        snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() } as VentaCatalogo))),
+        snap => cb(snap.docs.map(d => ({ ...d.data(), id: d.id } as VentaCatalogo))),
         err => console.error("[catalog] ventas:", err)
     )
 

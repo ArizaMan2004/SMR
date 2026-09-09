@@ -125,7 +125,7 @@ export default function TasksView({ areaPriorizada }: { ordenes?: any, currentUs
 
     useEffect(() => {
         const unsub = onSnapshot(collection(db, "ordenes_servicio"), (snap) => {
-            const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceOrder))
+            const data = snap.docs.map(d => ({ ...d.data(), id: d.id } as ServiceOrder))
             data.sort((a, b) => new Date(a.fechaEntrega || '2099').getTime() - new Date(b.fechaEntrega || '2099').getTime());
             setOrdenesServicio(data);
             setIsLoading(false);

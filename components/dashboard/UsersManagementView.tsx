@@ -47,7 +47,7 @@ export function UsersManagementView() {
     // Cargar Usuarios y Códigos en tiempo real
     useEffect(() => {
         const unsubUsuarios = onSnapshot(collection(db, "usuarios"), (snap) => {
-            setUsuarios(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            setUsuarios(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
         });
 
         const unsubCodigos = onSnapshot(collection(db, "admin_codes"), (snap) => {

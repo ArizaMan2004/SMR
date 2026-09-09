@@ -122,9 +122,9 @@ export function PaymentAuditView(_props: PaymentAuditViewProps) {
             ]);
 
             const pagos = new Map<string, any>();
-            [...sp1.docs, ...sp2.docs].forEach(d => pagos.set(d.id, { id: d.id, ...d.data() }));
+            [...sp1.docs, ...sp2.docs].forEach(d => pagos.set(d.id, { ...d.data(), id: d.id }));
 
-            setSelfGastos(sg.docs.map(d => ({ id: d.id, ...d.data() })));
+            setSelfGastos(sg.docs.map(d => ({ ...d.data(), id: d.id })));
             setSelfPagos(Array.from(pagos.values()));
             setLecturas(n => n + sg.size + sp1.size + sp2.size);
         } catch (e) {
@@ -149,7 +149,7 @@ export function PaymentAuditView(_props: PaymentAuditViewProps) {
             const snap = await getDocs(
                 query(collection(db, "ordenes"), orderBy("fecha", "desc"), limit(TOPE_ORDENES))
             );
-            const datos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const datos = snap.docs.map(d => ({ ...d.data(), id: d.id }));
             cacheOrdenes = { datos, cargadoEn: Date.now() };
             setSelfOrdenes(datos);
             setCargadoEn(cacheOrdenes.cargadoEn);

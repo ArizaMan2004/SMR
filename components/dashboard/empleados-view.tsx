@@ -143,7 +143,7 @@ export function EmpleadosView({ empleados, pagos, rates, tareas = [] }: Empleado
 
   useEffect(() => {
       const unsub = onSnapshot(collection(db, "usuarios"), (snap) => {
-          setUsuariosApp(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+          setUsuariosApp(snap.docs.map(d => ({ ...d.data(), id: d.id })));
       });
       return () => unsub();
   }, []);

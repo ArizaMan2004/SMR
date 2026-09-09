@@ -183,7 +183,7 @@ export async function planificarAuditoria(anio: number, mes: number): Promise<Pl
     const manuales: RenglonAuditado[] = [];
 
     snap.docs.forEach(d => {
-        const orden: any = { id: d.id, ...d.data() };
+        const orden: any = { ...d.data(), id: d.id };
         const f = fechaDe(orden.fecha);
         if (isNaN(f.getTime()) || f.getFullYear() !== anio || f.getMonth() !== mes) return;
 

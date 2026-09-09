@@ -24,10 +24,7 @@ export const subscribeToClients = (callback: (clients: any[]) => void) => {
   );
   
   return onSnapshot(q, (snapshot) => {
-    const clients = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const clients = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
     callback(clients);
   }, (error) => {
     console.error("Error en suscripción de clientes:", error);
@@ -49,7 +46,7 @@ export const buscarClientePorRif = async (rifCedula: string) => {
     if (querySnapshot.empty) return null;
     
     const docSnap = querySnapshot.docs[0];
-    return { id: docSnap.id, ...docSnap.data() };
+    return { ...docSnap.data(), id: docSnap.id };
   } catch (error) {
     console.error("Error buscando cliente:", error);
     return null;

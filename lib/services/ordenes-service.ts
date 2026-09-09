@@ -120,8 +120,19 @@ export async function createOrden(data: OrdenServicio) {
 
     const clienteBusqueda = data.cliente?.nombreRazonSocial ? data.cliente.nombreRazonSocial.toLowerCase() : "";
 
+    // EL `id` DEL PAYLOAD NO SE GUARDA.
+    //
+    // `actualizarOrden` ya lo descartaba, pero aqui no, y esa asimetria dejaba
+    // rastro: si el formulario venia con el `id` de otra orden, `addDoc` lo
+    // escribia dentro del documento nuevo. Como al leer se hacia
+    // `{ id: doc.id, ...doc.data() }` —con el spread al final— ese campo pisaba
+    // al identificador real y dos ordenes distintas se pintaban con la misma
+    // clave. El identificador de un documento lo pone Firestore; que viaje
+    // tambien dentro solo puede acabar en que discrepen.
+    const { id: _idDescartado, ...datosLimpios } = data as any;
+
     const docRef = await addDoc(colRef, {
-      ...data,
+      ...datosLimpios,
       ordenNumero: numeroSeguro, // Sobrescribimos y forzamos a que sea un número puro
       clienteBusqueda,
       fecha: data.fecha || new Date().toISOString(),
@@ -190,9 +201,13 @@ export function subscribeToOrdenes(
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
+        // El spread va PRIMERO y `id` despues, a proposito: si el documento
+        // guardase por dentro un campo `id` —hay dos que lo hacen, de antes de
+        // que crear lo descartara— al reves lo pisaria, y la orden se
+        // renderizaria con la clave de otra.
         const data = snapshot.docs.map((doc) => ({
-          id: doc.id,
           ...doc.data(),
+          id: doc.id,
         })) as OrdenServicio[];
 
         callback(data);
@@ -272,7 +287,7 @@ export async function getOrdenById(ordenId: string): Promise<OrdenServicio | nul
   try {
     const snap = await getDoc(doc(db, "ordenes", ordenId));
     if (!snap.exists()) return null;
-    return { id: snap.id, ...snap.data() } as OrdenServicio;
+    return { ...snap.data(), id: snap.id } as OrdenServicio;
   } catch (error) {
     console.error("❌ Error al leer la orden:", error);
     return null;
@@ -299,7 +314,7 @@ export async function buscarOrdenEspecifica(numeroDeOrden: string) {
     }
 
     const docSnap = querySnapshot.docs[0];
-    return { id: docSnap.id, ...docSnap.data() } as OrdenServicio;
+    return { ...docSnap.data(), id: docSnap.id } as OrdenServicio;
 
   } catch (error) {
     console.error("❌ Error en la búsqueda profunda:", error);
@@ -474,7 +489,7 @@ export async function buscarOrdenesHistoricas(searchTerm: string) {
     
     snapshots.forEach((snap) => {
       snap.forEach((doc) => {
-        resultadosMap.set(doc.id, { id: doc.id, ...doc.data() });
+        resultadosMap.set(doc.id, { ...doc.data(), id: doc.id });
       });
     });
 
@@ -495,10 +510,7 @@ export const subscribeToDeudasActivas = (callback: (ordenes: any[]) => void) => 
     );
 
     return onSnapshot(q, (snapshot) => {
-        const deudas = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
+        const deudas = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
         callback(deudas);
     }, (error) => {
         console.error("Error cargando deudas activas:", error);
@@ -512,7 +524,7 @@ export async function cargarHistorialMasivo() {
   try {
     const q = query(collection(db, "ordenes"), orderBy("fecha", "desc"), limit(800));
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as OrdenServicio[];
+    return querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as OrdenServicio[];
   } catch (error) {
     console.error("❌ Error cargando historial masivo:", error);
     return [];
