@@ -1,6 +1,7 @@
 // @/components/dashboard/BudgetEntryView.tsx
 "use client"
 
+import { renglonDeDocumento } from "@/lib/services/documento-renglones";
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'; 
 import { motion, AnimatePresence } from "framer-motion"
 
@@ -394,11 +395,11 @@ export default function BudgetEntryView({
      * la tasa —y el resto— se decide viendo la hoja.
      */
     const handleDownloadPDF = async (data: any) => {
-        const items = (data.items || []).map((i: any) => ({
+        const items = (data.items || []).map((i: any) => renglonDeDocumento({
             descripcion: i.descripcion,
             cantidad: i.cantidad,
-            unidad: i.unidad === 'm2' ? 'm²' : i.unidad === 'und' ? 'Und.' : i.unidad,
-            precioUnitario: i.precioUnitarioUSD ?? (i.totalUSD / (i.cantidad || 1)),
+            medidaXCm: i.medidaXCm,
+            medidaYCm: i.medidaYCm,
             total: i.totalUSD,
             grupo: i.subCliente,
         }));

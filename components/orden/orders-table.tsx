@@ -1,6 +1,7 @@
 // @/components/orden/orders-table.tsx
 "use client"
 
+import { renglonDeDocumento } from "@/lib/services/documento-renglones";
 import React, { useState, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { type OrdenServicio } from "@/lib/types/orden"
@@ -150,11 +151,11 @@ export function OrdersTable({
   const handleDownloadPDF = (o: OrdenServicio) => {
     const esMatriz = (o as any).isMaster === true;
 
-    const items = (o.items || []).map((i: any) => ({
+    const items = (o.items || []).map((i: any) => renglonDeDocumento({
       descripcion: i.nombre,
       cantidad: i.cantidad,
-      unidad: i.unidad === 'm2' ? 'm²' : 'Und.',
-      precioUnitario: i.precioUnitario ?? (i.subtotal / (i.cantidad || 1)),
+      medidaXCm: i.medidaXCm,
+      medidaYCm: i.medidaYCm,
       total: i.subtotal,
       grupo: i.subCliente,
     }));

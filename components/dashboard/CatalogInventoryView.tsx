@@ -1,6 +1,7 @@
 // @/components/dashboard/CatalogInventoryView.tsx
 "use client"
 
+import { renglonDeDocumento } from "@/lib/services/documento-renglones";
 import React, { useState, useEffect, useMemo, useCallback, useRef} from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card } from '@/components/ui/card'
@@ -552,11 +553,11 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
             return
         }
 
-        const items = (venta.items || []).map(i => ({
+        const items = (venta.items || []).map(i => renglonDeDocumento({
             descripcion: i.varianteNombre ? `${i.productoNombre} — ${i.varianteNombre}` : i.productoNombre,
             cantidad: i.cantidad,
-            unidad: i.tipoVenta === 'metro_cuadrado' ? 'm²' : 'Und.',
-            precioUnitario: i.cantidad > 0 ? i.subtotalUSD / i.cantidad : i.subtotalUSD,
+            cmAncho: i.cmAncho,
+            cmAlto: i.cmAlto,
             total: i.subtotalUSD,
         }))
 

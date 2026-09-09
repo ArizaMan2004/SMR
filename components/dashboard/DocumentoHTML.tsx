@@ -46,8 +46,22 @@ export interface DatosDocumento {
     clienteTelefono?: string
     items: {
         descripcion: string
+        /**
+         * CUANTAS PIEZAS SON, no metros.
+         *
+         * Antes venia acompanada de la unidad y salia "1 m2" cuando lo que hay
+         * es UNA pieza. Dos impresiones que juntas dan un metro se leian como
+         * dos metros. La columna ya se titula "Cantidad": va el numero solo.
+         */
         cantidad: number
-        unidad?: string
+        /** "50 x 80 cm", debajo de la descripcion. Vacio si no se mide. */
+        medida?: string
+        /**
+         * LO QUE CUESTA UNA PIEZA, no el metro cuadrado.
+         *
+         * Un banner de 50x80 a $15/m2 salia con unitario $15,00 e importe
+         * $6,00, y el cliente llamaba a preguntar por que le cobraban quince.
+         */
         precioUnitario: number
         total: number
         /**
@@ -154,6 +168,7 @@ table.h-items th.c { text-align: center; }
 table.h-items th.d { text-align: right; }
 table.h-items td { border-bottom: 1px solid #eee; padding: 6px 0; vertical-align: top; white-space: pre-wrap; }
 table.h-items td.c { text-align: center; padding-right: 12px; }
+table.h-items td span.med { display: block; margin-top: 2px; font-size: 9.5px; color: #555; }
 table.h-items td.d { text-align: right; font-variant-numeric: tabular-nums; }
 table.h-items tr.h-sub td { border-bottom: none; padding: 14px 0 4px; font-size: 10px;
     font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
@@ -346,8 +361,11 @@ export function DocumentoHTML({ datos, op }: { datos: DatosDocumento; op: Opcion
 
                             {g.items.map((it, i) => (
                                 <tr key={i}>
-                                    <td className="c">{it.cantidad}{it.unidad ? ` ${it.unidad}` : ''}</td>
-                                    <td>{it.descripcion || '—'}</td>
+                                    <td className="c">{it.cantidad}</td>
+                                    <td>
+                                        {it.descripcion || '—'}
+                                        {it.medida && <span className="med">{it.medida}</span>}
+                                    </td>
                                     <td className="d">{usd(sinIva(it.precioUnitario))}</td>
                                     <td className="d">{usd(sinIva(it.total))}</td>
                                 </tr>

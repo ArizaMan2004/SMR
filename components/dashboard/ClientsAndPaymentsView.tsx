@@ -1,6 +1,7 @@
 // @/components/dashboard/ClientsAndPaymentsView.tsx
 "use client"
 
+import { renglonDeDocumento } from "@/lib/services/documento-renglones";
 import React, { useMemo, useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { type OrdenServicio, EstadoPago } from '@/lib/types/orden'
@@ -542,14 +543,14 @@ export function ClientsAndPaymentsView({
                         : price * qty;
                 }
 
-                return {
+                return renglonDeDocumento({
                     descripcion: item.nombre,
                     cantidad: qty,
-                    unidad: item.unidad === "m2" ? 'm²' : 'Und.',
-                    precioUnitario: qty > 0 ? subtotal / qty : 0,
+                    medidaXCm: x,
+                    medidaYCm: y,
                     total: subtotal,
                     grupo: `Orden #${orden.ordenNumero || 'S/N'}`,
-                };
+                });
             })
         );
 
