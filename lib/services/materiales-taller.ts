@@ -309,8 +309,11 @@ export const buscarMaterial = (
     nombre?: string
 ): MaterialTaller | undefined => {
     if (!nombre) return undefined;
-    const limpio = nombre.trim().toLowerCase();
-    return materialesDe(cfg).find(m => m.nombre.trim().toLowerCase() === limpio);
+    // Sin tildes a proposito: en las ordenes hay "Acrilico" escrito a mano y en
+    // la configuracion "Acrilico" con tilde. Compararlos tal cual no encuentra
+    // nada, y el formulario se queda sin grosores ni colores sin decir por que.
+    const limpio = sinTildes(nombre);
+    return materialesDe(cfg).find(m => sinTildes(m.nombre) === limpio);
 };
 
 export const grosoresDe = (m?: MaterialTaller): GrosorMaterial[] =>

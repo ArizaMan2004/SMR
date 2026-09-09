@@ -1,6 +1,7 @@
 // @/components/orden/item-form-modal.tsx
 "use client"
 
+import { MuestraMaterial } from "@/components/taller/MuestraMaterial"
 import * as React from "react"
 import { useState, useEffect, useMemo } from "react" 
 import { motion, AnimatePresence } from "framer-motion"
@@ -38,8 +39,6 @@ import {
 // --- CONSTANTES ---
 const PRECIO_LASER_POR_MINUTO = 0.80;
 const PERSONAL_TALLER = ["Marcos", "Samuel", "Daniela", "Jose Angel", "Daniel Montero"];
-const MATERIALES_CORTE = ["Acrilico", "MDF", "Melamina", "Cartulina", "Otro"] as const;
-const GROSORES = Array.from({ length: 12 }, (_, i) => `${i + 1}mm`);
 
 // --- CONSTANTES DE IMPRESIÓN ---
 const MATERIALES_IMPRESION = [
@@ -172,6 +171,31 @@ export function ItemFormModal({
   // Los sustratos y sus grosores salen de la configuración, no de una lista
   // escrita aquí: así se puede añadir uno nuevo sin tocar código.
   const sustratosPegado = useMemo(() => materialesDePegado(matTaller), [matTaller])
+
+  // EL CORTE SALE DE LA CONFIGURACION, NO DE UNA LISTA EN EL CODIGO.
+  //
+  // Antes los sustratos y los grosores estaban escritos aqui dentro, asi que
+  // registrar un material en Ajustes no servia de nada: el formulario seguia
+  // ofreciendo los cinco de siempre. Y como el PVC ya declara que no se corta,
+  // deja de aparecer solo, sin tener que acordarse de quitarlo.
+  const sustratosCorte = useMemo(() => materialesDeCorte(matTaller), [matTaller])
+  const materialCorte = useMemo(
+      () => buscarMaterial(matTaller, state.materialDeCorte),
+      [matTaller, state.materialDeCorte]
+  )
+  const grosoresCorte = useMemo(() => grosoresDe(materialCorte), [materialCorte])
+  const coloresCorte = useMemo(() => coloresDe(materialCorte), [materialCorte])
+
+  // El desplegable compara textos tal cual, asi que "Acrilico" y "Acrilico"
+  // con tilde son dos cosas distintas y el campo sale vacio aunque el material
+  // exista. `buscarMaterial` si los reconoce como el mismo, asi que en cuanto
+  // carga la configuracion se escribe el nombre bueno.
+  useEffect(() => {
+      if (state.tipoServicio !== 'CORTE') return
+      if (materialCorte && materialCorte.nombre !== state.materialDeCorte) {
+          setState((prev: any) => ({ ...prev, materialDeCorte: materialCorte.nombre }))
+      }
+  }, [materialCorte, state.materialDeCorte, state.tipoServicio])
   const grosoresPegado = useMemo(
       () => grosoresDe(buscarMaterial(matTaller, state.tipoPegado)),
       [matTaller, state.tipoPegado]
@@ -395,12 +419,10 @@ export function ItemFormModal({
       setCatalogSearch('')
   }
 
-  const allColors = useMemo(() => {
-    const uniqueColors = new Map();
-    COLORES_PREDEFINIDOS.forEach(c => uniqueColors.set(c.value, c));
-    customColors.forEach((c: any) => uniqueColors.set(c.value, c));
-    return Array.from(uniqueColors.values());
-  }, [customColors]);
+  // Aqui vivia `allColors`, que juntaba una lista fija con los colores sueltos
+  // registrados a mano. Los colores del corte ahora salen del material —cada
+  // uno tiene los suyos, con su tono y su familia—, que es lo que evita ofrecer
+  // un dorado en un material que no viene en dorado.
 
   useEffect(() => {
     if (isOpen) {
@@ -704,36 +726,77 @@ export function ItemFormModal({
                                 </Tabs>
                             </div>
 
+                            {/* QUIEN PONE EL MATERIAL.
+
+                                No es un detalle administrativo: decide lo que se
+                                cobra. Si la plancha la trae el cliente solo se
+                                cobra el tiempo de maquina; si es nuestra, se
+                                cobra tambien el material. Preguntarlo aqui evita
+                                tener que reclamarlo despues. */}
+                            <div className="grid grid-cols-2 gap-2 mb-5">
+                                {([
+                                    { propio: true, titulo: 'Material nuestro', pie: 'Tiempo + material' },
+                                    { propio: false, titulo: 'Lo trae el cliente', pie: 'Solo el tiempo' },
+                                ]).map(o => (
+                                    <button
+                                        key={String(o.propio)}
+                                        type="button"
+                                        onClick={() => setState({ ...state, suministrarMaterial: o.propio })}
+                                        className={cn(
+                                            'p-3 rounded-2xl border text-left transition-all',
+                                            !!state.suministrarMaterial === o.propio
+                                                ? 'border-orange-400 bg-orange-100/70 dark:bg-orange-500/15'
+                                                : 'border-black/10 dark:border-white/10 bg-white/60 dark:bg-slate-800/60'
+                                        )}
+                                    >
+                                        <p className="text-[10px] font-black uppercase tracking-widest">{o.titulo}</p>
+                                        <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">{o.pie}</p>
+                                    </button>
+                                ))}
+                            </div>
+
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                                 <div className="space-y-1.5">
                                     <Label className="text-[9px] font-black text-orange-400 uppercase">Sustrato</Label>
-                                    <Select value={state.materialDeCorte} onValueChange={v => setState({...state, materialDeCorte: v})}>
-                                        <SelectTrigger className="bg-white dark:bg-slate-800 border-none h-11 rounded-xl font-bold"><SelectValue /></SelectTrigger>
-                                        <SelectContent>{MATERIALES_CORTE.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+                                    <Select value={state.materialDeCorte} onValueChange={v => setState({...state, materialDeCorte: v, grosorMaterial: '', colorAcrilico: ''})}>
+                                        <SelectTrigger className="bg-white dark:bg-slate-800 border-none h-11 rounded-xl font-bold"><SelectValue placeholder="Elegir..." /></SelectTrigger>
+                                        <SelectContent>
+                                            {sustratosCorte.length === 0 && (
+                                                <div className="px-3 py-2 text-[10px] text-slate-400">
+                                                    Ninguno marcado como que se corta
+                                                </div>
+                                            )}
+                                            {sustratosCorte.map(m => <SelectItem key={m.id} value={m.nombre}>{m.nombre}</SelectItem>)}
+                                        </SelectContent>
                                     </Select>
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label className="text-[9px] font-black text-orange-400 uppercase">Grosor</Label>
-                                    <Select value={state.grosorMaterial} onValueChange={v => setState({...state, grosorMaterial: v})} disabled={state.materialDeCorte === 'Cartulina'}>
-                                        <SelectTrigger className="bg-white dark:bg-slate-800 border-none h-11 rounded-xl font-bold"><SelectValue placeholder="N/A" /></SelectTrigger>
-                                        <SelectContent>{GROSORES.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent>
+                                    {/* Se deshabilita por lo que el material DICE, no por su
+                                        nombre: antes estaba escrito "si es Cartulina", asi que
+                                        un material nuevo sin grosores lo seguia pidiendo. */}
+                                    <Select value={state.grosorMaterial} onValueChange={v => setState({...state, grosorMaterial: v})} disabled={grosoresCorte.length === 0}>
+                                        <SelectTrigger className="bg-white dark:bg-slate-800 border-none h-11 rounded-xl font-bold"><SelectValue placeholder={grosoresCorte.length ? 'Elegir...' : 'N/A'} /></SelectTrigger>
+                                        <SelectContent>{grosoresCorte.map(g => <SelectItem key={g.id} value={g.nombre}>{g.nombre}</SelectItem>)}</SelectContent>
                                     </Select>
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label className="text-[9px] font-black text-orange-400 uppercase">Color</Label>
-                                    <Select value={state.colorAcrilico} onValueChange={v => setState({...state, colorAcrilico: v})}>
-                                        <SelectTrigger className="bg-white dark:bg-slate-800 border-none h-11 rounded-xl font-bold"><SelectValue /></SelectTrigger>
+                                    <Select value={state.colorAcrilico} onValueChange={v => setState({...state, colorAcrilico: v})} disabled={coloresCorte.length === 0}>
+                                        <SelectTrigger className="bg-white dark:bg-slate-800 border-none h-11 rounded-xl font-bold">
+                                            <SelectValue placeholder={coloresCorte.length ? 'Elegir...' : 'Sin colores'} />
+                                        </SelectTrigger>
                                         <SelectContent>
-                                            {allColors.map((c: any) => <SelectItem key={c.value} value={c.value}>{c.emoji} {c.label}</SelectItem>)}
-                                            <Separator className="my-2" />
-                                            <SelectItem value="NEW" className="text-blue-600 font-black">➕ Registrar Nuevo Color</SelectItem>
+                                            {coloresCorte.map(c => (
+                                                <SelectItem key={c.id} value={c.nombre}>
+                                                    <span className="flex items-center gap-2">
+                                                        <MuestraMaterial material={materialCorte} color={c} tam={16} className="rounded" />
+                                                        {c.nombre}
+                                                    </span>
+                                                </SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
-                                    {state.colorAcrilico === 'NEW' && (
-                                        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="pt-2">
-                                            <Input value={state.nuevoColorCustom} onChange={e => setState({...state, nuevoColorCustom: e.target.value})} className="h-10 text-xs border-orange-200 dark:bg-slate-800" placeholder="Nombre del color..." />
-                                        </motion.div>
-                                    )}
                                 </div>
                             </div>
 
@@ -1458,7 +1521,12 @@ export function ItemFormModal({
                         </Select>
                     </div>
 
-                    <div className={cn("p-4 rounded-2xl border flex items-center justify-between transition-all", state.suministrarMaterial ? "bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200" : "bg-slate-50 dark:bg-slate-900 border-slate-100")}>
+                    {/* En CORTE esto ya se pregunta arriba, con las palabras
+                        que importan ahi: quien pone la plancha y por tanto si
+                        se cobra solo el tiempo. Dos interruptores para el mismo
+                        dato en la misma pantalla es una invitacion a que uno de
+                        los dos se quede sin tocar. */}
+                    <div className={cn("p-4 rounded-2xl border items-center justify-between transition-all", state.tipoServicio === 'CORTE' ? "hidden" : "flex", state.suministrarMaterial ? "bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200" : "bg-slate-50 dark:bg-slate-900 border-slate-100")}>
                         <div className="flex items-center gap-3">
                             <div className={cn("p-2 rounded-lg", state.suministrarMaterial ? "bg-emerald-500 text-white" : "bg-slate-200 text-slate-400")}>
                                 <Box className="w-5 h-5" />
