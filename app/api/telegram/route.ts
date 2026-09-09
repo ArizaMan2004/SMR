@@ -53,8 +53,24 @@ export async function GET() {
             );
         }
 
+        // QUIEN ES EL BOT.
+        //
+        // Hace falta para poder dar a los empleados el enlace de su bot. Sin el
+        // hay que explicarles de palabra como se llama, y ahi es donde la mitad
+        // le escribe al bot equivocado.
+        let botUsuario = "";
+        try {
+            const me = await fetch(`https://api.telegram.org/bot${token}/getMe`, { cache: "no-store" });
+            const j = await me.json().catch(() => ({}));
+            botUsuario = j?.result?.username || "";
+        } catch {
+            // Sin esto se sigue pudiendo vincular a mano; no es motivo de error.
+        }
+
         // Un mismo grupo aparece en cada mensaje: se queda uno por id.
-        const vistos = new Map<string, { id: string; nombre: string; tipo: string }>();
+        const vistos = new Map<string, {
+            id: string; nombre: string; tipo: string; usuario: string;
+        }>();
 
         for (const u of (data?.result || [])) {
             const chat = u?.message?.chat || u?.channel_post?.chat
@@ -68,10 +84,13 @@ export async function GET() {
                 id,
                 nombre: chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(" ") || id,
                 tipo: chat.type || "",
+                // El @usuario es lo unico parecido a un identificador legible
+                // que da Telegram: el telefono no lo entrega nunca.
+                usuario: chat.username ? `@${chat.username}` : "",
             });
         }
 
-        return NextResponse.json({ ok: true, chats: [...vistos.values()] });
+        return NextResponse.json({ ok: true, chats: [...vistos.values()], botUsuario });
     } catch (e: any) {
         return NextResponse.json(
             { error: `No se pudo hablar con Telegram: ${e?.message || e}` },

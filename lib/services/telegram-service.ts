@@ -149,6 +149,8 @@ export interface ChatDescubierto {
     id: string;
     nombre: string;
     tipo: string;
+    /** "@juanperez", si lo tiene. Telegram nunca da el telefono. */
+    usuario?: string;
 }
 
 /**
@@ -157,16 +159,59 @@ export interface ChatDescubierto {
  * Copiar el id de un grupo a mano es donde todo el mundo se equivoca. Esto lo
  * pregunta y devuelve la lista con sus nombres, para elegir en vez de teclear.
  */
-export const descubrirChats = async (): Promise<{ chats: ChatDescubierto[]; error?: string }> => {
+export const descubrirChats = async (): Promise<{
+    chats: ChatDescubierto[]; botUsuario?: string; error?: string;
+}> => {
     try {
         const res = await fetch("/api/telegram", { cache: "no-store" });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return { chats: [], error: data?.error || `Error ${res.status}` };
-        return { chats: data?.chats || [] };
+        return { chats: data?.chats || [], botUsuario: data?.botUsuario || "" };
     } catch (e: any) {
         return { chats: [], error: e?.message || "Sin conexión" };
     }
 };
+
+/**
+ * Por qué no vale lo que se escribió, o null si vale.
+ *
+ * Comprobarlo antes de guardarlo evita el caso peor: creer que está
+ * configurado y descubrir que no el día que hace falta el aviso.
+ *
+ * EL TELÉFONO SE DETECTA APARTE, Y A PROPÓSITO
+ *
+ * Es el error que va a cometer todo el mundo: la pantalla pide "el chat de
+ * Jesús" y uno escribe el número de Jesús. Un teléfono venezolano —0414…— es
+ * once dígitos, así que pasaría por un id numérico sin despeinarse.
+ *
+ * Lo que lo delata es el cero de delante: los identificadores de Telegram son
+ * enteros de verdad y ninguno empieza por cero. Decir "eso es un teléfono" en
+ * vez de "formato inválido" es la diferencia entre corregirlo en diez segundos
+ * y pasar media hora buscando dónde está el campo del teléfono.
+ */
+export const motivoChatInvalido = (valor: string): string | null => {
+    const v = String(valor || "").trim();
+    if (!v) return "Escribe el id del chat o su @usuario";
+
+    if (/^@/.test(v)) {
+        return /^@[A-Za-z0-9_]{4,}$/.test(v)
+            ? null
+            : "Un @usuario lleva al menos 4 letras, números o guiones bajos";
+    }
+
+    if (/^\+?\d[\d\s-]+$/.test(v) && /^\+?0/.test(v.replace(/[\s-]/g, ""))) {
+        return "Eso es un teléfono. Telegram no los usa: hace falta el id del chat";
+    }
+
+    if (!/^-?[1-9]\d{4,}$/.test(v)) {
+        return "No parece un chat: un número como 1524194054, o un @usuario";
+    }
+
+    return null;
+};
+
+/** Atajo para cuando solo importa si vale. */
+export const chatIdValido = (v: string): boolean => motivoChatInvalido(v) === null;
 
 /** El envío en crudo. Pasa por el servidor porque el token no sale de ahí. */
 export const enviarTelegram = async (

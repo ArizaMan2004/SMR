@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
 import { esAdmin } from '@/lib/roles'
 import {
-    subscribeToTelegram, guardarTelegram, enviarTelegram, descubrirChats, AREAS_TELEGRAM,
+    subscribeToTelegram, guardarTelegram, enviarTelegram, descubrirChats, motivoChatInvalido, AREAS_TELEGRAM,
     type ConfigTelegram, type AreaTelegram, type ChatDescubierto,
 } from '@/lib/services/telegram-service'
 import { subscribeToEmpleados } from '@/lib/services/gastos-service'
@@ -38,6 +38,27 @@ export function TelegramPanel() {
     const [cfg, setCfg] = useState<ConfigTelegram>({})
     const [chats, setChats] = useState<Partial<Record<AreaTelegram, string>>>({})
     const [empleadosChat, setEmpleadosChat] = useState<Record<string, string>>({})
+    /** Como se llama el bot, para poder pasarle el enlace a la gente. */
+    const [botUsuario, setBotUsuario] = useState('')
+    /** Lo que se esta tecleando en la casilla de cada empleado. */
+    const [borrador, setBorrador] = useState<Record<string, string>>({})
+
+    /**
+     * Vincula lo escrito a mano.
+     *
+     * Se comprueba antes de guardarlo. Un id mal copiado se guarda igual de
+     * bien que uno bueno y no se nota hasta el dia que hace falta el aviso, que
+     * es el peor momento para enterarse.
+     */
+    const vincularAMano = (empleadoId: string) => {
+        const v = String(borrador[empleadoId] ?? '').trim()
+        if (!v) return
+        const motivo = motivoChatInvalido(v)
+        if (motivo) { toast.error(motivo); return }
+        setEmpleadosChat(p => ({ ...p, [empleadoId]: v }))
+        setBorrador(p => { const c = { ...p }; delete c[empleadoId]; return c })
+        setTocado(true)
+    }
     const [urlApp, setUrlApp] = useState('')
     const [activo, setActivo] = useState(true)
 
@@ -53,6 +74,7 @@ export function TelegramPanel() {
     const buscarGrupos = async () => {
         setBuscando(true)
         const r = await descubrirChats()
+        if (r.botUsuario) setBotUsuario(r.botUsuario)
         setBuscando(false)
 
         if (r.error) return toast.error(r.error)
@@ -197,6 +219,9 @@ export function TelegramPanel() {
                     {encontrados.map(c => (
                         <div key={c.id} className="flex flex-wrap items-center gap-2 bg-white dark:bg-black/20 rounded-xl px-3 py-2">
                             <span className="font-black text-xs flex-1 min-w-[8rem] truncate">{c.nombre}</span>
+                            {c.usuario && (
+                                <span className="text-[10px] font-black text-blue-600 shrink-0">{c.usuario}</span>
+                            )}
                             <span className="text-[9px] font-bold text-slate-400 font-mono shrink-0">{c.id}</span>
                             <select
                                 defaultValue=""
@@ -293,6 +318,44 @@ export function TelegramPanel() {
                     </p>
                 </div>
 
+                {/* POR QUE NO HAY NUMEROS DE TELEFONO.
+
+                    Telegram no se los da a los bots, ni con permiso: lo unico
+                    que entrega es un identificador de conversacion. No es una
+                    limitacion del panel y no hay forma de rodearla, asi que
+                    mejor decirlo aqui que dejar a alguien buscando el campo del
+                    telefono durante media hora. */}
+                <div className="rounded-2xl bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20 p-3 space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-700 dark:text-blue-300">
+                        Telegram no da telefonos
+                    </p>
+                    <p className="text-[10px] font-bold text-blue-900/70 dark:text-blue-200/70 leading-snug">
+                        A los bots solo les entrega un numero de conversacion. Por eso ves IDs y
+                        no telefonos: no falta nada por configurar, es asi y no se puede cambiar.
+                    </p>
+                    <ol className="text-[10px] font-bold text-blue-900/70 dark:text-blue-200/70 leading-snug list-decimal ml-4 space-y-0.5">
+                        <li>La persona abre el bot y le escribe cualquier cosa.</li>
+                        <li>Tocas <span className="font-black">Buscar chats</span> aqui arriba.</li>
+                        <li>Aparece con su nombre y la vinculas.</li>
+                    </ol>
+                    {botUsuario && (
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <code className="text-[10px] font-black bg-white dark:bg-black/30 rounded-lg px-2 py-1">
+                                https://t.me/{botUsuario.replace('@', '')}
+                            </code>
+                            <button
+                                onClick={() => {
+                                    navigator.clipboard?.writeText(`https://t.me/${botUsuario.replace('@', '')}`)
+                                    toast.success('Enlace copiado, pasaselo a tu gente')
+                                }}
+                                className="text-[9px] font-black uppercase tracking-widest text-blue-600 hover:underline"
+                            >
+                                Copiar enlace
+                            </button>
+                        </div>
+                    )}
+                </div>
+
                 {empleados.length === 0 ? (
                     <p className="text-[10px] font-bold text-slate-400">No hay empleados registrados.</p>
                 ) : (
@@ -340,7 +403,22 @@ Hola ${e.nombre}, si lees esto tus avisos funcionan.`)
                                             </button>
                                         </>
                                     ) : (
-                                        <span className="text-[9px] font-bold text-slate-300 pr-2">sin vincular</span>
+                                        /* ESCRIBIRLO A MANO.
+
+                                           Buscar chats solo encuentra a quien le
+                                           haya escrito al bot hace poco: Telegram
+                                           descarta las actualizaciones viejas. Si
+                                           el empleado escribio ayer, ya no sale, y
+                                           sin esta casilla no queda mas remedio que
+                                           pedirle que vuelva a escribir. */
+                                        <input
+                                            value={borrador[e.id] ?? ''}
+                                            onChange={ev => setBorrador(p => ({ ...p, [e.id]: ev.target.value }))}
+                                            onKeyDown={ev => { if (ev.key === 'Enter') vincularAMano(e.id) }}
+                                            onBlur={() => vincularAMano(e.id)}
+                                            placeholder="Pegar ID o @usuario"
+                                            className="h-6 w-36 rounded-full bg-white dark:bg-black/30 border border-dashed border-black/15 dark:border-white/15 text-[9px] font-bold px-2 outline-none"
+                                        />
                                     )}
                                 </div>
                             )
