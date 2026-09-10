@@ -1,0 +1,114 @@
+rules_version = '2';
+
+// ============================================================================
+//  REGLAS DE FIRESTORE
+// ============================================================================
+//
+//  POR QUÉ EXISTE ESTE ARCHIVO
+//
+//  El 10-09-2026 se comprobó que la base se podía leer SIN iniciar sesión:
+//  desde un navegador sin ningún usuario de Firebase guardado, una lectura
+//  directa al servidor devolvía clientes y órdenes. La configuración de
+//  Firebase va dentro del JavaScript público de la web —eso es normal y no es
+//  el problema—, así que cualquiera que abriera la página podía llevarse los
+//  clientes con RIF y teléfono y todas las órdenes con montos.
+//
+//  Estas reglas NO se aplican solas por estar aquí. Se pegan en:
+//    Consola de Firebase → Firestore Database → Reglas → Publicar
+//  Firebase guarda el historial: si algo falla, se vuelve a la versión
+//  anterior con un clic desde esa misma pantalla.
+//
+//  QUÉ HACEN
+//
+//  1. Para ver o tocar CUALQUIER dato hace falta una cuenta APROBADA:
+//     `usuarios/{uid}.isActive == true`. No basta con estar logueado: el
+//     login comprueba `isActive` en el navegador, y quien cree una cuenta
+//     directamente contra Firebase se salta esa comprobación. La base tiene
+//     que exigirlo por su cuenta.
+//
+//  2. Lo único que se puede hacer sin sesión es comprobar UN código de
+//     invitación por su nombre exacto. El registro lo lee antes de crear la
+//     cuenta; sin esto, nadie más podría registrarse. No se pueden listar: los
+//     códigos no se pueden adivinar recorriéndolos.
+//
+//  3. Nadie se aprueba ni se asciende a sí mismo. Una cuenta nueva nace con
+//     `isActive: false` y rol EMPLEADO, y solo un ADMIN activo puede cambiar
+//     el rol o la aprobación de alguien.
+//
+//  COMPROBADO ANTES DE PROPONERLAS
+//
+//  Los 6 usuarios que había tenían `isActive: true` (3 ADMIN), así que ninguno
+//  se queda fuera. Ninguna ruta del servidor usa Firestore.
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function sesion() {
+      return request.auth != null;
+    }
+
+    function rutaPerfil() {
+      return /databases/$(database)/documents/usuarios/$(request.auth.uid);
+    }
+
+    // Cuenta aprobada. Un get() por petición: Firestore lo cachea dentro de la
+    // misma petición, así que no multiplica las lecturas.
+    function activo() {
+      return sesion() && exists(rutaPerfil()) && get(rutaPerfil()).data.get('isActive', false) == true;
+    }
+
+    function admin() {
+      return activo() && get(rutaPerfil()).data.get('rol', '') == 'ADMIN';
+    }
+
+    // ------------------------------------------------------------ usuarios
+    match /usuarios/{uid} {
+      // El propio perfil se lee aunque no esté aprobado: el login lo necesita
+      // para decir "tu cuenta está en espera". Los demás, solo con cuenta activa.
+      allow read: if (sesion() && request.auth.uid == uid) || activo();
+
+      // Alta: solo el propio perfil, y naciendo en espera y sin privilegios.
+      allow create: if sesion()
+                    && request.auth.uid == uid
+                    && request.resource.data.isActive == false
+                    && request.resource.data.rol == 'EMPLEADO';
+
+      // Un ADMIN cambia a cualquiera. Cada quien puede editar lo suyo (foto,
+      // colores, datos), pero no su rol ni su aprobación.
+      allow update: if admin()
+                    || (activo()
+                        && request.auth.uid == uid
+                        && request.resource.data.get('rol', null) == resource.data.get('rol', null)
+                        && request.resource.data.get('isActive', null) == resource.data.get('isActive', null));
+
+      allow delete: if admin();
+    }
+
+    // ------------------------------------------------------ admin_codes
+    match /admin_codes/{codigo} {
+      // Comprobar UN código por su nombre, sin sesión (el registro lo hace
+      // antes de crear la cuenta). `list` no entra aquí: no se pueden recorrer.
+      allow get: if true;
+      allow list: if admin();
+
+      // Recién registrado: marca como usado el código que acaba de gastar, y
+      // solo si no estaba usado ya.
+      allow update: if sesion()
+                    && resource.data.get('used', false) != true
+                    && request.resource.data.used == true
+                    && request.resource.data.usedBy == request.auth.uid;
+
+      allow create, update, delete: if admin();
+    }
+
+    // --------------------------------------------------- todo lo demás
+    // Órdenes, clientes, catálogo, pagos, taller, configuración... Cuenta
+    // aprobada y nada más, como hasta ahora dentro de la app. `usuarios` y
+    // `admin_codes` quedan fuera a propósito: si entraran aquí, cualquier
+    // empleado activo podría darse el rol de ADMIN.
+    match /{coleccion}/{documento=**} {
+      allow read, write: if activo() && !(coleccion in ['usuarios', 'admin_codes']);
+    }
+  }
+}
