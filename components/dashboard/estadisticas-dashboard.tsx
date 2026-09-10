@@ -36,6 +36,7 @@ import { OrderDetailModal } from "@/components/orden/order-detail-modal"
 import { ConsumoMaterialesPanel } from "@/components/dashboard/ConsumoMaterialesPanel"
 import { ConsumoCortePanel } from "@/components/dashboard/ConsumoCortePanel"
 import { consumoDeCorte } from "@/lib/services/corte-service"
+import { estadoPagoDe } from "@/lib/hooks/use-consumo-materiales"
 import { useConsumoMateriales } from "@/lib/hooks/use-consumo-materiales"
 
 // El orden importa: 'melamina' contiene 'mdf' en algunas escrituras y
@@ -121,6 +122,15 @@ interface EstadisticasDashboardProps {
 }
 
 type ViewMode = 'GENERAL' | 'IMPRESION' | 'CORTE';
+
+/**
+ * Dinero con dos decimales siempre.
+ *
+ * `toLocaleString()` a secas quita los ceros del final: 2514,40 salia como
+ * "2514,4" y al lado de "2206,02" parecia que faltaba un digito.
+ */
+const dinero = (n: number) =>
+    (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 type DetailType = 'INGRESOS' | 'EGRESOS' | 'UTILIDAD' | 'DEUDA' | 'MATERIALES' | null;
 
 const identificarServicio = (item: any) => {
@@ -322,9 +332,11 @@ export function EstadisticasDashboard({
       () => materiales.consumoDe('IMPRESION', fechas.inicioPrev, fechas.finPrev),
       [materiales, fechas]
   );
+  // Corte obedece a las pestanas de pago porque viven en su tarjeta.
+  // Impresion no las tiene, asi que no se le aplican.
   const consumoCorte = useMemo(
-      () => materiales.consumoDe('CORTE', fechas.inicio, fechas.fin),
-      [materiales, fechas]
+      () => materiales.consumoDe('CORTE', fechas.inicio, fechas.fin, filtroPagoMateriales),
+      [materiales, fechas, filtroPagoMateriales]
   );
 
   /**
@@ -337,10 +349,11 @@ export function EstadisticasDashboard({
   const consumoMaquinaCorte = useMemo(() => {
       const dentro = (localOrdenes || []).filter((o: any) => {
           const f = new Date(o?.fecha);
-          return !isNaN(f.getTime()) && f >= fechas.inicio && f <= fechas.fin;
+          if (isNaN(f.getTime()) || f < fechas.inicio || f > fechas.fin) return false;
+          return filtroPagoMateriales === 'TODOS' || estadoPagoDe(o) === filtroPagoMateriales;
       });
       return consumoDeCorte(dentro as any);
-  }, [localOrdenes, fechas]);
+  }, [localOrdenes, fechas, filtroPagoMateriales]);
 
   /** Variacion de metros impresos contra el mes anterior. */
   const variacionM2Real = useMemo(() => {
@@ -1703,7 +1716,7 @@ export function EstadisticasDashboard({
                 <div className="flex gap-3 sm:gap-4">
                     <div className="flex-1 p-3 sm:p-4 bg-slate-50 dark:bg-white/5 rounded-2xl sm:rounded-3xl border border-slate-100 dark:border-white/5">
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 sm:mb-2">&lt;30d</p>
-                        <p className="text-sm sm:text-xl font-black text-slate-700 dark:text-white break-all">${analisisDeuda.deudaCorriente.toLocaleString()}</p>
+                        <p className="text-sm sm:text-lg font-black text-slate-700 dark:text-white whitespace-nowrap tabular-nums">${dinero(analisisDeuda.deudaCorriente)}</p>
                         <div className="h-1.5 w-full bg-slate-200 mt-2 sm:mt-3 rounded-full overflow-hidden">
                             <motion.div initial={{width:0}} animate={{width: `${(analisisDeuda.deudaCorriente / (analisisDeuda.totalDeuda || 1)) * 100}%`}} className="h-full bg-blue-500 rounded-full" />
                         </div>
@@ -1713,7 +1726,7 @@ export function EstadisticasDashboard({
                             <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest">&gt;30d</p>
                             <ShieldAlert className="w-3 h-3 text-rose-500" />
                         </div>
-                        <p className="text-sm sm:text-xl font-black text-rose-600 break-all">${analisisDeuda.deudaCritica.toLocaleString()}</p>
+                        <p className="text-sm sm:text-lg font-black text-rose-600 whitespace-nowrap tabular-nums">${dinero(analisisDeuda.deudaCritica)}</p>
                         <div className="h-1.5 w-full bg-rose-200 mt-2 sm:mt-3 rounded-full overflow-hidden">
                             <motion.div initial={{width:0}} animate={{width: `${(analisisDeuda.deudaCritica / (analisisDeuda.totalDeuda || 1)) * 100}%`}} className="h-full bg-rose-500 rounded-full" />
                         </div>
@@ -1721,7 +1734,7 @@ export function EstadisticasDashboard({
                 </div>
                 <div className="mt-3 sm:mt-4 text-center cursor-pointer hover:bg-slate-50 p-2 rounded-xl transition-colors" onClick={() => setSelectedDetail('DEUDA')}>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                        Total: <span className="text-slate-800 dark:text-white">${analisisDeuda.totalDeuda.toLocaleString()}</span>
+                        Total: <span className="text-slate-800 dark:text-white tabular-nums">${dinero(analisisDeuda.totalDeuda)}</span>
                     </p>
                 </div>
             </Card>
@@ -2364,7 +2377,7 @@ function StatCard({ label, value, trend, icon, color, sub, highlight, onClick }:
             </div>
             <div>
                 <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 sm:mb-1 truncate">{label}</p>
-                <p className="text-base sm:text-2xl lg:text-3xl font-black tracking-tighter text-slate-900 dark:text-white break-all">
+                <p className="text-base sm:text-2xl lg:text-3xl font-black tracking-tighter text-slate-900 dark:text-white whitespace-nowrap tabular-nums">
                     ${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                 </p>
                 <p className="text-[9px] font-bold text-slate-400 mt-1 sm:mt-2 uppercase tracking-wide opacity-60 truncate hidden sm:block">{sub}</p>

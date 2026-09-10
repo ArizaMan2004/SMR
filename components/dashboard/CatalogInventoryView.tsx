@@ -1,6 +1,7 @@
 // @/components/dashboard/CatalogInventoryView.tsx
 "use client"
 
+import { CompraLoteModal } from "@/components/dashboard/CompraLoteModal"
 import { renglonDeDocumento } from "@/lib/services/documento-renglones";
 import React, { useState, useEffect, useMemo, useCallback, useRef} from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -17,13 +18,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
 import {
-    Package, Plus, Search, Trash2, Pencil, Tag, Layers,
-    ShoppingCart, History, DollarSign, Ruler, Box, X,
-    ChevronRight, AlertTriangle, CheckCircle2, Banknote,
-    Receipt, Percent, BarChart3, Palette, Grid3X3,
-    ArrowUpCircle, ArrowDownCircle, RefreshCw, Settings2,
-    CircleDollarSign, TrendingUp, FileText, Eye, FileDown,
-    User, Phone, Image as ImageIcon} from 'lucide-react'
+    Package, Plus, Search, Trash2, Pencil, Tag, Layers, ShoppingCart, History, DollarSign, Ruler, Box, X, ChevronRight, AlertTriangle, CheckCircle2, Banknote, Receipt, Percent, BarChart3, Palette, Grid3X3, ArrowUpCircle, ArrowDownCircle, RefreshCw, Settings2, CircleDollarSign, TrendingUp, FileText, Eye, FileDown, User, Phone, Image as ImageIcon, PackagePlus,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { uploadFileToCloudinary } from '@/lib/services/cloudinary-service'
 import { subscribeToClients } from '@/lib/services/clientes-service'
@@ -195,6 +191,8 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     const [editingCat, setEditingCat] = useState<CatalogoCategoria | null>(null)
     const [configProduct, setConfigProduct] = useState<CatalogoProducto | null>(null)
     const [stockProduct, setStockProduct] = useState<CatalogoProducto | null>(null)
+    /** El producto del que se esta registrando una compra por lote. */
+    const [compraProducto, setCompraProducto] = useState<CatalogoProducto | null>(null)
     const [selectedVenta, setSelectedVenta] = useState<VentaCatalogo | null>(null)
 
     // Config cart item (para m², variantes y tipo de cliente)
@@ -874,6 +872,15 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                                         <Button variant="outline" size="sm" onClick={() => openStockModal(prod)}
                                                             className="flex-1 h-9 rounded-xl text-[9px] font-black uppercase border-black/10 dark:border-white/10">
                                                             <Box className="w-3 h-3 mr-1" /> Stock
+                                                        </Button>
+                                                    )}
+                                                    {/* Stock corrige un numero; Compra dice DE DONDE sale:
+                                                        sube el stock, guarda lo que costo cada unidad de
+                                                        este lote y apunta el gasto en Insumos. */}
+                                                    {isAdmin && (
+                                                        <Button variant="outline" size="sm" onClick={() => setCompraProducto(prod)}
+                                                            className="flex-1 h-9 rounded-xl text-[9px] font-black uppercase border-black/10 dark:border-white/10">
+                                                            <PackagePlus className="w-3 h-3 mr-1" /> Compra
                                                         </Button>
                                                     )}
                                                     <Button size="sm" onClick={() => openCartConfig(prod)}
@@ -2023,6 +2030,14 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
             {/* ============================================================
                 MODAL: EDITAR STOCK
             ============================================================ */}
+            <CompraLoteModal
+                open={!!compraProducto}
+                onOpenChange={v => { if (!v) setCompraProducto(null) }}
+                producto={compraProducto}
+                tasa={rates?.usd || 0}
+                usuario={currentUser?.uid || currentUser?.id}
+            />
+
             <Dialog open={isStockModalOpen} onOpenChange={v => { setIsStockModalOpen(v); if (!v) setStockProduct(null) }}>
                 <DialogContent className="sm:max-w-md rounded-[2.5rem] bg-white dark:bg-[#1c1c1e] border-0 shadow-2xl p-8 max-h-[80vh] overflow-y-auto">
                     <DialogHeader className="mb-4">

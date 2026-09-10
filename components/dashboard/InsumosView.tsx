@@ -2,6 +2,7 @@
 "use client"
 
 import React, { useState, useMemo, useEffect } from "react"
+import { LotesRecientes } from "@/components/dashboard/LotesRecientes"
 import {
   Package,
   ShoppingBag,
@@ -264,6 +265,10 @@ export function InsumosView({
           </div>
         </div>
       </div>
+
+      {/* Las compras por lote van antes del cuaderno de gastos: son lo
+          mismo visto por dentro, con cuanto costo cada unidad. */}
+      <LotesRecientes mes={selectedMonth} />
 
       {/* LISTADO FULL-WIDTH + BOTÓN NUEVO */}
       <div className="space-y-4 sm:space-y-6">

@@ -27,6 +27,26 @@ import { loadBudgetsFromFirestore, type DbBudgetEntry } from "@/lib/firebase/fir
 
 export type AreaVista = "IMPRESION" | "CORTE";
 
+/** Las pestanas de pago de Estadisticas. TODOS no filtra. */
+export type FiltroPago = "TODOS" | "PAGADO" | "ABONADO" | "SIN_PAGAR";
+
+/**
+ * En que punto del cobro esta una orden.
+ *
+ * Se deduce del dinero y no de `estadoPago`, que en ordenes viejas no siempre
+ * se actualizo al abonar. Es la misma regla que ya usaba Estadisticas para los
+ * colores; tenerla en un solo sitio evita que dos pestanas de la misma tarjeta
+ * cuenten distinto la misma orden.
+ */
+export const estadoPagoDe = (o: any): Exclude<FiltroPago, "TODOS"> => {
+    const total = Number(o?.totalUSD) || 0;
+    const pagado = Number(o?.montoPagadoUSD) || 0;
+    if (total <= 0) return "PAGADO";
+    if (pagado >= total) return "PAGADO";
+    if (pagado > 0) return "ABONADO";
+    return "SIN_PAGAR";
+};
+
 /**
  * Los presupuestos se leen una sola vez por sesión.
  *
@@ -106,12 +126,32 @@ export function useConsumoMateriales(ventasCatalogo: any[] = [], ordenes: any[] 
 
     const ordenesLista = useMemo(() => ordenes || [], [ordenes]);
 
-    const consumoDe = useCallback((area: AreaVista, inicio: Date, fin: Date): ConsumoDelPeriodo => {
+    const consumoDe = useCallback((
+        area: AreaVista,
+        inicio: Date,
+        fin: Date,
+        /**
+         * Solo lo cobrado, lo abonado o lo que no se ha pagado.
+         *
+         * Las pestanas existian en pantalla pero este calculo no las recibia:
+         * se elegia "Sin pago" y los metros no cambiaban. Una pestana que no
+         * filtra es peor que no tenerla, porque se cree el numero.
+         */
+        filtroPago: FiltroPago = "TODOS"
+    ): ConsumoDelPeriodo => {
         const presupuestos = budgets.filter(b => enRango(b.dateCreated, inicio, fin));
-        const delMostrador = ventas.filter(v => enRango(v?.fecha, inicio, fin));
+        const delMostrador = ventas.filter(v => {
+            if (!enRango(v?.fecha, inicio, fin)) return false;
+            if (filtroPago === "TODOS") return true;
+            // Lo del mostrador se cobra en el acto: completada es pagada, y
+            // no hay mostrador abonado ni pendiente.
+            return filtroPago === "PAGADO" && v?.estado !== "ANULADA";
+        });
         // Las órdenes ya facturadas son la tercera fuente: es donde está el
         // grueso de lo que sale del rollo cada mes.
-        const delTaller = ordenesLista.filter(o => enRango(o?.fecha, inicio, fin));
+        const delTaller = ordenesLista.filter(o =>
+            enRango(o?.fecha, inicio, fin)
+            && (filtroPago === "TODOS" || estadoPagoDe(o) === filtroPago));
 
         // Un presupuesto NO entra en el balance mientras siga siendo un
         // presupuesto: es una oferta que el cliente todavia puede rechazar, y
