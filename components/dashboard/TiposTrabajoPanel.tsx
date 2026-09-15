@@ -23,6 +23,7 @@ import { esAdmin } from '@/lib/roles'
 import {
     subscribeToTiposTrabajo, guardarTiposTrabajo, tiposDe, esTipoDeFabrica, nuevoIdTipo,
     MODOS_COBRO, AREAS_TRABAJO,
+    unidadesDe, guardarUnidades, motivoUnidadInvalida, esUnidadDeFabrica, type UnidadItem,
     type ConfigTiposTrabajo, type TipoTrabajo, type ModoCobro, type AreaTrabajo, type CatalogoDeTipo,
 } from '@/lib/services/tipos-trabajo-service'
 
@@ -39,6 +40,17 @@ export function TiposTrabajoPanel({ onAnadirOpcion }: {
     const [tipos, setTipos] = useState<TipoTrabajo[]>([])
     const [guardando, setGuardando] = useState(false)
     const [tocado, setTocado] = useState(false)
+    const [unidades, setUnidades] = useState<UnidadItem[]>([])
+    const [nuevaUnidad, setNuevaUnidad] = useState('')
+
+    const anadirUnidad = () => {
+        const motivo = motivoUnidadInvalida(nuevaUnidad, unidades)
+        if (motivo) return toast.error(motivo)
+        const nombre = nuevaUnidad.trim()
+        setTocado(true)
+        setUnidades(prev => [...prev, { id: nombre, nombre, activo: true }])
+        setNuevaUnidad('')
+    }
 
     useEffect(() => subscribeToTiposTrabajo(setCfg), [])
 
@@ -46,6 +58,7 @@ export function TiposTrabajoPanel({ onAnadirOpcion }: {
     useEffect(() => {
         if (tocado) return
         setTipos(tiposDe(cfg).map(t => ({ ...t })))
+        setUnidades(unidadesDe(cfg).map(u => ({ ...u })))
     }, [cfg, tocado])
 
     const editar = (id: string, cambio: Partial<TipoTrabajo>) => {
@@ -70,6 +83,7 @@ export function TiposTrabajoPanel({ onAnadirOpcion }: {
         setGuardando(true)
         try {
             await guardarTiposTrabajo(tipos)
+            await guardarUnidades(unidades)
             toast.success('Tipos de trabajo guardados')
             setTocado(false)
         } catch (e: any) {
@@ -236,6 +250,55 @@ export function TiposTrabajoPanel({ onAnadirOpcion }: {
             >
                 <Plus className="w-4 h-4" /> Añadir tipo
             </Button>
+
+            {/* UNIDADES DE VENTA.
+
+                Eran siete escritas en el codigo. Son solo el nombre que acompana
+                a la cantidad: el calculo por m2 y por tiempo no depende de
+                ellas. Las de fabrica se ocultan pero no se borran, porque hay
+                ordenes que las usan. */}
+            <div className="space-y-2 pt-4 border-t border-black/5 dark:border-white/5">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Unidades de venta</p>
+                <p className="text-[10px] font-bold text-slate-400 leading-snug">
+                    Cómo se cuenta lo que se vende por unidad. Es solo el nombre: el cálculo por m² y por tiempo no cambia.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                    {unidades.map(u => {
+                        const fabrica = esUnidadDeFabrica(u.id)
+                        const oculta = u.activo === false
+                        return (
+                            <div key={u.id} className={cn('flex items-center gap-1 rounded-full bg-slate-50 dark:bg-white/5 pl-3 pr-1 h-8', oculta && 'opacity-50')}>
+                                <span className="text-[10px] font-black uppercase">{u.nombre}</span>
+                                <button type="button"
+                                    onClick={() => { setTocado(true); setUnidades(prev => prev.map(x => x.id === u.id ? { ...x, activo: oculta } : x)) }}
+                                    aria-label={oculta ? 'Mostrar' : 'Ocultar'}
+                                    className="p-1 text-slate-400 hover:text-blue-600">
+                                    {oculta ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                                </button>
+                                {!fabrica && (
+                                    <button type="button"
+                                        onClick={() => { setTocado(true); setUnidades(prev => prev.filter(x => x.id !== u.id)) }}
+                                        aria-label="Borrar" className="p-1 text-slate-300 hover:text-red-500">
+                                        <Trash2 className="w-3 h-3" />
+                                    </button>
+                                )}
+                            </div>
+                        )
+                    })}
+                    <div className="flex items-center gap-1">
+                        <Input
+                            value={nuevaUnidad}
+                            onChange={e => setNuevaUnidad(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); anadirUnidad() } }}
+                            placeholder="Caja, Galón…"
+                            className="h-8 w-32 rounded-full bg-white dark:bg-black/20 border border-dashed text-[10px] font-bold"
+                        />
+                        <Button type="button" size="icon" variant="ghost" onClick={anadirUnidad} className="h-8 w-8 rounded-full" aria-label="Añadir unidad">
+                            <Plus className="w-3.5 h-3.5" />
+                        </Button>
+                    </div>
+                </div>
+            </div>
         </Card>
     )
 }

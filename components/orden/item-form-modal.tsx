@@ -1,6 +1,8 @@
 // @/components/orden/item-form-modal.tsx
 "use client"
 
+import { subscribeToEmpleados } from "@/lib/services/gastos-service"
+import type { Empleado } from "@/lib/types/gastos"
 import { PrecioEstimadoBoton } from "@/components/ui/precio-estimado-boton"
 import { MuestraMaterial } from "@/components/taller/MuestraMaterial"
 import * as React from "react"
@@ -35,18 +37,16 @@ import {
 } from "@/lib/services/catalog-service"
 import { SelectorCatalogo } from "@/components/orden/SelectorCatalogo"
 import {
-    subscribeToTiposTrabajo, tiposDe, resolverTipo, tipoServicioDe, unidadInicialDe,
+    subscribeToTiposTrabajo, tiposDe, resolverTipo, tipoServicioDe, unidadInicialDe, unidadesDe,
     type ConfigTiposTrabajo,
 } from "@/lib/services/tipos-trabajo-service"
 import {
     subscribeToMaterialesTaller, materialesDePegado, materialesDeCorte,
-    buscarMaterial, grosoresDe, coloresDe, costoPegado, precioFondoBlancoM2,
+    buscarMaterial, grosoresDe, coloresDe, costoPegado, precioFondoBlancoM2, precioLaserMinutoDe,
     type ConfigMaterialesTaller,
 } from "@/lib/services/materiales-taller"
 
 // --- CONSTANTES ---
-const PRECIO_LASER_POR_MINUTO = 0.80;
-const PERSONAL_TALLER = ["Marcos", "Samuel", "Daniela", "Jose Angel", "Daniel Montero"];
 
 // --- CONSTANTES DE IMPRESIÓN ---
 const MATERIALES_IMPRESION = [
@@ -161,6 +161,38 @@ export function ItemFormModal({
    */
   const [tiposCfg, setTiposCfg] = useState<ConfigTiposTrabajo>({})
   useEffect(() => subscribeToTiposTrabajo(setTiposCfg), [])
+
+  /**
+   * QUIEN LO HACE: LOS EMPLEADOS REGISTRADOS Y ACTIVOS.
+   *
+   * Antes eran cinco nombres escritos en el codigo. Se usa la misma regla que
+   * Horarios para no ofrecer a quien ya no trabaja, y se conservan los
+   * disenadores que ya salian. El nombre que tenga guardado un item viejo se
+   * ofrece aunque ya no este, para que al editarlo no aparezca vacio.
+   */
+  const [empleados, setEmpleados] = useState<Empleado[]>([])
+  useEffect(() => subscribeToEmpleados(setEmpleados), [])
+  const opcionesResponsable = useMemo(() => {
+      const nombres = [
+          ...empleados.filter(e => e.activo !== false)
+              .map(e => [e.nombre, e.apellido].filter(Boolean).join(' ').trim()),
+          ...(designers || []).map((d: any) => String(d?.name || '').trim()),
+      ].filter(Boolean)
+      const unicos = [...new Set(nombres)]
+      const actual = String(state.empleadoAsignado || '').trim()
+      if (actual && actual !== 'N/A' && !unicos.includes(actual)) unicos.push(actual)
+      return unicos
+  }, [empleados, designers, state.empleadoAsignado])
+
+  // Las unidades de venta visibles, mas la del item si ya no esta en la lista.
+  const opcionesUnidad = useMemo(() => {
+      const visibles = unidadesDe(tiposCfg).filter(u => u.activo !== false)
+      const actual = String(state.unidad || '')
+      if (actual && actual !== 'm2' && actual !== 'tiempo' && !visibles.some(u => u.id === actual)) {
+          return [...visibles, { id: actual, nombre: actual === 'ml' ? 'Metro lineal' : actual }]
+      }
+      return visibles
+  }, [tiposCfg, state.unidad])
   const todosLosTipos = useMemo(() => tiposDe(tiposCfg), [tiposCfg])
   const tipoActual = useMemo(
       () => resolverTipo(todosLosTipos, state,
@@ -553,7 +585,7 @@ export function ItemFormModal({
             const m = parseFloat(minutos) || 0;
             const s = parseFloat(segundos) || 0;
             const totalMinutes = (h * 60) + m + (s / 60);
-            costoBaseUnitario = totalMinutes * PRECIO_LASER_POR_MINUTO;
+            costoBaseUnitario = totalMinutes * precioLaserMinutoDe(matTaller);
         } else if (unidad === 'm2' && medidaXCm > 0 && medidaYCm > 0) {
             costoBaseUnitario = (medidaXCm / 100) * (medidaYCm / 100) * precioEfectivo;
 
@@ -590,7 +622,7 @@ export function ItemFormModal({
       horas, minutos, segundos, state.suministrarMaterial, state.costoMaterialExtra,
       modo, state.modoCobroLaser, state.impresionLaminado,
       state.tipoCobroLaminado, state.precioLaminadoLineal, state.precioLaminadoManual,
-      state.impresionPegado, state.proveedorPegado, state.precioPegado
+      state.impresionPegado, state.proveedorPegado, state.precioPegado, matTaller
   ]);
 
   const handleSave = async () => {
@@ -1056,13 +1088,9 @@ export function ItemFormModal({
                                     <Select value={state.unidad} onValueChange={v => setState({...state, unidad: v})}>
                                         <SelectTrigger className="h-10 rounded-xl border-none bg-white dark:bg-slate-800 text-xs font-black"><SelectValue /></SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="und">Pieza / Unidad</SelectItem>
-                                            <SelectItem value="rollo">Rollo</SelectItem>
-                                            <SelectItem value="m">Metro lineal</SelectItem>
-                                            <SelectItem value="lamina">Lámina</SelectItem>
-                                            <SelectItem value="par">Par</SelectItem>
-                                            <SelectItem value="juego">Juego / Set</SelectItem>
-                                            <SelectItem value="hora">Hora</SelectItem>
+                                            {opcionesUnidad.map(u => (
+                                                <SelectItem key={u.id} value={u.id}>{u.nombre}</SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
                                 </div>
@@ -1684,8 +1712,7 @@ export function ItemFormModal({
                             </SelectTrigger>
                             <SelectContent className="rounded-2xl border-none shadow-2xl">
                                 <SelectItem value="N/A">Sin Asignar</SelectItem>
-                                {PERSONAL_TALLER.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                                {designers.map((d: any) => <SelectItem key={d.id} value={d.name}>{d.name}</SelectItem>)}
+                                {opcionesResponsable.map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
                             </SelectContent>
                         </Select>
                     </div>

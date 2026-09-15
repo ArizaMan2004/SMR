@@ -16,7 +16,7 @@
 import { PrecioEstimadoBoton } from "@/components/ui/precio-estimado-boton"
 import { MuestraMaterial } from "@/components/taller/MuestraMaterial"
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
-import { FAMILIAS_COLOR, tonoDeColor, type ColorMaterial, type FamiliaColor } from "@/lib/services/materiales-taller"
+import { FAMILIAS_COLOR, tonoDeColor, PRECIO_LASER_MINUTO_POR_DEFECTO, type ColorMaterial, type FamiliaColor } from "@/lib/services/materiales-taller"
 import React, { useEffect, useState } from 'react'
 
 import { Card } from '@/components/ui/card'
@@ -50,6 +50,7 @@ export function MaterialesTallerPanel() {
     const [cfg, setCfg] = useState<ConfigMaterialesTaller>({})
     const [materiales, setMateriales] = useState<MaterialTaller[]>([])
     const [fondoBlanco, setFondoBlanco] = useState('')
+    const [laserMinuto, setLaserMinuto] = useState('')
     const [guardando, setGuardando] = useState(false)
     const [tocado, setTocado] = useState(false)
 
@@ -61,6 +62,7 @@ export function MaterialesTallerPanel() {
         if (tocado) return
         setMateriales(materialesDe(cfg).map(m => ({ ...m })))
         setFondoBlanco(cfg.fondoBlancoM2 ? String(cfg.fondoBlancoM2) : '')
+        setLaserMinuto(cfg.precioLaserMinuto ? String(cfg.precioLaserMinuto) : '')
     }, [cfg, tocado])
 
     const editar = (id: string, cambio: Partial<MaterialTaller>) => {
@@ -71,7 +73,11 @@ export function MaterialesTallerPanel() {
     const guardar = async () => {
         setGuardando(true)
         try {
-            await guardarMaterialesTaller(materiales, { fondoBlancoM2: num(fondoBlanco) })
+            await guardarMaterialesTaller(materiales, {
+                fondoBlancoM2: num(fondoBlanco),
+                // Vacio vuelve al de siempre en vez de cobrar el laser a cero.
+                precioLaserMinuto: num(laserMinuto) > 0 ? num(laserMinuto) : null,
+            })
             toast.success('Materiales guardados')
             setTocado(false)
         } catch (e: any) {
@@ -143,6 +149,31 @@ export function MaterialesTallerPanel() {
                     <span className="text-[10px] font-black uppercase text-slate-400">/ m²</span>
                     <PrecioEstimadoBoton soloIcono formas={['rollo']}
                         onUsar={v => { setFondoBlanco(String(v)); setTocado(true) }} />
+                </div>
+            </div>
+
+            {/* EL PRECIO DEL LASER.
+
+                Estaba fijo en el codigo del formulario de items. Es lo que se
+                cobra por minuto en los cortes por tiempo; los cortes por pieza
+                llevan su propio precio. */}
+            <div className="rounded-2xl bg-slate-50 dark:bg-white/5 p-4 flex flex-wrap items-center gap-4">
+                <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Precio del láser por minuto</p>
+                    <p className="text-[10px] font-bold text-slate-400 leading-snug mt-0.5">
+                        Lo que se cobra por minuto de máquina en los cortes por tiempo. Vacío: ${PRECIO_LASER_MINUTO_POR_DEFECTO.toFixed(2)}, como hasta ahora.
+                    </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs font-black text-slate-400">$</span>
+                    <Input
+                        value={laserMinuto}
+                        onChange={e => { setLaserMinuto(e.target.value); setTocado(true) }}
+                        placeholder={PRECIO_LASER_MINUTO_POR_DEFECTO.toFixed(2)}
+                        inputMode="decimal"
+                        className="h-10 w-24 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black text-right"
+                    />
+                    <span className="text-[10px] font-black uppercase text-slate-400">/ min</span>
                 </div>
             </div>
 

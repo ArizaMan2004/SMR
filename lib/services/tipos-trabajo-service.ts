@@ -45,8 +45,57 @@ export interface TipoTrabajo {
 
 export interface ConfigTiposTrabajo {
     tipos?: TipoTrabajo[];
+    unidades?: UnidadItem[];
     actualizadoEn?: string;
 }
+
+/**
+ * Una unidad de venta: como se cuenta lo que se vende por unidad.
+ *
+ * Es SOLO un nombre. El calculo mira `m2` y `tiempo`, que no son de esta
+ * lista; lo demas (pieza, rollo, caja...) es la etiqueta que acompana a la
+ * cantidad. Las nuevas se guardan con su propio nombre como identificador,
+ * para que se lean bien en cualquier pantalla que muestre la unidad tal cual.
+ */
+export interface UnidadItem {
+    id: string;
+    nombre: string;
+    activo?: boolean;
+}
+
+/** Las de siempre, con el valor que ya esta escrito en las ordenes. */
+export const UNIDADES_POR_DEFECTO: UnidadItem[] = [
+    { id: "und", nombre: "Pieza / Unidad", activo: true },
+    { id: "rollo", nombre: "Rollo", activo: true },
+    { id: "m", nombre: "Metro lineal", activo: true },
+    { id: "lamina", nombre: "Lámina", activo: true },
+    { id: "par", nombre: "Par", activo: true },
+    { id: "juego", nombre: "Juego / Set", activo: true },
+    { id: "hora", nombre: "Hora", activo: true },
+];
+
+export const esUnidadDeFabrica = (id: string) => UNIDADES_POR_DEFECTO.some(u => u.id === id);
+
+export const unidadesDe = (cfg: ConfigTiposTrabajo): UnidadItem[] =>
+    cfg?.unidades?.length ? cfg.unidades : UNIDADES_POR_DEFECTO;
+
+/** Nombres que el calculo usa por dentro: una unidad con ese nombre lo confundiria. */
+const RESERVADAS = new Set(["m2", "m²", "tiempo", "ml"]);
+
+/** Por que no vale una unidad nueva, o null si vale. */
+export const motivoUnidadInvalida = (nombre: string, existentes: UnidadItem[]): string | null => {
+    const limpio = String(nombre || "").trim();
+    if (!limpio) return "Escribe el nombre de la unidad";
+    if (RESERVADAS.has(limpio.toLowerCase())) return "Ese nombre lo usa el cálculo por dentro: elige otro";
+    const igual = (a: string) => a.trim().toLowerCase() === limpio.toLowerCase();
+    if (existentes.some(u => igual(u.id) || igual(u.nombre))) return "Esa unidad ya existe";
+    return null;
+};
+
+export const guardarUnidades = async (unidades: UnidadItem[]) => {
+    const limpias = unidades.map(u => ({ id: u.id, nombre: u.nombre.trim(), activo: u.activo !== false }));
+    await setDoc(REF(), { unidades: limpias, actualizadoEn: new Date().toISOString() }, { merge: true });
+};
 
 export const MODOS_COBRO: { id: ModoCobro; label: string; ayuda: string }[] = [
     { id: "medida", label: "Por medida", ayuda: "Ancho × alto, material, laminado, pegado y extras" },

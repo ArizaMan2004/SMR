@@ -107,8 +107,22 @@ export interface ConfigMaterialesTaller {
      * aparte, así que tiene su propio precio.
      */
     fondoBlancoM2?: number;
+    /**
+     * Lo que se cobra por cada minuto de laser en los trabajos por tiempo.
+     *
+     * Estaba fijo en el formulario del item. Vacio o cero: el de siempre.
+     */
+    precioLaserMinuto?: number | null;
     actualizadoEn?: string;
 }
+
+/** El precio por minuto que habia escrito en el codigo. */
+export const PRECIO_LASER_MINUTO_POR_DEFECTO = 0.8;
+
+export const precioLaserMinutoDe = (cfg: ConfigMaterialesTaller): number => {
+    const v = Number(cfg?.precioLaserMinuto);
+    return Number.isFinite(v) && v > 0 ? v : PRECIO_LASER_MINUTO_POR_DEFECTO;
+};
 
 const REF = () => doc(db, "configuracion", "materiales_taller");
 
@@ -373,7 +387,7 @@ export const costoPegado = (
 
 export const guardarMaterialesTaller = async (
     materiales: MaterialTaller[],
-    extras?: { fondoBlancoM2?: number }
+    extras?: { fondoBlancoM2?: number; precioLaserMinuto?: number | null }
 ) => {
     await setDoc(
         REF(),
