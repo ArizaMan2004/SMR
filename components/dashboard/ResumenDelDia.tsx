@@ -20,7 +20,7 @@ import { nombreDePila } from '@/lib/services/perfil-apariencia'
 import { cn } from '@/lib/utils'
 import {
     Users, PackageCheck, TrendingUp, AlertTriangle,
-    CircleDot, Clock, ArrowRight, Sparkles,
+    CircleDot, Clock, ArrowRight, Sparkles, ChevronDown,
 } from 'lucide-react'
 
 import { asistenciaDe, resumenBloques, type HorarioEstandar } from '@/lib/types/horarios'
@@ -53,6 +53,9 @@ const saludo = (): string => {
     return 'Buenas noches'
 }
 
+/** Donde se recuerda si la lista del equipo va plegada. */
+const CLAVE_EQUIPO = 'panel.equipoAbierto'
+
 export function ResumenDelDia({ ordenes, horarios, onNavigate, onVerOrden }: Props) {
     const { userData } = useAuth()
     const miNombre = nombreDePila(userData?.nombre)
@@ -60,6 +63,32 @@ export function ResumenDelDia({ ordenes, horarios, onNavigate, onVerOrden }: Pro
 
     const equipo = useMemo(() => asistenciaDe(horarios), [horarios])
     const enTaller = equipo.filter(e => e.presenteAhora).length
+
+    /**
+     * La lista del equipo, desplegada o no.
+     *
+     * Con ocho personas y su horario, en el telefono la tarjeta ocupaba media
+     * pantalla antes de llegar a lo que se abre el panel para ver. Plegada
+     * queda en una linea —las iniciales y quien esta ahora— y se abre cuando
+     * hace falta saber el horario de alguien.
+     *
+     * Arranca plegada en el movil y abierta en pantallas grandes, donde sobra
+     * sitio. Lo que uno elija se recuerda en ese aparato.
+     */
+    const [equipoAbierto, setEquipoAbierto] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return true
+        try {
+            const guardado = window.localStorage.getItem(CLAVE_EQUIPO)
+            if (guardado === '1' || guardado === '0') return guardado === '1'
+        } catch { /* sin almacenamiento: se decide por el ancho */ }
+        return window.matchMedia('(min-width: 640px)').matches
+    })
+
+    const alternarEquipo = () => setEquipoAbierto(v => {
+        const nuevo = !v
+        try { window.localStorage.setItem(CLAVE_EQUIPO, nuevo ? '1' : '0') } catch { /* no pasa nada */ }
+        return nuevo
+    })
 
     /** Órdenes cuya fecha de entrega es hoy y que aún no están terminadas. */
     const entregasHoy = useMemo(() => {
@@ -139,20 +168,26 @@ export function ResumenDelDia({ ordenes, horarios, onNavigate, onVerOrden }: Pro
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
 
-                {/* --- EQUIPO DE HOY --- */}
-                <motion.button
+                {/* --- EQUIPO DE HOY ---
+                    Antes la tarjeta entera era un boton hacia Horarios, y un
+                    boton no puede llevar otro dentro. Ahora la cabecera pliega
+                    y despliega, y la flecha es la que lleva a Horarios. */}
+                <motion.div
                     variants={tarjeta}
-                    whileHover={{ y: -3 }}
-                    whileTap={{ scale: 0.99 }}
-                    onClick={() => onNavigate?.('horarios')}
-                    className="lg:col-span-2 text-left bg-white dark:bg-[#1c1c1e] rounded-[2rem] p-5 sm:p-6 shadow-sm hover:shadow-xl border border-black/5 dark:border-white/5 transition-shadow group"
+                    className="lg:col-span-2 bg-white dark:bg-[#1c1c1e] rounded-[2rem] p-5 sm:p-6 shadow-sm border border-black/5 dark:border-white/5"
                 >
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2.5">
-                            <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-500/10 text-teal-600 flex items-center justify-center">
+                    <div className="flex items-center justify-between gap-2">
+                        <button
+                            type="button"
+                            onClick={alternarEquipo}
+                            aria-expanded={equipoAbierto}
+                            disabled={equipo.length === 0}
+                            className="flex items-center gap-2.5 min-w-0 flex-1 text-left disabled:cursor-default"
+                        >
+                            <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-500/10 text-teal-600 flex items-center justify-center shrink-0">
                                 <Users className="w-4 h-4" />
                             </div>
-                            <div>
+                            <div className="min-w-0">
                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 leading-none">
                                     Equipo de hoy
                                 </p>
@@ -162,17 +197,31 @@ export function ResumenDelDia({ ordenes, horarios, onNavigate, onVerOrden }: Pro
                                         : `${equipo.length} en turno${enTaller > 0 ? ` · ${enTaller} ahora` : ''}`}
                                 </p>
                             </div>
-                        </div>
-                        <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-teal-600 group-hover:translate-x-0.5 transition-all shrink-0" />
+                            {equipo.length > 0 && (
+                                <ChevronDown className={cn(
+                                    'w-4 h-4 text-slate-400 shrink-0 transition-transform',
+                                    equipoAbierto && 'rotate-180'
+                                )} />
+                            )}
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => onNavigate?.('horarios')}
+                            aria-label="Ver horarios del personal"
+                            className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-300 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-500/10 transition-colors shrink-0"
+                        >
+                            <ArrowRight className="w-4 h-4" />
+                        </button>
                     </div>
 
                     {equipo.length === 0 ? (
-                        <p className="text-[11px] font-bold text-slate-400">
+                        <p className="text-[11px] font-bold text-slate-400 mt-4">
                             Define la semana tipo del equipo para verlo aquí cada día.
                         </p>
-                    ) : (
-                        <div className="flex flex-wrap gap-2">
-                            {equipo.slice(0, 6).map(a => (
+                    ) : equipoAbierto ? (
+                        <div className="flex flex-wrap gap-2 mt-4">
+                            {equipo.map(a => (
                                 <div
                                     key={a.empleadoId}
                                     className={cn(
@@ -199,14 +248,34 @@ export function ResumenDelDia({ ordenes, horarios, onNavigate, onVerOrden }: Pro
                                     </div>
                                 </div>
                             ))}
-                            {equipo.length > 6 && (
-                                <div className="flex items-center px-3 rounded-2xl bg-slate-50 dark:bg-white/5">
-                                    <span className="text-[10px] font-black text-slate-400">+{equipo.length - 6}</span>
-                                </div>
-                            )}
                         </div>
+                    ) : (
+                        /* Plegada: una linea con las iniciales. Verde quien esta
+                           ahora en el taller, que es lo que se mira de pasada. */
+                        <button
+                            type="button"
+                            onClick={alternarEquipo}
+                            className="flex items-center mt-3 pl-1"
+                            aria-label="Ver el equipo de hoy"
+                        >
+                            {equipo.slice(0, 8).map(a => (
+                                <span
+                                    key={a.empleadoId}
+                                    title={a.empleadoNombre}
+                                    className={cn(
+                                        '-ml-1.5 first:ml-0 w-7 h-7 rounded-lg flex items-center justify-center font-black text-[10px] uppercase ring-2 ring-white dark:ring-[#1c1c1e]',
+                                        a.presenteAhora ? 'bg-emerald-500 text-white' : 'bg-slate-100 dark:bg-white/10 text-slate-500'
+                                    )}
+                                >
+                                    {a.empleadoNombre.charAt(0)}
+                                </span>
+                            ))}
+                            {equipo.length > 8 && (
+                                <span className="ml-2 text-[10px] font-black text-slate-400">+{equipo.length - 8}</span>
+                            )}
+                        </button>
                     )}
-                </motion.button>
+                </motion.div>
 
                 {/* --- DINERO DE HOY --- */}
                 <motion.div
