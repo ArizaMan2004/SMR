@@ -241,6 +241,14 @@ export interface CatalogoProducto {
     anchoBaseCm?: number
     /** Foto para reconocerlo de un vistazo al facturar. */
     fotoUrl?: string
+    /**
+     * En qué tipos de trabajo se ofrece ("Aparece en").
+     *
+     * Vacío: se ofrece como siempre, en los tipos que correspondan por su clase
+     * y su área. Con valor, sale en esos tipos y no en los demás: los dibujos
+     * de un tipo "Dibujos" no aparecen al vender un producto.
+     */
+    tiposTrabajo?: string[]
     /** Lo que costó traerlo, para calcular el precio sugerido. */
     costo?: CostoCompra
     // Solo aplica para tipoVenta === 'unidad':

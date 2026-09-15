@@ -243,10 +243,22 @@ export function ItemFormModal({
    * inventarse una.
    */
   const productosOfrecidos = useMemo(() => {
-      if (modo === 'laser') return materialesDelArea(catalogProductos, catalogCategorias, 'CORTE')
-      if (modo === 'medida') return materialesDelArea(catalogProductos, catalogCategorias, tipoActual.area === 'CORTE' ? 'CORTE' : 'IMPRESION')
-      return catalogProductos
-  }, [catalogProductos, catalogCategorias, modo, tipoActual.area])
+      // "APARECE EN".
+      //
+      // Lo que el catalogo asigno a este tipo sale siempre. Lo asignado a OTRO
+      // tipo no sale aqui. Lo que no dice nada sigue saliendo como antes, por
+      // su clase y su area, para que nada desaparezca por no haberlo marcado.
+      // Una asignacion a un tipo que ya no existe cuenta como si no la tuviera.
+      const existentes = new Set(todosLosTipos.map(t => t.id))
+      const etiquetasDe = (p: any): string[] =>
+          (p?.tiposTrabajo || []).filter((id: string) => existentes.has(id))
+      const suyos = catalogProductos.filter(p => etiquetasDe(p).includes(tipoActual.id))
+      const libres = catalogProductos.filter(p => etiquetasDe(p).length === 0)
+
+      if (modo === 'laser') return [...suyos, ...materialesDelArea(libres, catalogCategorias, 'CORTE')]
+      if (modo === 'medida') return [...suyos, ...materialesDelArea(libres, catalogCategorias, tipoActual.area === 'CORTE' ? 'CORTE' : 'IMPRESION')]
+      return [...suyos, ...libres]
+  }, [catalogProductos, catalogCategorias, modo, tipoActual.id, tipoActual.area, todosLosTipos])
 
   // El desplegable compara textos tal cual, asi que "Acrilico" y "Acrilico"
   // con tilde son dos cosas distintas y el campo sale vacio aunque el material

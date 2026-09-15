@@ -28,7 +28,10 @@ import {
 
 const selector = 'h-10 rounded-xl bg-slate-50 dark:bg-white/5 border-none text-[11px] font-black px-2 outline-none cursor-pointer'
 
-export function TiposTrabajoPanel() {
+export function TiposTrabajoPanel({ onAnadirOpcion }: {
+    /** Abre la ficha nueva del catalogo ya asignada a ese tipo. */
+    onAnadirOpcion?: (tipo: TipoTrabajo) => void
+} = {}) {
     const { userData } = useAuth()
     const puedeEditar = esAdmin(userData?.rol)
 
@@ -192,6 +195,25 @@ export function TiposTrabajoPanel() {
                                         <option value="servicio">Ofrece servicios</option>
                                         <option value="ambos">Productos y servicios</option>
                                     </select>
+                                )}
+                                {/* Las opciones de un tipo son fichas del Catalogo: asi
+                                    el precio vive en un solo sitio y lo vendido sigue
+                                    contando en stock y estadisticas. Los de laser sacan
+                                    sus materiales de Materiales de taller, y los de
+                                    precio libre no tienen opciones. */}
+                                {onAnadirOpcion && (t.modo === 'catalogo' || t.modo === 'medida') && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            // Un tipo sin guardar puede descartarse, y la
+                                            // ficha quedaria asignada a algo que no existe.
+                                            if (tocado) return toast.error('Guarda los cambios antes de añadir opciones')
+                                            onAnadirOpcion(t)
+                                        }}
+                                        className="h-10 px-3 rounded-xl border border-dashed border-blue-300 text-blue-600 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 hover:bg-blue-50 dark:hover:bg-blue-500/10"
+                                    >
+                                        <Plus className="w-3.5 h-3.5" /> Añadir opción
+                                    </button>
                                 )}
                                 {fabrica && (
                                     <span className="text-[9px] font-black uppercase tracking-widest text-slate-300">De fábrica</span>

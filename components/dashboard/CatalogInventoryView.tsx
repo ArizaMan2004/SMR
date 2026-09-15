@@ -1,6 +1,7 @@
 // @/components/dashboard/CatalogInventoryView.tsx
 "use client"
 
+import { subscribeToTiposTrabajo, tiposDe, type ConfigTiposTrabajo, type TipoTrabajo } from "@/lib/services/tipos-trabajo-service"
 import { PrecioEstimadoBoton } from "@/components/ui/precio-estimado-boton"
 import { TiposTrabajoPanel } from "@/components/dashboard/TiposTrabajoPanel"
 import { CompraLoteModal } from "@/components/dashboard/CompraLoteModal"
@@ -64,7 +65,7 @@ import {
 } from '@/lib/services/catalog-service'
 import { puedeGestionarInventario } from '@/lib/roles'
 import { MaterialesTallerPanel } from '@/components/dashboard/MaterialesTallerPanel'
-import { Dialog as DlgMat, DialogContent as DlgMatContent } from '@/components/ui/dialog'
+import { Dialog as DlgMat, DialogContent as DlgMatContent, DialogTitle as DlgMatTitle } from '@/components/ui/dialog'
 
 // ============================================================
 // TIPOS LOCALES
@@ -184,6 +185,10 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     const [isReceiptOpen, setIsReceiptOpen] = useState(false)
     const [isMaterialesOpen, setIsMaterialesOpen] = useState(false)
     const [isTiposOpen, setIsTiposOpen] = useState(false)
+    /** Los tipos de trabajo, para el "Aparece en" de cada ficha. */
+    const [tiposCfg, setTiposCfg] = useState<ConfigTiposTrabajo>({})
+    useEffect(() => subscribeToTiposTrabajo(setTiposCfg), [])
+    const tiposDeTrabajo = useMemo(() => tiposDe(tiposCfg).filter(t => t.activo !== false), [tiposCfg])
 
     /** La venta que se esta preparando para entregar. */
     const [pdfEnEdicion, setPdfEnEdicion] = useState<DatosDocumento | null>(null)
@@ -316,6 +321,25 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     const openNewProduct = () => {
         setEditingProd(null)
         setProdForm({ ...PROD_DEFAULT, categoriaId: categorias[0]?.id || '' })
+        setIsProdModalOpen(true)
+    }
+
+    /**
+     * La ficha nueva, ya asignada a un tipo de trabajo.
+     *
+     * Aparte de openNewProduct porque aquel se usa directamente como onClick y
+     * recibiria el evento del clic en lugar de un tipo.
+     */
+    const openNewProductParaTipo = (tipo: TipoTrabajo) => {
+        setEditingProd(null)
+        setProdForm({
+            ...PROD_DEFAULT,
+            categoriaId: categorias[0]?.id || '',
+            tiposTrabajo: [tipo.id],
+            ...(tipo.modo === 'medida' ? { tipoEntrada: 'material' as const } : {}),
+            ...(tipo.modo === 'catalogo' && tipo.catalogo === 'servicio' ? { tipoEntrada: 'servicio' as const } : {}),
+            ...(tipo.modo === 'catalogo' && tipo.catalogo === 'producto' ? { tipoEntrada: 'producto' as const } : {}),
+        })
         setIsProdModalOpen(true)
     }
 
@@ -1497,6 +1521,50 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                             )}
                         </div>
 
+                        {/* APARECE EN.
+
+                            En que tipos de trabajo se ofrece esta ficha al facturar.
+                            Sin marcar nada sale como siempre, por su clase y su area:
+                            nada desaparece por no haberlo marcado. Marcando, sale
+                            solo en esos tipos, que es lo que separa por ejemplo
+                            unos dibujos simples de un full art en un tipo propio. */}
+                        {tiposDeTrabajo.length > 0 && (
+                            <div className="space-y-2">
+                                <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Aparece en</Label>
+                                <div className="flex flex-wrap gap-2">
+                                    {tiposDeTrabajo.map(t => {
+                                        const marcado = (prodForm.tiposTrabajo || []).includes(t.id)
+                                        return (
+                                            <button
+                                                key={t.id}
+                                                type="button"
+                                                onClick={() => setProdForm(p => {
+                                                    const actuales = p.tiposTrabajo || []
+                                                    return {
+                                                        ...p,
+                                                        tiposTrabajo: marcado ? actuales.filter(x => x !== t.id) : [...actuales, t.id],
+                                                    }
+                                                })}
+                                                className={cn(
+                                                    'px-3 py-2 rounded-xl border text-[10px] font-black uppercase transition-all',
+                                                    marcado
+                                                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-600'
+                                                        : 'border-black/10 dark:border-white/10 text-slate-400'
+                                                )}
+                                            >
+                                                {t.emoji} {t.nombre}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                                <p className="text-[9px] font-bold text-slate-400 ml-2">
+                                    {(prodForm.tiposTrabajo || []).length === 0
+                                        ? 'Sin marcar: sale como siempre, en los tipos que le corresponden.'
+                                        : 'Solo sale en los tipos marcados.'}
+                                </p>
+                            </div>
+                        )}
+
                         {/* Qué es esto: decide en qué pestaña sale al facturar. */}
                         <div className="space-y-2">
                             <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Tipo</Label>
@@ -2131,12 +2199,15 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
 
             <DlgMat open={isTiposOpen} onOpenChange={setIsTiposOpen}>
                 <DlgMatContent className="max-w-3xl p-0 border-none bg-transparent shadow-none max-h-[90vh] overflow-y-auto custom-scrollbar">
-                    <TiposTrabajoPanel />
+                    {/* El panel ya lleva su titulo a la vista; este es para el lector de pantalla. */}
+                    <DlgMatTitle className="sr-only">Tipos de trabajo</DlgMatTitle>
+                    <TiposTrabajoPanel onAnadirOpcion={t => { setIsTiposOpen(false); openNewProductParaTipo(t) }} />
                 </DlgMatContent>
             </DlgMat>
 
             <DlgMat open={isMaterialesOpen} onOpenChange={setIsMaterialesOpen}>
                 <DlgMatContent className="max-w-3xl p-0 border-none bg-transparent shadow-none max-h-[90vh] overflow-y-auto custom-scrollbar">
+                    <DlgMatTitle className="sr-only">Materiales del taller</DlgMatTitle>
                     <MaterialesTallerPanel />
                 </DlgMatContent>
             </DlgMat>
