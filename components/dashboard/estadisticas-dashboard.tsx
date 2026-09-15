@@ -290,12 +290,30 @@ export function EstadisticasDashboard({
     setIsGeneratingPdf(true);
     try {
       const element = dashboardRef.current;
-      const canvas = await toPng(element, { cacheBust: true, pixelRatio: 2, backgroundColor: '#ffffff' });
+      const ancho = element.scrollWidth;
+      const alto = element.scrollHeight;
+      // Mismo limite que el editor de documentos: el iPhone no dibuja lienzos
+      // de mas de unos 16 millones de pixeles, y el reporte es largo.
+      const pixelRatio = Math.max(1, Math.min(2, Math.sqrt(16_000_000 / Math.max(1, ancho * alto))));
+      const canvas = await toPng(element, { cacheBust: true, pixelRatio, backgroundColor: '#ffffff', width: ancho, height: alto });
       const pdf = new jsPDF('p', 'mm', 'a4');
       const imgProps = pdf.getImageProperties(canvas);
       const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
       const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-      pdf.addImage(canvas, 'PNG', 0, 0, pdfWidth, pdfHeight);
+
+      // Antes iba entero en UNA hoja A4: lo que no cabia se perdia, y un
+      // reporte mensual casi nunca cabe. Se reparte corriendo la misma imagen
+      // hacia arriba en cada pagina, como el editor de documentos.
+      let y = 0;
+      pdf.addImage(canvas, 'PNG', 0, y, pdfWidth, pdfHeight);
+      let restante = pdfHeight - pageHeight;
+      while (restante > 0) {
+        y -= pageHeight;
+        pdf.addPage();
+        pdf.addImage(canvas, 'PNG', 0, y, pdfWidth, pdfHeight);
+        restante -= pageHeight;
+      }
       pdf.save(`Reporte_${viewMode}_${fechaReferencia.toLocaleDateString('es-VE').replace(/\//g, '-')}.pdf`);
     } catch (error) {
       console.error("Error PDF:", error);

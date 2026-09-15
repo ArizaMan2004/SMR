@@ -96,6 +96,45 @@ export function EditorPDFModal({
 
     const hojaRef = useRef<HTMLDivElement>(null)
 
+    /**
+     * EN EL MOVIL LA HOJA SE ENCOGE PARA VERSE, NO PARA FOTOGRAFIARSE.
+     *
+     * La hoja mide 216 mm (unos 816 px) y en un telefono la pantalla da unos
+     * 343. Antes el contenedor tenia el ancho de la pantalla y `overflow
+     * hidden`, y era ESE contenedor el que se fotografiaba: en el PDF salia el
+     * 42 % izquierdo del documento, estirado a lo ancho del papel.
+     *
+     * Ahora la hoja conserva siempre su tamano de papel y solo se reduce con
+     * `transform` para la vista previa. `transform` no cambia `offsetWidth` ni
+     * los estilos que copia la captura, asi que la foto sale a tamano real. Y
+     * como tampoco cambia el hueco que ocupa, el marco toma a mano el alto ya
+     * reducido; si no, quedaria un espacio en blanco del tamano de la hoja.
+     */
+    const marcoRef = useRef<HTMLDivElement>(null)
+    const [escala, setEscala] = useState(1)
+    const [altoHoja, setAltoHoja] = useState(0)
+
+    useEffect(() => {
+        if (!open) return
+        const marco = marcoRef.current
+        const hoja = hojaRef.current
+        if (!marco || !hoja) return
+
+        const medir = () => {
+            const ancho = hoja.offsetWidth
+            if (!ancho) return
+            setEscala(Math.min(1, marco.clientWidth / ancho))
+            setAltoHoja(hoja.offsetHeight)
+        }
+        medir()
+        // El marco cambia de ancho al girar el telefono; la hoja cambia de alto
+        // al encender o apagar bloques del documento.
+        const obs = new ResizeObserver(medir)
+        obs.observe(marco)
+        obs.observe(hoja)
+        return () => obs.disconnect()
+    }, [open])
+
     const cuentas: CuentaBilletera[] = useMemo(
         () => BILLETERAS.flatMap(b => cuentasActivas(b, billeteras))
             .filter(c => c.numeroCuenta || c.telefono || c.correo),
@@ -219,7 +258,23 @@ export function EditorPDFModal({
                 import('jspdf'),
             ])
 
-            const imagen = await toPng(hoja, { cacheBust: true, pixelRatio: 2, backgroundColor: '#ffffff' })
+            // La hoja a su tamano de papel, no al de la pantalla: el ancho y el
+            // alto van explicitos y el clon se fotografia sin la reduccion de
+            // la vista previa.
+            const ancho = hoja.offsetWidth
+            const alto = hoja.offsetHeight
+            // El iPhone no dibuja lienzos de mas de unos 16 millones de
+            // pixeles. Un presupuesto largo a doble resolucion se pasa, y el
+            // PDF sale en blanco o no sale. Se baja la resolucion lo justo.
+            const pixelRatio = Math.max(1, Math.min(2, Math.sqrt(16_000_000 / Math.max(1, ancho * alto))))
+            const imagen = await toPng(hoja, {
+                cacheBust: true,
+                backgroundColor: '#ffffff',
+                width: ancho,
+                height: alto,
+                pixelRatio,
+                style: { transform: 'none' },
+            })
             const nombre = `${archivo()}.pdf`
 
             if (formato === 'continuo') {
@@ -386,8 +441,21 @@ export function EditorPDFModal({
 
                 {/* --------------------------------------------------- la hoja */}
                 <style>{estilosDocumento(formato)}</style>
-                <div ref={hojaRef} className="rounded-2xl bg-white shadow-2xl overflow-hidden">
-                    <DocumentoHTML datos={datos} op={opciones} />
+                <div
+                    ref={marcoRef}
+                    className="rounded-2xl bg-white shadow-2xl overflow-hidden"
+                    style={{ height: escala < 1 && altoHoja ? altoHoja * escala : undefined }}
+                >
+                    <div
+                        ref={hojaRef}
+                        style={{
+                            width: 'max-content',
+                            transform: escala < 1 ? `scale(${escala})` : undefined,
+                            transformOrigin: 'top left',
+                        }}
+                    >
+                        <DocumentoHTML datos={datos} op={opciones} />
+                    </div>
                 </div>
             </div>
         </div>,
