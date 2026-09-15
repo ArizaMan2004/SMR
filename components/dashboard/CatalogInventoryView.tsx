@@ -4,6 +4,11 @@
 import { subscribeToTiposTrabajo, tiposDe, type ConfigTiposTrabajo, type TipoTrabajo } from "@/lib/services/tipos-trabajo-service"
 import { extrasDe, esExtraDeFabrica, nombreExtra, EXTRAS_DE_FABRICA } from "@/lib/utils/extras-impresion"
 import { PrecioEstimadoBoton } from "@/components/ui/precio-estimado-boton"
+import { unidadesDeRollo } from "@/lib/utils/precio-estimado"
+import { MateriaPrimaPanel } from "@/components/dashboard/MateriaPrimaPanel"
+import {
+    subscribeToMateriaPrima, guardarMateriaPrima, type MateriaPrima,
+} from "@/lib/services/materia-prima-service"
 import { TiposTrabajoPanel } from "@/components/dashboard/TiposTrabajoPanel"
 import { CompraLoteModal } from "@/components/dashboard/CompraLoteModal"
 import { renglonDeDocumento } from "@/lib/services/documento-renglones";
@@ -22,7 +27,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
 import {
-    Package, Plus, Search, Trash2, Pencil, Tag, Layers, ShoppingCart, History, DollarSign, Ruler, Box, X, ChevronRight, AlertTriangle, CheckCircle2, Banknote, Receipt, Percent, BarChart3, Palette, Grid3X3, ArrowUpCircle, ArrowDownCircle, RefreshCw, Settings2, CircleDollarSign, TrendingUp, FileText, Eye, FileDown, User, Phone, Image as ImageIcon, PackagePlus, ListChecks,
+    Package, Plus, Search, Trash2, Pencil, Tag, Layers, ShoppingCart, History, DollarSign, Ruler, Box, Boxes, X, ChevronRight, AlertTriangle, CheckCircle2, Banknote, Receipt, Percent, BarChart3, Palette, Grid3X3, ArrowUpCircle, ArrowDownCircle, RefreshCw, Settings2, CircleDollarSign, TrendingUp, FileText, Eye, FileDown, User, Phone, Image as ImageIcon, PackagePlus, ListChecks,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { uploadFileToCloudinary } from '@/lib/services/cloudinary-service'
@@ -48,6 +53,7 @@ import {
     unidadDe,
     abrevUnidad,
     tipoEntradaDe,
+    llevaStockDe,
     costoUnitario,
     precioRecomendado,
     categoriasRaiz,
@@ -58,6 +64,7 @@ import {
     type AreaTaller,
     type CatalogoCategoria,
     type CatalogoProducto,
+    type CostoCompra,
     type CatalogoVariante,
     type CartItem,
     type VentaCatalogo,
@@ -159,6 +166,8 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     // Datos
     const [categorias, setCategorias] = useState<CatalogoCategoria[]>([])
     const [productos, setProductos] = useState<CatalogoProducto[]>([])
+    /** El depósito: lo que se compra para trabajar y no se vende. */
+    const [materiaPrima, setMateriaPrima] = useState<MateriaPrima[]>([])
     const [ventas, setVentas] = useState<VentaCatalogo[]>([])
     const [clientes, setClientes] = useState<any[]>([])
 
@@ -238,6 +247,43 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     // Lo que sale de un rollo o una lámina no se cuenta por piezas: su stock se
     // lleva por rollos enteros, a mano.
     const seMideEnRollo = esPorM2 || esPorMetroLineal
+
+    /**
+     * Cambia un dato del costo de compra y deja la cuenta al día.
+     *
+     * Con rollos, "cuántas unidades trae" no se teclea: son el ancho por los
+     * metros, y se recalcula cada vez que se toca uno de los dos. Si se
+     * guardara el número viejo, el costo por m² y el precio sugerido saldrían
+     * de unas medidas que ya no son las que están escritas.
+     */
+    const setCosto = (cambio: Partial<CostoCompra>) => setProdForm(p => {
+        const costo: CostoCompra = { montoLoteUSD: 0, unidadesLote: 0, ...(p.costo || {}), ...cambio }
+        const u = unidadDe(p)
+        if (u === 'metro_cuadrado' || u === 'metro_lineal') {
+            costo.unidadesLote = unidadesDeRollo(costo.anchoCm, costo.metrosRollo, u === 'metro_lineal')
+        }
+        return { ...p, costo }
+    })
+
+    /**
+     * Lo que deja el precio que ya está escrito en la ficha.
+     *
+     * No es "a cómo deberías venderlo" —eso es el sugerido— sino la pregunta
+     * que se hace de verdad al apuntar un costo: lo que vengo cobrando, ¿sigue
+     * dejando algo?
+     */
+    const rentabilidadFicha = useMemo(() => {
+        const costo = costoUnitario(prodForm.costo)
+        const precio = Number(prodForm.precioBase) || 0
+        if (costo <= 0 || precio <= 0) return null
+        return {
+            costo,
+            precio,
+            ganancia: Math.round((precio - costo) * 100) / 100,
+            margenPct: ((precio / costo) - 1) * 100,
+        }
+    }, [prodForm.costo, prodForm.precioBase])
+
     const [catForm, setCatForm] = useState<CatalogoCategoria>({ ...CAT_DEFAULT })
     const [prodVarianteInput, setProdVarianteInput] = useState({ nombre: '', stock: 0, stockMinimo: 0, precioGeneral: 0, precioAliado: 0 })
     const [prodAcabadoInput, setProdAcabadoInput] = useState('')
@@ -252,8 +298,47 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
         const u2 = subscribeToCatalogoProducts(setProductos)
         const u3 = subscribeToVentasCatalogo(setVentas)
         const u4 = subscribeToClients(setClientes)
-        return () => { u1(); u2(); u3(); u4() }
+        const u5 = subscribeToMateriaPrima(setMateriaPrima)
+        return () => { u1(); u2(); u3(); u4(); u5() }
     }, [])
+
+    /**
+     * Rollos que todavía se cuentan dentro de fichas de venta.
+     *
+     * El conteo vivía ahí de antes; ahora vive en Materia Prima. Mientras
+     * queden números sueltos se ofrece traerlos, y en cuanto se traen esto
+     * queda vacío y el aviso desaparece solo.
+     */
+    const rollosSueltos = useMemo(() =>
+        productos
+            .filter(p => (p.rollosEnStock ?? 0) > 0)
+            .map(p => ({ nombre: p.nombre, rollos: p.rollosEnStock!, anchoCm: p.anchoBaseCm })),
+        [productos]
+    )
+
+    /**
+     * La mudanza, en un solo botón.
+     *
+     * Cada rollo suelto se convierte en una entrada del depósito y la ficha
+     * deja de contarlo. Si algo falla a mitad, lo ya traído se queda traído y
+     * lo demás sigue en su ficha: se vuelve a pulsar y termina. Peor sería
+     * borrar el número de la ficha sin haberlo guardado en ninguna parte.
+     */
+    const traerRollosAlDeposito = useCallback(async () => {
+        for (const p of productos.filter(x => (x.rollosEnStock ?? 0) > 0)) {
+            await guardarMateriaPrima({
+                nombre: `Rollo de ${p.nombre}`,
+                presentacion: 'rollo',
+                stock: p.rollosEnStock!,
+                stockMinimo: 0,
+                ...(p.anchoBaseCm ? { anchoCm: p.anchoBaseCm } : {}),
+                ...(p.costo?.metrosRollo ? { metrosRollo: p.costo.metrosRollo } : {}),
+                nota: 'Traído del Catálogo al separar el depósito de la venta.',
+                activo: true,
+            })
+            await saveCatalogoProduct({ ...p, rollosEnStock: 0 }, p.id)
+        }
+    }, [productos])
 
     // ============================================================
     // DERIVADOS
@@ -303,6 +388,9 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     const kpis = useMemo(() => {
         const totalProductos = productos.filter(p => p.activo).length
         const stockBajo = productos.filter(p => {
+            // Lo que no se cuenta nunca está bajo: un diseño gráfico en cero no
+            // es una alarma, y si cuenta como tal el aviso deja de mirarse.
+            if (!llevaStockDe(p)) return false
             if (p.tipoVenta === 'metro_cuadrado') return false  // m² no tiene stock de unidades
             if (p.tieneVariantes) return p.variantes.some(v => v.stock <= v.stockMinimo)
             return p.stockSimple <= p.stockMinimo
@@ -785,6 +873,8 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                     {[
                         { value: 'catalogo',   label: 'Catálogo',     icon: <Grid3X3 className="w-3.5 h-3.5" /> },
                         { value: 'inventario', label: 'Inventario',   icon: <Box className="w-3.5 h-3.5" /> },
+                        // Lo que se compra para poder trabajar y no se vende.
+                        { value: 'materia',    label: 'Materia Prima', icon: <Boxes className="w-3.5 h-3.5" /> },
                         { value: 'historial',  label: 'Historial',    icon: <History className="w-3.5 h-3.5" /> },
                     ].map(t => (
                         <TabsTrigger key={t.value} value={t.value}
@@ -840,7 +930,15 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                     const stockTotal = prod.tieneVariantes
                                         ? prod.variantes.reduce((acc, v) => acc + v.stock, 0)
                                         : prod.stockSimple
-                                    const stockBajo = !esM2 && (prod.tieneVariantes
+                                    // Lo que no se cuenta no tiene existencias que enseñar
+                                    // ni que corregir: ni el número, ni el aviso, ni el
+                                    // botón de Stock.
+                                    const seCuenta = llevaStockDe(prod)
+                                    // Los de rollo sí compran, aunque no se cuenten: el
+                                    // rollo es la materia prima de lo que se vende aquí,
+                                    // y de esa compra salen el costo del metro y el gasto.
+                                    const deRollo = ['metro_cuadrado', 'metro_lineal'].includes(unidadDe(prod))
+                                    const stockBajo = seCuenta && !esM2 && (prod.tieneVariantes
                                         ? prod.variantes.some(v => v.stock <= v.stockMinimo)
                                         : prod.stockSimple <= prod.stockMinimo)
                                     return (
@@ -879,7 +977,7 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                                             <p className="text-[9px] font-black text-violet-500 mt-0.5">€{prod.precioPublicista} publicista</p>
                                                         ) : null}
                                                     </div>
-                                                    {esM2 ? (
+                                                    {!seCuenta ? null : esM2 ? (
                                                         <div className="text-right">
                                                             <p className="text-[8px] font-black uppercase text-slate-400">Rollos</p>
                                                             <p className="text-lg font-black text-blue-500">
@@ -902,7 +1000,8 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                                     <div className="flex flex-wrap gap-1 mt-1">
                                                         {prod.variantes.slice(0, 4).map(v => (
                                                             <span key={v.id} className="text-[7px] bg-slate-100 dark:bg-white/5 px-2 py-0.5 rounded-md font-bold text-slate-500 uppercase">
-                                                                {v.nombre} ({v.stock})
+                                                                {/* El nombre sirve siempre; el número, solo si se cuenta. */}
+                                                                {v.nombre}{seCuenta ? ` (${v.stock})` : ''}
                                                             </span>
                                                         ))}
                                                         {prod.variantes.length > 4 && (
@@ -912,7 +1011,7 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                                 )}
 
                                                 <div className="flex gap-2 mt-2">
-                                                    {isAdmin && (
+                                                    {isAdmin && seCuenta && (
                                                         <Button variant="outline" size="sm" onClick={() => openStockModal(prod)}
                                                             className="flex-1 h-9 rounded-xl text-[9px] font-black uppercase border-black/10 dark:border-white/10">
                                                             <Box className="w-3 h-3 mr-1" /> Stock
@@ -920,8 +1019,10 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                                     )}
                                                     {/* Stock corrige un numero; Compra dice DE DONDE sale:
                                                         sube el stock, guarda lo que costo cada unidad de
-                                                        este lote y apunta el gasto en Insumos. */}
-                                                    {isAdmin && (
+                                                        este lote y apunta el gasto en Insumos.
+                                                        Los de rollo lo llevan aunque no se cuenten: el rollo
+                                                        se compra igual, y de ahí sale el costo del metro. */}
+                                                    {isAdmin && (seCuenta || deRollo) && (
                                                         <Button variant="outline" size="sm" onClick={() => setCompraProducto(prod)}
                                                             className="flex-1 h-9 rounded-xl text-[9px] font-black uppercase border-black/10 dark:border-white/10">
                                                             <PackagePlus className="w-3 h-3 mr-1" /> Compra
@@ -944,14 +1045,21 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                 {/* ========== TAB: INVENTARIO ========== */}
                 <TabsContent value="inventario" className="mt-0">
                     <div className="space-y-4">
-                        {productos.length === 0 ? (
+                        {/* El inventario es de lo que se cuenta. Un diseño gráfico
+                            no tiene existencias y aquí solo estorbaba, con un cero
+                            permanente al lado. Se cambia en su ficha. */}
+                        {productos.filter(llevaStockDe).length === 0 ? (
                             <div className="text-center py-20 opacity-40">
                                 <Box className="w-12 h-12 mx-auto mb-3" />
                                 <p className="font-bold uppercase text-xs">Sin productos en el inventario</p>
+                                <p className="text-[10px] font-bold mt-1 max-w-xs mx-auto leading-snug">
+                                    Aquí salen los que llevan cuenta de existencias. Se elige en la
+                                    ficha, en «¿Se cuenta cuántos quedan?».
+                                </p>
                             </div>
                         ) : (
                             categorias.map(cat => {
-                                const prods = productos.filter(p => p.categoriaId === cat.id)
+                                const prods = productos.filter(p => p.categoriaId === cat.id && llevaStockDe(p))
                                 if (prods.length === 0) return null
                                 const cs = getColorStyle(cat.color)
                                 return (
@@ -1234,6 +1342,20 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                         </div>
                     </SheetContent>
                 </Sheet>
+
+                {/* ========== TAB: MATERIA PRIMA ==========
+                    El depósito. Aquí no se vende nada: es lo que hace falta
+                    tener para poder entregar lo que sí se vende. */}
+                <TabsContent value="materia" className="mt-0">
+                    <MateriaPrimaPanel
+                        items={materiaPrima}
+                        isAdmin={isAdmin}
+                        tasa={rates?.usd || 0}
+                        usuario={currentUser?.uid || currentUser?.id}
+                        rollosSueltos={rollosSueltos}
+                        onTraerRollos={traerRollosAlDeposito}
+                    />
+                </TabsContent>
 
                 {/* ========== TAB: HISTORIAL ========== */}
                 <TabsContent value="historial" className="mt-0 space-y-4">
@@ -1612,6 +1734,16 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                                 // tipoVenta se mantiene al día para todo lo que aún lo lee.
                                                 tipoVenta: u.valor === 'metro_cuadrado' ? 'metro_cuadrado' : 'unidad',
                                                 unidadLabel: u.abrev,
+                                                // Cambiar de unidad cambia la cuenta: lo que trae un rollo
+                                                // no son las piezas de una caja.
+                                                ...(p.costo && (u.valor === 'metro_cuadrado' || u.valor === 'metro_lineal')
+                                                    ? {
+                                                        costo: {
+                                                            ...p.costo,
+                                                            unidadesLote: unidadesDeRollo(p.costo.anchoCm, p.costo.metrosRollo, u.valor === 'metro_lineal'),
+                                                        },
+                                                    }
+                                                    : {}),
                                             }))}
                                             className={cn('p-3 rounded-2xl border text-left transition-all',
                                                 activo ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10' : 'border-black/10 dark:border-white/10')}>
@@ -1621,6 +1753,39 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                     )
                                 })}
                             </div>
+                        </div>
+
+                        {/* ¿SE CUENTA O NO SE CUENTA?
+                            De un llavero se sabe que quedan doce; de un diseño
+                            gráfico no queda nada que contar, y de un rollo de vinil
+                            no se sabe cuánto queda hasta que se acaba. Lo que no se
+                            cuenta no debería avisar de "stock bajo" ni pedir que se
+                            registre una entrada: son avisos que no dicen nada y que
+                            tapan los de lo que sí se cuenta. */}
+                        <div className="space-y-2">
+                            <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">¿Se cuenta cuántos quedan?</Label>
+                            <div className="grid grid-cols-2 gap-2">
+                                {[
+                                    { si: true, titulo: 'Sí, se cuenta', pie: 'Llaveros, tazas, acrílicos: se sabe cuántos hay' },
+                                    { si: false, titulo: 'No se cuenta', pie: 'Servicios y material de rollo: se mira, no se consulta' },
+                                ].map(o => (
+                                    <button key={String(o.si)}
+                                        onClick={() => setProdForm(p => ({ ...p, llevaStock: o.si }))}
+                                        className={cn('p-3 rounded-2xl border text-left transition-all',
+                                            llevaStockDe(prodForm) === o.si
+                                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10'
+                                                : 'border-black/10 dark:border-white/10')}>
+                                        <p className="font-black text-[10px] uppercase text-blue-600">{o.titulo}</p>
+                                        <p className="text-[9px] text-slate-400 leading-snug">{o.pie}</p>
+                                    </button>
+                                ))}
+                            </div>
+                            {!llevaStockDe(prodForm) && (
+                                <p className="text-[9px] text-slate-400 ml-2 leading-snug">
+                                    Su ficha no pedirá existencias ni avisará de stock bajo. El precio se
+                                    saca igual desde el costo de compra, aquí abajo.
+                                </p>
+                            )}
                         </div>
 
                         {/* El ancho del rollo solo hace falta para el metro lineal, y ahí
@@ -1673,46 +1838,97 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                             <div>
                                 <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Costo de compra (opcional)</p>
                                 <p className="text-[9px] text-slate-400 mt-0.5">
-                                    Lo que pagaste por el lote. Sirve para proponerte un precio; el que se cobra es el de arriba.
+                                    {seMideEnRollo
+                                        ? 'Lo que costó un rollo y cómo viene. De ahí sale a cómo te queda el metro; el precio que se cobra es el de abajo.'
+                                        : 'Lo que pagaste por el lote. Sirve para proponerte un precio; el que se cobra es el de abajo.'}
                                 </p>
                             </div>
 
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className={cn('grid gap-2', esPorM2 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3')}>
                                 <div className="space-y-1">
-                                    <Label className="text-[8px] font-black uppercase text-slate-400">Costó el lote</Label>
-                                    <Input type="number" placeholder="40" value={prodForm.costo?.montoLoteUSD || ''}
-                                        onChange={e => setProdForm(p => ({ ...p, costo: { ...(p.costo || { montoLoteUSD: 0, unidadesLote: 0 }), montoLoteUSD: parseFloat(e.target.value) || 0 } }))}
+                                    <Label className="text-[8px] font-black uppercase text-slate-400">{seMideEnRollo ? 'Costó el rollo' : 'Costó el lote'}</Label>
+                                    <Input type="number" placeholder={seMideEnRollo ? '120' : '40'} value={prodForm.costo?.montoLoteUSD || ''}
+                                        onChange={e => setCosto({ montoLoteUSD: parseFloat(e.target.value) || 0 })}
                                         className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black" />
                                 </div>
-                                <div className="space-y-1">
-                                    <Label className="text-[8px] font-black uppercase text-slate-400">Trae</Label>
-                                    <Input type="number" placeholder="12" value={prodForm.costo?.unidadesLote || ''}
-                                        onChange={e => setProdForm(p => ({ ...p, costo: { ...(p.costo || { montoLoteUSD: 0, unidadesLote: 0 }), unidadesLote: parseFloat(e.target.value) || 0 } }))}
-                                        className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black" />
-                                </div>
+
+                                {/* Con rollos no se pregunta cuántos m² trae —eso es la
+                                    cuenta— sino lo que se sabe de memoria: uno de 137
+                                    que trae 50 metros. Cobrando el metro lineal el
+                                    ancho no divide, así que ahí ni se pide. */}
+                                {seMideEnRollo ? (
+                                    <>
+                                        {!esPorMetroLineal && (
+                                            <div className="space-y-1">
+                                                <Label className="text-[8px] font-black uppercase text-slate-400">Ancho (cm)</Label>
+                                                <Input type="number" placeholder="137" value={prodForm.costo?.anchoCm || ''}
+                                                    onChange={e => setCosto({ anchoCm: parseFloat(e.target.value) || 0 })}
+                                                    className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black" />
+                                            </div>
+                                        )}
+                                        <div className="space-y-1">
+                                            <Label className="text-[8px] font-black uppercase text-slate-400">Metros que trae</Label>
+                                            <Input type="number" placeholder="50" value={prodForm.costo?.metrosRollo || ''}
+                                                onChange={e => setCosto({ metrosRollo: parseFloat(e.target.value) || 0 })}
+                                                className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black" />
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="space-y-1">
+                                        <Label className="text-[8px] font-black uppercase text-slate-400">Trae</Label>
+                                        <Input type="number" placeholder="12" value={prodForm.costo?.unidadesLote || ''}
+                                            onChange={e => setCosto({ unidadesLote: parseFloat(e.target.value) || 0 })}
+                                            className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black" />
+                                    </div>
+                                )}
+
                                 <div className="space-y-1">
                                     <Label className="text-[8px] font-black uppercase text-slate-400">Margen %</Label>
                                     <Input type="number" placeholder="100" value={prodForm.costo?.margenPct || ''}
-                                        onChange={e => setProdForm(p => ({ ...p, costo: { ...(p.costo || { montoLoteUSD: 0, unidadesLote: 0 }), margenPct: parseFloat(e.target.value) || 0 } }))}
+                                        onChange={e => setCosto({ margenPct: parseFloat(e.target.value) || 0 })}
                                         className="h-10 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black" />
                                 </div>
                             </div>
 
                             {costoUnitario(prodForm.costo) > 0 && (
-                                <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-black/20 rounded-xl px-3 py-2.5">
-                                    <div>
-                                        <p className="text-[8px] font-black uppercase text-slate-400">Te sale a</p>
-                                        <p className="text-sm font-black tabular-nums">${costoUnitario(prodForm.costo).toFixed(4)} <span className="text-[9px] font-bold text-slate-400">/{abrevUnidad(unidadActual)}</span></p>
+                                <div className="space-y-2">
+                                    {seMideEnRollo && (prodForm.costo?.unidadesLote || 0) > 0 && (
+                                        <p className="text-[9px] font-black text-blue-600 dark:text-blue-300">
+                                            Cada rollo trae {(prodForm.costo!.unidadesLote).toFixed(2)} {abrevUnidad(unidadActual)}
+                                            {' · '}el stock sigue contándose en rollos, den los metros que den
+                                        </p>
+                                    )}
+
+                                    <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-black/20 rounded-xl px-3 py-2.5">
+                                        <div>
+                                            <p className="text-[8px] font-black uppercase text-slate-400">Te sale a</p>
+                                            <p className="text-sm font-black tabular-nums">${costoUnitario(prodForm.costo).toFixed(4)} <span className="text-[9px] font-bold text-slate-400">/{abrevUnidad(unidadActual)}</span></p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[8px] font-black uppercase text-emerald-600">Precio sugerido</p>
+                                            <p className="text-sm font-black tabular-nums text-emerald-600">${precioRecomendado(prodForm.costo).toFixed(2)}</p>
+                                        </div>
+                                        <Button
+                                            onClick={() => setProdForm(p => ({ ...p, precioBase: precioRecomendado(p.costo) }))}
+                                            className="h-9 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-[9px] px-3">
+                                            Usar este precio
+                                        </Button>
                                     </div>
-                                    <div>
-                                        <p className="text-[8px] font-black uppercase text-emerald-600">Precio sugerido</p>
-                                        <p className="text-sm font-black tabular-nums text-emerald-600">${precioRecomendado(prodForm.costo).toFixed(2)}</p>
-                                    </div>
-                                    <Button
-                                        onClick={() => setProdForm(p => ({ ...p, precioBase: precioRecomendado(p.costo) }))}
-                                        className="h-9 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-[9px] px-3">
-                                        Usar este precio
-                                    </Button>
+
+                                    {/* Lo que deja el precio que YA está puesto. Sin esto
+                                        el sugerido no se puede juzgar: no se sabe si es
+                                        mejor o peor que lo que se viene cobrando. */}
+                                    {rentabilidadFicha && (
+                                        <p className={cn(
+                                            'text-[9px] font-black leading-snug',
+                                            rentabilidadFicha.ganancia >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                                        )}>
+                                            Cobrando los ${rentabilidadFicha.precio.toFixed(2)} de ahora
+                                            {rentabilidadFicha.ganancia >= 0 ? ' ganas ' : ' pierdes '}
+                                            ${Math.abs(rentabilidadFicha.ganancia).toFixed(2)} por {abrevUnidad(unidadActual)}
+                                            {' · '}{rentabilidadFicha.margenPct.toFixed(0)} % sobre el costo
+                                        </p>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -1724,7 +1940,9 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                     <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">
                                         Precio General (USD) {prodForm.tipoVenta === 'metro_cuadrado' ? '/ m²' : '/ unidad'} *
                                     </Label>
-                                    <PrecioEstimadoBoton soloIcono formas={prodForm.tipoVenta === 'metro_cuadrado' ? ['rollo', 'lote', 'unidad'] : ['lote', 'unidad']} porMetroLineal={(prodForm as any).unidadVenta === 'metro_lineal'} onUsar={v => setProdForm(p => ({ ...p, precioBase: v }))} />
+                                    {/* Con texto y no solo el icono: como calculadora suelta
+                                        no la encontraba nadie. */}
+                                    <PrecioEstimadoBoton texto="Estimar" formas={seMideEnRollo ? ['rollo', 'lote', 'unidad'] : ['lote', 'unidad']} porMetroLineal={esPorMetroLineal} onUsar={v => setProdForm(p => ({ ...p, precioBase: v }))} />
                                 </div>
                                 <div className="relative">
                                     <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
@@ -1738,7 +1956,7 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                     <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">
                                         Precio Publicista (EUR) {prodForm.tipoVenta === 'metro_cuadrado' ? '/ m²' : '/ unidad'}
                                     </Label>
-                                    <PrecioEstimadoBoton soloIcono moneda="€" formas={prodForm.tipoVenta === 'metro_cuadrado' ? ['rollo', 'lote', 'unidad'] : ['lote', 'unidad']} porMetroLineal={(prodForm as any).unidadVenta === 'metro_lineal'} onUsar={v => setProdForm(p => ({ ...p, precioPublicista: v }))} />
+                                    <PrecioEstimadoBoton texto="Estimar" moneda="€" formas={seMideEnRollo ? ['rollo', 'lote', 'unidad'] : ['lote', 'unidad']} porMetroLineal={esPorMetroLineal} onUsar={v => setProdForm(p => ({ ...p, precioPublicista: v }))} />
                                 </div>
                                 <div className="relative">
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-violet-400">€</span>
@@ -1764,23 +1982,20 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                         </div>
 
                         {/* Stock mínimo (solo para productos sin variantes) */}
-                        {/* Stock: lógica diferente según tipo de venta */}
-                        {prodForm.tipoVenta === 'metro_cuadrado' ? (
-                            <div className="bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 p-4 rounded-2xl space-y-3">
-                                <p className="text-[9px] font-black uppercase text-blue-600 tracking-widest">
-                                    📦 Inventario de Rollos (opcional)
+                        {/* Stock: lógica diferente según tipo de venta. Lo que no se
+                            cuenta no pregunta nada de esto. */}
+                        {seMideEnRollo ? (
+                            /* El conteo de rollos se mudó al depósito: un rollo es
+                               materia prima y esta ficha es la de venta. Se dice
+                               dónde está, que si no parece que se perdió. */
+                            <div className="bg-slate-50 dark:bg-white/5 p-4 rounded-2xl">
+                                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Cuántos rollos quedan</p>
+                                <p className="text-[9px] text-slate-400 mt-0.5 leading-snug">
+                                    Se lleva en <span className="font-black">Materia Prima</span>, junto con la tinta y lo
+                                    demás que se compra para trabajar. Aquí va lo que se cobra; allí, lo que hay.
                                 </p>
-                                <p className="text-[9px] text-slate-500 dark:text-slate-400">
-                                    Los materiales por m² (vinil, banner) no llevan conteo de m² — solo puedes registrar cuántos rollos físicos tienes. El contador de rollos es manual.
-                                </p>
-                                <div className="space-y-2">
-                                    <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Rollos en Stock</Label>
-                                    <Input type="number" placeholder="0" value={prodForm.rollosEnStock || ''}
-                                        onChange={e => setProdForm(p => ({ ...p, rollosEnStock: parseInt(e.target.value) || 0 }))}
-                                        className="h-12 rounded-2xl bg-white dark:bg-black/20 border-none font-black text-center" />
-                                </div>
                             </div>
-                        ) : !prodForm.tieneVariantes && (
+                        ) : !llevaStockDe(prodForm) ? null : !prodForm.tieneVariantes && (
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="space-y-2">
                                     <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">Stock Inicial</Label>

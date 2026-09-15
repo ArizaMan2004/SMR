@@ -31,13 +31,25 @@
 // el lote guarda las dos cosas —cuántos paquetes y cuántas unidades trae cada
 // uno— y el stock se mueve siempre en la unidad del producto (unidad, kilo,
 // litro...), nunca en cajas.
+//
+// LOS ROLLOS SE CUENTAN EN OTRA PARTE
+//
+// Un rollo de vinil no se saca a medir con cinta métrica cada vez que entra
+// uno: se cuenta, "me llegaron tres". Pero ese conteo no es de aquí. El rollo
+// es materia prima —no se vende— y vive en el depósito, en Materia Prima. Esta
+// ficha es la de venta; sumar los rollos en los dos sitios dejaría dos números
+// distintos y ninguno de fiar.
+//
+// Lo que sí se queda de una compra de rollos es la CUENTA DEL PRECIO: con el
+// ancho y los metros sale a cómo queda el m², y con eso se puede decir cuánto
+// se gana con el precio que ya está puesto.
 
 import { db } from "@/lib/firebase";
 import {
     collection, doc, onSnapshot, orderBy, query, runTransaction, where,
     Timestamp, serverTimestamp,
 } from "firebase/firestore";
-import type { CatalogoProducto, UnidadVenta } from "@/lib/services/catalog-service";
+import { unidadDe, type CatalogoProducto, type UnidadVenta } from "@/lib/services/catalog-service";
 
 const LOTES_COL = "compras_lote";
 const PROD_COL = "catalogo_productos";
@@ -62,6 +74,15 @@ export interface CompraLote {
     /** En qué se cuentan esas unidades. */
     unidad: UnidadVenta;
 
+    /**
+     * Si lo que llegó fueron rollos: el ancho en cm y los metros de cada uno.
+     *
+     * De ahí salió `unidadesPorPaquete`, pero se guardan los dos números como
+     * se preguntaron: "137 × 50" se lee, y 68,5 m² hay que creérselo.
+     */
+    anchoCm?: number;
+    metrosRollo?: number;
+
     montoUSD: number;
     /** Lo que se pagó en bolívares, si se pagó en bolívares. */
     montoBs?: number;
@@ -82,7 +103,18 @@ export interface DatosCompra {
     varianteId?: string | null;
     presentacion: string;
     paquetes: number;
+    /**
+     * Unidades de venta que trae cada paquete.
+     *
+     * Con rollos no se teclea: sale de `anchoCm` y `metrosRollo` con
+     * `unidadesDeRollo`, que es la misma cuenta que hace el "¿Precio
+     * estimado?" de las demás pantallas.
+     */
     unidadesPorPaquete: number;
+    /** Ancho del rollo en cm, si lo que se compró fue un rollo. */
+    anchoCm?: number;
+    /** Metros de largo de cada rollo, si lo que se compró fue un rollo. */
+    metrosRollo?: number;
     montoUSD: number;
     tasa?: number;
     proveedor?: string;
@@ -121,7 +153,19 @@ export const problemaDeCompra = (d: Partial<DatosCompra>): string | null => {
     if (!d.producto?.id) return "Elige qué producto se compró";
     if (d.producto.tieneVariantes && !d.varianteId) return "Elige de cuál variante";
     if (!(n(d.paquetes) > 0)) return "¿Cuántos paquetes llegaron?";
-    if (!(n(d.unidadesPorPaquete) > 0)) return "¿Cuántas unidades trae cada paquete?";
+    if (!(n(d.unidadesPorPaquete) > 0)) {
+        // Con rollos ese número no se teclea, sale del ancho y los metros. Decir
+        // "faltan las unidades por paquete" señalaría un campo que no existe en
+        // esa pantalla, así que se pregunta por el que de verdad está vacío.
+        const u = unidadDe(d.producto);
+        if (u === "metro_lineal") return "¿Cuántos metros trae el rollo?";
+        if (u === "metro_cuadrado") {
+            return n(d.metrosRollo) > 0
+                ? "¿Cuánto mide de ancho el rollo?"
+                : "¿Cuántos metros trae el rollo?";
+        }
+        return "¿Cuántas unidades trae cada paquete?";
+    }
     if (!(n(d.montoUSD) > 0)) return "¿Cuánto costó en total?";
     return null;
 };
@@ -162,28 +206,45 @@ export const registrarCompra = async (d: DatosCompra): Promise<{ loteId: string;
         const actual = snap.data() as CatalogoProducto;
 
         // ---- 2. el stock
+        //
+        // Los rollos NO se cuentan aquí. Viven en Materia Prima, que es el
+        // depósito; esta ficha es la de venta, y un rollo de vinil no se vende.
+        // Sumarlos en los dos sitios dejaría dos números distintos y ninguno de
+        // fiar. De la compra de un rollo, esta pantalla se queda con lo único
+        // que usa para vender: a cómo sale el metro.
         const cambios: Record<string, any> = { updatedAt: serverTimestamp() };
-        if (unidad === "metro_cuadrado") {
-            // Lo que se vende por metro cuadrado se cuenta en ROLLOS: sale del
-            // rollo a medida y descontarlo por área daría un número exacto que
-            // sería mentira. Un paquete aquí es un rollo.
-            cambios.rollosEnStock = n(actual.rollosEnStock) + paquetes;
-        } else if (actual.tieneVariantes && d.varianteId) {
-            cambios.variantes = (actual.variantes || []).map(v =>
-                v.id === d.varianteId ? { ...v, stock: n(v.stock) + unidades } : v
-            );
-        } else {
-            cambios.stockSimple = n(actual.stockSimple) + unidades;
+        const deRollo = unidad === "metro_cuadrado" || unidad === "metro_lineal";
+        if (!deRollo) {
+            if (actual.tieneVariantes && d.varianteId) {
+                cambios.variantes = (actual.variantes || []).map(v =>
+                    v.id === d.varianteId ? { ...v, stock: n(v.stock) + unidades } : v
+                );
+            } else {
+                cambios.stockSimple = n(actual.stockSimple) + unidades;
+            }
         }
 
         // ---- 3. el costo pasa a ser el de este lote
         //
         // El margen se conserva si no se da uno nuevo: quien lo puso sabía por
         // qué, y comprar otra caja no es motivo para olvidarlo.
+        //
+        // Con rollos se guarda lo que costó UN rollo, no la compra entera.
+        //
+        // La ficha del producto habla de uno solo —"costó el rollo", "trae 50
+        // metros"—, así que si aquí se guardara el total, al abrirla se vería
+        // el monto de tres rollos junto a las medidas de uno y el costo por m²
+        // saldría por las nubes. El costo unitario es el mismo de las dos
+        // formas; lo que cambia es que así la ficha se puede leer.
+        const porRollo = n(d.metrosRollo) > 0;
         cambios.costo = {
-            montoLoteUSD: monto,
-            unidadesLote: unidades,
+            montoLoteUSD: porRollo ? Math.round((monto / paquetes) * 10000) / 10000 : monto,
+            unidadesLote: porRollo ? porPaquete : unidades,
             margenPct: d.margenPct != null ? n(d.margenPct) : n(actual.costo?.margenPct),
+            // Y las medidas, para que la ficha pueda volver a enseñar
+            // "137 × 50" en vez de un 68,5 sin explicación.
+            ...(porRollo && n(d.anchoCm) > 0 ? { anchoCm: n(d.anchoCm) } : {}),
+            ...(porRollo ? { metrosRollo: n(d.metrosRollo) } : {}),
             actualizadoEn: new Date().toISOString(),
         };
         if (n(d.nuevoPrecioBase) > 0) cambios.precioBase = n(d.nuevoPrecioBase);
@@ -197,7 +258,10 @@ export const registrarCompra = async (d: DatosCompra): Promise<{ loteId: string;
         tx.set(gastoRef, {
             nombre: `${nombreGasto} (${paquetes} ${d.presentacion || "paq."})`,
             descripcion: [
-                `${unidades} unidades a $${unitario.toFixed(4)} c/u`,
+                porRollo
+                    // "1,37 × 50 m" se reconoce al leer el gasto; "68,5" no.
+                    ? `${paquetes} de ${n(d.anchoCm) > 0 ? `${(n(d.anchoCm) / 100).toFixed(2)} × ` : ""}${n(d.metrosRollo)} m · ${unidades} ${unidad === "metro_lineal" ? "m.l." : "m²"} a $${unitario.toFixed(4)} c/u`
+                    : `${unidades} unidades a $${unitario.toFixed(4)} c/u`,
                 d.proveedor ? `Proveedor: ${d.proveedor}` : "",
                 d.nota || "",
             ].filter(Boolean).join(" · "),
@@ -224,6 +288,8 @@ export const registrarCompra = async (d: DatosCompra): Promise<{ loteId: string;
             unidadesPorPaquete: porPaquete,
             unidadesTotales: unidades,
             unidad,
+            ...(porRollo && n(d.anchoCm) > 0 ? { anchoCm: n(d.anchoCm) } : {}),
+            ...(porRollo ? { metrosRollo: n(d.metrosRollo) } : {}),
             montoUSD: monto,
             ...(tasa > 0 ? { tasa, montoBs: Math.round(monto * tasa * 100) / 100 } : {}),
             costoUnitarioUSD: unitario,

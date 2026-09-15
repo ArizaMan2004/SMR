@@ -50,12 +50,34 @@ export const UNIDADES: { valor: UnidadVenta; etiqueta: string; abrev: string; ay
  * razones para cobrar distinto que ninguna fórmula conoce.
  */
 export interface CostoCompra {
-    /** Lo que costó el lote entero. */
+    /**
+     * Lo que costó lo que se compró de una vez: el lote entero, o UN rollo.
+     *
+     * Con rollos se guarda el de uno solo aunque llegaran tres, porque va con
+     * las medidas de uno: si aquí estuviera el total de la compra, dividirlo
+     * entre los m² de un rollo daría un costo por las nubes.
+     */
     montoLoteUSD: number
-    /** Cuántas unidades trae el lote. */
+    /**
+     * Cuántas unidades de venta trae el lote.
+     *
+     * Siempre en la unidad en la que se VENDE: piezas si se cuenta por piezas,
+     * m² si se cobra el área, metros si se cobra el metro lineal. Lo que se
+     * compró puede ser una caja o un rollo; eso lo dicen los campos de abajo.
+     */
     unidadesLote: number
     /** Margen que se quiere ganar, en porcentaje. */
     margenPct?: number
+    /**
+     * Si lo que se compró fue un rollo: su ancho en centímetros.
+     *
+     * No entra en la cuenta —`unidadesLote` ya viene hecho— pero se guarda para
+     * poder volver a enseñarla: quien abra la ficha dentro de seis meses ve
+     * "137 × 50" y no un 68,5 que no sabe de dónde salió.
+     */
+    anchoCm?: number
+    /** Si lo que se compró fue un rollo: los metros de largo que traía. */
+    metrosRollo?: number
     /** Cuándo se actualizó, porque los costos envejecen. */
     actualizadoEn?: string
 }
@@ -258,6 +280,16 @@ export interface CatalogoProducto {
     tiposTrabajo?: string[]
     /** Lo que costó traerlo, para calcular el precio sugerido. */
     costo?: CostoCompra
+    /**
+     * Si de esto se lleva la cuenta de cuántos quedan.
+     *
+     * No todo se cuenta. Un diseño gráfico no tiene existencias, y de un rollo
+     * de vinil no se sabe cuánto queda hasta que se acaba: lo que hay se mira,
+     * no se consulta. Tratarlos como mercancía llenaba sus fichas de "0 und ·
+     * stock bajo", un aviso que no quiere decir nada y que se aprende a
+     * ignorar —y con él se ignora el de las cosas que sí se cuentan.
+     */
+    llevaStock?: boolean
     // Solo aplica para tipoVenta === 'unidad':
     stockSimple: number
     stockMinimo: number
@@ -680,6 +712,17 @@ export const tipoEntradaDe = (p?: CatalogoProducto): TipoEntrada => {
     const u = unidadDe(p);
     return u === "metro_cuadrado" || u === "metro_lineal" ? "material" : "producto";
 };
+
+/**
+ * Si de este producto se cuentan las existencias.
+ *
+ * Lo dice la ficha. Mientras nadie lo haya dicho se supone por lo que es: la
+ * mercancía que se compra hecha se cuenta —llaveros, tazas—, y lo que sale de
+ * un rollo o es mano de obra, no. Es la misma suposición que ya venía haciendo
+ * el Catálogo, solo que ahora se puede contradecir.
+ */
+export const llevaStockDe = (p?: CatalogoProducto): boolean =>
+    p?.llevaStock ?? tipoEntradaDe(p) === "producto";
 
 /** Las categorías de primer nivel. */
 export const categoriasRaiz = (cats: CatalogoCategoria[]): CatalogoCategoria[] =>
