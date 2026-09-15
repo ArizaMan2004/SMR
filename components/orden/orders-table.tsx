@@ -344,7 +344,7 @@ export function OrdersTable({
       )}
 
       <Dialog open={isHistoryModalOpen} onOpenChange={setIsHistoryModalOpen}>
-          <DialogContent className="max-w-4xl p-0 border-none bg-white dark:bg-zinc-950 rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden">
+          <DialogContent showCloseButton={false} className="max-w-4xl p-0 border-none bg-white dark:bg-zinc-950 rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden">
               <header className="p-6 border-b dark:border-white/10 flex justify-between items-center bg-slate-50 dark:bg-zinc-900">
                   <div className="flex items-center gap-3">
                       <div className="p-2.5 bg-blue-600 rounded-xl text-white shadow-lg"><History className="w-5 h-5" /></div>

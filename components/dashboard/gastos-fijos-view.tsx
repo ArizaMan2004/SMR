@@ -317,7 +317,7 @@ export function GastosFijosView({ gastos, rates, onNotification }: ViewProps) {
 
       {/* --- MODAL DE PAGO (MEJORADO) --- */}
       <Dialog open={!!paymentTarget} onOpenChange={(open) => !open && setPaymentTarget(null)}>
-        <DialogContent className="w-[95vw] max-w-md p-0 border-none bg-transparent shadow-none">
+        <DialogContent showCloseButton={false} className="w-[95vw] max-w-md p-0 border-none bg-transparent shadow-none">
           <DialogTitle className="sr-only">Procesar Pago</DialogTitle>
           <div className="bg-white dark:bg-[#1c1c1e] w-full rounded-[2rem] sm:rounded-[3rem] p-5 sm:p-10 shadow-2xl border border-black/5">
               <div className="flex items-center justify-between mb-5 sm:mb-8">

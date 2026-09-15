@@ -137,7 +137,7 @@ export function OrderDetailModal({ open, onClose, orden, rates = { usd: 0, eur: 
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-[95vw] md:max-w-6xl h-[92vh] p-0 border-none bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-2xl overflow-hidden rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl flex flex-col">
+      <DialogContent showCloseButton={false} className="max-w-[95vw] md:max-w-6xl h-[92vh] p-0 border-none bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-2xl overflow-hidden rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl flex flex-col">
         
         <header className={cn(
             "shrink-0 relative p-6 md:p-10 border-b border-slate-200/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 z-10",

@@ -111,7 +111,7 @@ export function OrdenTallerDetalle({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="w-[95vw] sm:max-w-2xl max-h-[92vh] p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[1.75rem] sm:rounded-[2rem] overflow-hidden flex flex-col">
+            <DialogContent showCloseButton={false} className="w-[95vw] sm:max-w-2xl max-h-[92vh] p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[1.75rem] sm:rounded-[2rem] overflow-hidden flex flex-col">
                 <DialogTitle className="sr-only">Detalle de la orden de trabajo</DialogTitle>
 
                 {/* CABECERA. El número primero: es por donde se pregunta. */}

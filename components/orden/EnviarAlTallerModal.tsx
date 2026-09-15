@@ -345,7 +345,7 @@ export function EnviarAlTallerModal({ open, onOpenChange, orden, responsablePorD
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-2xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] overflow-hidden max-h-[92vh] flex flex-col">
+            <DialogContent showCloseButton={false} className="max-w-2xl p-0 border-none bg-white dark:bg-[#1c1c1e] rounded-[2rem] overflow-hidden max-h-[92vh] flex flex-col">
                 <header className="p-5 sm:p-6 border-b border-black/5 dark:border-white/10 flex items-center justify-between gap-3 bg-slate-50 dark:bg-white/5">
                     <div className="flex items-center gap-3 min-w-0">
                         <div className="w-10 h-10 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/20">

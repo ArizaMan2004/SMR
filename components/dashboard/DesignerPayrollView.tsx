@@ -591,7 +591,7 @@ function PaymentModal({ isOpen, onClose, item, form, setForm, rates, onConfirm, 
 function ImagePreviewModal({ imageUrl, onClose, onDownload }: any) {
     return (
         <Dialog open={!!imageUrl} onOpenChange={onClose}>
-            <DialogContent className="max-w-[95vw] lg:max-w-4xl p-0 bg-transparent border-none shadow-none z-[200]">
+            <DialogContent showCloseButton={false} className="max-w-[95vw] lg:max-w-4xl p-0 bg-transparent border-none shadow-none z-[200]">
                 <DialogHeader className="sr-only"><DialogTitle>Vista previa</DialogTitle></DialogHeader>
                 <div className="flex flex-col items-center p-2 lg:p-4">
                     <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="relative bg-slate-900 rounded-2xl lg:rounded-[2.5rem] overflow-hidden border-2 lg:border-4 border-white/10 shadow-2xl w-full flex flex-col items-center">
