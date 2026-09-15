@@ -16,6 +16,7 @@ import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
 
 import {
     X, Scissors, Hash, DollarSign, Box, Type,
@@ -389,6 +390,7 @@ export function ItemFormModal({
       const area = areaDeProducto(prod, catalogCategorias)
 
       setVentaProductoId(prod.id)
+      setErrors((e: any) => ({ ...e, productoCatalogo: false, precio: false }))
       setState((s: any) => ({
           ...s,
           precioUnitario: precio,
@@ -407,6 +409,7 @@ export function ItemFormModal({
   }
 
   const seleccionarMaterialCatalogo = (prod: any, varianteId?: string | null, acabadoId?: string | null) => {
+      setErrors((e: any) => ({ ...e, material: false }))
       const variante = varianteId ? prod.variantes?.find((v: any) => v.id === varianteId) : null
       const usarPublicista = esAliado && (prod.precioPublicista ?? 0) > 0
 
@@ -600,8 +603,61 @@ export function ItemFormModal({
 
     if ((state.cantidad || 0) <= 0) { newErrors.cantidad = true; hasError = true; }
 
+    // LO QUE PIDE CADA FORMA DE COBRO.
+    //
+    // Sin esto se podia anadir un item de impresion sin material, uno de laser
+    // sin decir que se corta o una venta sin decir que se vendio: la orden se
+    // guardaba y el hueco aparecia despues, en el balance o en el taller.
+    //
+    // Lo que ya estaba guardado en un item viejo cuenta como relleno: editar
+    // una orden para cambiar un precio no tiene por que obligar a volver a
+    // elegir un material que ya consta.
+    if (modo === 'laser' && !String(state.materialDeCorte || '').trim()) {
+        newErrors.materialCorte = true; hasError = true;
+    }
+    if (modo === 'medida' && catalogM2.length > 0
+        && !catalogMaterialId && !manualMaterialId && !state.catalogoProductoId) {
+        newErrors.material = true; hasError = true;
+    }
+    if (modo === 'catalogo' && !ventaProductoId && !state.catalogoProductoId
+        && productosOfrecidos.some((p: any) => p.activo !== false && tiposCatalogo.includes(tipoEntradaDe(p)))) {
+        newErrors.productoCatalogo = true; hasError = true;
+    }
+
+    const bajarAlPrimero = () => setTimeout(() => {
+        const dialogos = document.querySelectorAll('[role="dialog"]')
+        const actual = dialogos[dialogos.length - 1]
+        actual?.querySelector('[data-falta="true"], [class*="ring-red-500"]')
+            ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 80)
+
     setErrors(newErrors);
-    if (hasError) return;
+    if (hasError) {
+        const NOMBRES: Record<string, string> = {
+            nombre: 'descripción',
+            materialCorte: 'material a cortar',
+            tiempo: 'tiempo de láser',
+            productoCatalogo: tipoActual.catalogo === 'servicio' ? 'el servicio' : 'el producto',
+            material: 'material de impresión',
+            medidaXCm: 'ancho',
+            medidaYCm: 'alto',
+            cantidad: 'cantidad',
+        }
+        const faltan = Object.keys(newErrors).filter(k => newErrors[k]).map(k => NOMBRES[k] || k)
+        toast.error(`Te falta rellenar: ${faltan.join(', ')}`)
+        bajarAlPrimero()
+        return;
+    }
+
+    // Un item en cero no se bloquea —una garantia, un regalo— pero se pregunta:
+    // casi siempre es un precio que se olvido escribir.
+    if ((state.subtotal || 0) <= 0
+        && !window.confirm('Este ítem va en $0. ¿Seguro que no se cobra?')) {
+        setErrors({ precio: true })
+        toast.error('Te falta rellenar: precio')
+        bajarAlPrimero()
+        return;
+    }
 
     let colorFinal = state.colorAcrilico;
 
@@ -835,9 +891,9 @@ export function ItemFormModal({
 
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                                 <div className="space-y-1.5">
-                                    <Label className="text-[9px] font-black text-orange-400 uppercase">Sustrato</Label>
-                                    <Select value={state.materialDeCorte} onValueChange={v => setState({...state, materialDeCorte: v, grosorMaterial: '', colorAcrilico: ''})}>
-                                        <SelectTrigger className="bg-white dark:bg-slate-800 border-none h-11 rounded-xl font-bold"><SelectValue placeholder="Elegir..." /></SelectTrigger>
+                                    <Label className={cn("text-[9px] font-black uppercase", errors.materialCorte ? "text-red-500" : "text-orange-400")}>Sustrato</Label>
+                                    <Select value={state.materialDeCorte} onValueChange={v => { setState({...state, materialDeCorte: v, grosorMaterial: '', colorAcrilico: ''}); clearError('materialCorte'); }}>
+                                        <SelectTrigger className={cn("border-none h-11 rounded-xl font-bold", errors.materialCorte ? "bg-red-50 text-red-600 ring-2 ring-red-500/50" : "bg-white dark:bg-slate-800")}><SelectValue placeholder="Elegir..." /></SelectTrigger>
                                         <SelectContent>
                                             {sustratosCorte.length === 0 && (
                                                 <div className="px-3 py-2 text-[10px] text-slate-400">
@@ -903,10 +959,10 @@ export function ItemFormModal({
                                     </div>
                                 ) : (
                                     <div className="space-y-1.5">
-                                        <Label className="text-[9px] font-black text-orange-400 uppercase">Precio por Pieza (USD)</Label>
+                                        <Label className={cn("text-[9px] font-black uppercase", errors.precio ? "text-red-500" : "text-orange-400")}>Precio por Pieza (USD)</Label>
                                         <div className="relative">
                                             <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-orange-400"/>
-                                            <Input type="number" step="0.01" value={state.precioUnitario === 0 ? '' : state.precioUnitario} onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})} className="h-14 pl-12 border-none bg-white dark:bg-slate-800 font-black text-orange-600 text-xl rounded-2xl shadow-inner" />
+                                            <Input type="number" step="0.01" value={state.precioUnitario === 0 ? '' : state.precioUnitario} onChange={e => { setState({...state, precioUnitario: parseFloat(e.target.value) || 0}); clearError('precio'); }} className={cn("h-14 pl-12 border-none font-black text-orange-600 text-xl rounded-2xl shadow-inner", errors.precio ? "bg-red-50 ring-2 ring-red-500/50" : "bg-white dark:bg-slate-800")} />
                                         </div>
                                     </div>
                                 )}
@@ -936,6 +992,11 @@ export function ItemFormModal({
                                 media columna, en el movil, las pestanas salian cortadas y
                                 los productos se veian de uno en uno. El tipo elegido
                                 arriba decide si se ofrecen productos, servicios o ambos. */}
+                            {errors.productoCatalogo && (
+                                <p data-falta="true" className="text-[10px] font-black uppercase text-red-600 bg-red-50 dark:bg-red-500/10 rounded-xl px-3 py-2">
+                                    Elige {tipoActual.catalogo === 'servicio' ? 'el servicio' : 'el producto'} que se vende
+                                </p>
+                            )}
                             {productosOfrecidos.some((p: any) => p.activo !== false && tiposCatalogo.includes(tipoEntradaDe(p))) && (
                                 <SelectorCatalogo
                                     key={tipoActual.id}
@@ -952,15 +1013,15 @@ export function ItemFormModal({
                             <div className="grid grid-cols-2 gap-4">
                                 {/* Precio unitario */}
                                 <div className="space-y-2">
-                                    <Label className="text-[9px] font-black uppercase text-emerald-600 ml-1">Precio por Unidad (USD)</Label>
+                                    <Label className={cn("text-[9px] font-black uppercase ml-1", errors.precio ? "text-red-500" : "text-emerald-600")}>Precio por Unidad (USD)</Label>
 
 
                                     <div className="relative">
                                         <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
                                         <Input type="number" step="0.01"
                                             value={state.precioUnitario === 0 ? '' : state.precioUnitario}
-                                            onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})}
-                                            className="h-12 pl-12 rounded-2xl border-none bg-white dark:bg-slate-800 font-black text-emerald-600 text-xl shadow-inner" />
+                                            onChange={e => { setState({...state, precioUnitario: parseFloat(e.target.value) || 0}); clearError('precio'); }}
+                                            className={cn("h-12 pl-12 rounded-2xl border-none font-black text-emerald-600 text-xl shadow-inner", errors.precio ? "bg-red-50 ring-2 ring-red-500/50" : "bg-white dark:bg-slate-800")} />
                                     </div>
                                 </div>
 
@@ -1005,7 +1066,13 @@ export function ItemFormModal({
                             
                             {/* SECCIÓN: OPCIONES DE IMPRESIÓN */}
                             {modo === 'medida' && (
-                                <div className="space-y-4 pb-4 border-b border-blue-200 dark:border-blue-900/50">
+                                <div
+                                    data-falta={errors.material ? 'true' : undefined}
+                                    className={cn("space-y-4 pb-4 border-b border-blue-200 dark:border-blue-900/50", errors.material && "rounded-2xl ring-2 ring-red-500/50 p-3 bg-red-50/60 dark:bg-red-500/5")}
+                                >
+                                    {errors.material && (
+                                        <p className="text-[10px] font-black uppercase text-red-600">Elige de qué material se imprime</p>
+                                    )}
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
                                             <Printer className="w-5 h-5 text-blue-600" />
@@ -1173,7 +1240,7 @@ export function ItemFormModal({
                                             <div className="flex flex-wrap gap-2">
                                                 {catalogM2.map((prod: any) => (
                                                     <button key={prod.id} type="button"
-                                                        onClick={() => setManualMaterialId(manualMaterialId === prod.id ? null : prod.id)}
+                                                        onClick={() => { setManualMaterialId(manualMaterialId === prod.id ? null : prod.id); clearError('material'); }}
                                                         className={cn(
                                                             'px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase transition-all',
                                                             manualMaterialId === prod.id
@@ -1504,7 +1571,7 @@ export function ItemFormModal({
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div className="space-y-2">
                             <div className="flex items-center justify-between ml-1">
-                                <Label className="text-[10px] font-black uppercase text-slate-400">Precio Unitario Base (USD)</Label>
+                                <Label className={cn("text-[10px] font-black uppercase", errors.precio ? "text-red-500" : "text-slate-400")}>Precio Unitario Base (USD)</Label>
                                 <button
                                     type="button"
                                     onClick={() => setShowCatalogPicker(v => !v)}
@@ -1566,8 +1633,8 @@ export function ItemFormModal({
                                     type="number"
                                     step="0.01"
                                     value={state.precioUnitario === 0 ? '' : state.precioUnitario}
-                                    onChange={e => setState({...state, precioUnitario: parseFloat(e.target.value) || 0})}
-                                    className="h-12 pl-12 rounded-2xl border-none bg-slate-100 dark:bg-slate-800 font-black text-emerald-600 text-xl shadow-inner"
+                                    onChange={e => { setState({...state, precioUnitario: parseFloat(e.target.value) || 0}); clearError('precio'); }}
+                                    className={cn("h-12 pl-12 rounded-2xl border-none font-black text-emerald-600 text-xl shadow-inner", errors.precio ? "bg-red-50 ring-2 ring-red-500/50" : "bg-slate-100 dark:bg-slate-800")}
                                 />
                             </div>
                         </div>
