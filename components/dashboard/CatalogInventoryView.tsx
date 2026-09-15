@@ -2,6 +2,7 @@
 "use client"
 
 import { subscribeToTiposTrabajo, tiposDe, type ConfigTiposTrabajo, type TipoTrabajo } from "@/lib/services/tipos-trabajo-service"
+import { extrasDe, esExtraDeFabrica, nombreExtra, EXTRAS_DE_FABRICA } from "@/lib/utils/extras-impresion"
 import { PrecioEstimadoBoton } from "@/components/ui/precio-estimado-boton"
 import { TiposTrabajoPanel } from "@/components/dashboard/TiposTrabajoPanel"
 import { CompraLoteModal } from "@/components/dashboard/CompraLoteModal"
@@ -189,6 +190,16 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     const [tiposCfg, setTiposCfg] = useState<ConfigTiposTrabajo>({})
     useEffect(() => subscribeToTiposTrabajo(setTiposCfg), [])
     const tiposDeTrabajo = useMemo(() => tiposDe(tiposCfg).filter(t => t.activo !== false), [tiposCfg])
+    const listaExtras = useMemo(() => extrasDe(tiposCfg.extras), [tiposCfg])
+
+    /** La etiqueta de una casilla del material: la de siempre, o el nombre nuevo si se renombro. */
+    const etiquetaOpcion = (campo: string, etiqueta: string) => {
+        const id = campo.startsWith('corte') ? 'corte' : campo
+        const deFabrica = EXTRAS_DE_FABRICA.find(e => e.id === id)?.nombre
+        const nombre = nombreExtra(listaExtras, id)
+        if (!deFabrica || nombre === deFabrica) return etiqueta
+        return campo === 'corteObligatorio' ? `${nombre} obligatorio` : nombre
+    }
 
     /** La venta que se esta preparando para entregar. */
     const [pdfEnEdicion, setPdfEnEdicion] = useState<DatosDocumento | null>(null)
@@ -1828,8 +1839,46 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                                 {activo && <CheckCircle2 className="w-3 h-3" />}
                                             </span>
                                             <span className="min-w-0">
-                                                <span className="block text-[10px] font-black uppercase leading-tight">{op.etiqueta}</span>
+                                                <span className="block text-[10px] font-black uppercase leading-tight">{etiquetaOpcion(op.campo, op.etiqueta)}</span>
                                                 <span className="block text-[9px] text-slate-400 leading-snug">{op.ayuda}</span>
+                                            </span>
+                                        </button>
+                                    )
+                                })}
+                                {/* Los extras propios salen en todos los materiales;
+                                    aqui se quitan donde no van. */}
+                                {listaExtras.filter(x => !esExtraDeFabrica(x.id) && x.activo !== false).map(x => {
+                                    const activo = !(prodForm.opcionesImpresion?.extrasOcultos || []).includes(x.id)
+                                    return (
+                                        <button
+                                            key={x.id}
+                                            type="button"
+                                            onClick={() => setProdForm(p => {
+                                                const ocultos = p.opcionesImpresion?.extrasOcultos || []
+                                                return {
+                                                    ...p,
+                                                    opcionesImpresion: {
+                                                        ...(p.opcionesImpresion || {}),
+                                                        extrasOcultos: activo ? [...ocultos, x.id] : ocultos.filter(i => i !== x.id),
+                                                    },
+                                                }
+                                            })}
+                                            className={cn(
+                                                'flex items-start gap-2.5 text-left rounded-xl p-2.5 border transition-colors',
+                                                activo
+                                                    ? 'bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/30'
+                                                    : 'bg-white dark:bg-black/20 border-black/5 hover:border-slate-200'
+                                            )}
+                                        >
+                                            <span className={cn(
+                                                'w-4 h-4 shrink-0 rounded-md border flex items-center justify-center mt-0.5',
+                                                activo ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 dark:border-white/20'
+                                            )}>
+                                                {activo && <CheckCircle2 className="w-3 h-3" />}
+                                            </span>
+                                            <span className="min-w-0">
+                                                <span className="block text-[10px] font-black uppercase leading-tight">{x.nombre}</span>
+                                                <span className="block text-[9px] text-slate-400 leading-snug">Extra propio · se ofrece salvo que lo quites</span>
                                             </span>
                                         </button>
                                     )

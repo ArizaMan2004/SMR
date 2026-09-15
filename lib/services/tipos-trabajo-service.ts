@@ -24,6 +24,7 @@
 
 import { db } from "@/lib/firebase";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { limpiarExtras, type ExtraImpresion } from "@/lib/utils/extras-impresion";
 
 export type ModoCobro = "medida" | "laser" | "catalogo" | "libre";
 export type AreaTrabajo = "IMPRESION" | "CORTE" | "DISENO" | "OTROS";
@@ -46,6 +47,8 @@ export interface TipoTrabajo {
 export interface ConfigTiposTrabajo {
     tipos?: TipoTrabajo[];
     unidades?: UnidadItem[];
+    /** Los extras de impresión: los de fábrica renombrados u ocultos y los propios. */
+    extras?: ExtraImpresion[];
     actualizadoEn?: string;
 }
 
@@ -95,6 +98,10 @@ export const motivoUnidadInvalida = (nombre: string, existentes: UnidadItem[]): 
 export const guardarUnidades = async (unidades: UnidadItem[]) => {
     const limpias = unidades.map(u => ({ id: u.id, nombre: u.nombre.trim(), activo: u.activo !== false }));
     await setDoc(REF(), { unidades: limpias, actualizadoEn: new Date().toISOString() }, { merge: true });
+};
+
+export const guardarExtras = async (extras: ExtraImpresion[]) => {
+    await setDoc(REF(), { extras: limpiarExtras(extras), actualizadoEn: new Date().toISOString() }, { merge: true });
 };
 
 export const MODOS_COBRO: { id: ModoCobro; label: string; ayuda: string }[] = [

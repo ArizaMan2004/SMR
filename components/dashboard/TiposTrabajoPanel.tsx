@@ -23,9 +23,13 @@ import { esAdmin } from '@/lib/roles'
 import {
     subscribeToTiposTrabajo, guardarTiposTrabajo, tiposDe, esTipoDeFabrica, nuevoIdTipo,
     MODOS_COBRO, AREAS_TRABAJO,
-    unidadesDe, guardarUnidades, motivoUnidadInvalida, esUnidadDeFabrica, type UnidadItem,
+    unidadesDe, guardarUnidades, guardarExtras, motivoUnidadInvalida, esUnidadDeFabrica, type UnidadItem,
     type ConfigTiposTrabajo, type TipoTrabajo, type ModoCobro, type AreaTrabajo, type CatalogoDeTipo,
 } from '@/lib/services/tipos-trabajo-service'
+import {
+    extrasDe, esExtraDeFabrica, nuevoIdExtra, motivoExtrasInvalidos, COBROS_EXTRA, MEDIDAS_LINEALES,
+    type ExtraImpresion, type CobroExtra, type MedidaLineal,
+} from '@/lib/utils/extras-impresion'
 
 const selector = 'h-10 rounded-xl bg-slate-50 dark:bg-white/5 border-none text-[11px] font-black px-2 outline-none cursor-pointer'
 
@@ -42,6 +46,12 @@ export function TiposTrabajoPanel({ onAnadirOpcion }: {
     const [tocado, setTocado] = useState(false)
     const [unidades, setUnidades] = useState<UnidadItem[]>([])
     const [nuevaUnidad, setNuevaUnidad] = useState('')
+    const [extras, setExtras] = useState<ExtraImpresion[]>([])
+
+    const editarExtra = (id: string, cambio: Partial<ExtraImpresion>) => {
+        setTocado(true)
+        setExtras(prev => prev.map(x => x.id === id ? { ...x, ...cambio } : x))
+    }
 
     const anadirUnidad = () => {
         const motivo = motivoUnidadInvalida(nuevaUnidad, unidades)
@@ -59,6 +69,7 @@ export function TiposTrabajoPanel({ onAnadirOpcion }: {
         if (tocado) return
         setTipos(tiposDe(cfg).map(t => ({ ...t })))
         setUnidades(unidadesDe(cfg).map(u => ({ ...u })))
+        setExtras(extrasDe(cfg.extras).map(x => ({ ...x })))
     }, [cfg, tocado])
 
     const editar = (id: string, cambio: Partial<TipoTrabajo>) => {
@@ -80,10 +91,13 @@ export function TiposTrabajoPanel({ onAnadirOpcion }: {
     const guardar = async () => {
         if (tipos.some(t => !t.nombre.trim())) return toast.error('Todos los tipos necesitan nombre')
         if (!tipos.some(t => t.activo !== false)) return toast.error('Deja al menos un tipo visible')
+        const motivoExtras = motivoExtrasInvalidos(extras)
+        if (motivoExtras) return toast.error(motivoExtras)
         setGuardando(true)
         try {
             await guardarTiposTrabajo(tipos)
             await guardarUnidades(unidades)
+            await guardarExtras(extras)
             toast.success('Tipos de trabajo guardados')
             setTocado(false)
         } catch (e: any) {
@@ -298,6 +312,91 @@ export function TiposTrabajoPanel({ onAnadirOpcion }: {
                         </Button>
                     </div>
                 </div>
+            </div>
+
+            {/* EXTRAS DE IMPRESION.
+
+                Las casillas de los trabajos que se cobran por medida. Los siete de
+                fabrica se renombran u ocultan y calculan como siempre: pegado y
+                laminado con su panel de precio, los demas solo quedan anotados.
+                Los propios llevan su precio, y cada ficha del Catalogo puede
+                quitar los que no van con ese material. */}
+            <div className="space-y-2 pt-4 border-t border-black/5 dark:border-white/5">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Extras de impresión</p>
+                <p className="text-[10px] font-bold text-slate-400 leading-snug">
+                    Las casillas de los trabajos por medida. Los de fábrica se renombran u ocultan; los tuyos llevan su precio.
+                    En la ficha de cada material del Catálogo puedes quitar los que no le van.
+                </p>
+                <div className="space-y-2">
+                    {extras.map(x => {
+                        const fabrica = esExtraDeFabrica(x.id)
+                        const oculto = x.activo === false
+                        return (
+                            <div key={x.id} className={cn('rounded-2xl border border-black/5 dark:border-white/5 p-3 space-y-2 transition-opacity', oculto && 'opacity-50')}>
+                                <div className="flex items-center gap-2">
+                                    <Input
+                                        value={x.nombre}
+                                        onChange={e => editarExtra(x.id, { nombre: e.target.value })}
+                                        placeholder="Nombre del extra"
+                                        className="h-10 flex-1 min-w-0 rounded-xl bg-slate-50 dark:bg-white/5 border-none text-sm font-black"
+                                    />
+                                    <button type="button" onClick={() => editarExtra(x.id, { activo: oculto })}
+                                        aria-label={oculto ? 'Mostrar' : 'Ocultar'}
+                                        title={oculto ? 'Oculto: no se ofrece al facturar' : 'Visible'}
+                                        className="p-1.5 text-slate-400 hover:text-blue-600">
+                                        {oculto ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                    </button>
+                                    {/* Los de fabrica estan marcados en ordenes viejas: se ocultan. */}
+                                    {!fabrica && (
+                                        <button type="button"
+                                            onClick={() => { setTocado(true); setExtras(prev => prev.filter(e => e.id !== x.id)) }}
+                                            aria-label="Borrar" className="p-1.5 text-slate-300 hover:text-red-500">
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    )}
+                                </div>
+                                {fabrica ? (
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-300">
+                                        De fábrica · {x.id === 'pegado' || x.id === 'laminado' ? 'su precio se pone en el ítem' : 'sin precio, queda anotado'}
+                                    </p>
+                                ) : (
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <select value={x.cobro || 'fijo'}
+                                            onChange={e => editarExtra(x.id, { cobro: e.target.value as CobroExtra })}
+                                            aria-label="Cómo se cobra" className={selector}>
+                                            {COBROS_EXTRA.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                                        </select>
+                                        {x.cobro === 'lineal' && (
+                                            <select value={x.medida || 'perimetro'}
+                                                onChange={e => editarExtra(x.id, { medida: e.target.value as MedidaLineal })}
+                                                aria-label="Qué metros cuenta" className={selector}>
+                                                {MEDIDAS_LINEALES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                                            </select>
+                                        )}
+                                        <Input
+                                            type="number" min={0} step="0.01"
+                                            value={x.precio ?? ''}
+                                            onChange={e => editarExtra(x.id, { precio: e.target.value === '' ? undefined : Number(e.target.value) })}
+                                            placeholder="Precio"
+                                            aria-label="Precio"
+                                            className="h-10 w-28 rounded-xl bg-slate-50 dark:bg-white/5 border-none text-[11px] font-black"
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        )
+                    })}
+                </div>
+                <Button
+                    variant="outline"
+                    onClick={() => {
+                        setTocado(true)
+                        setExtras(prev => [...prev, { id: nuevoIdExtra(), nombre: '', activo: true, cobro: 'fijo', precio: 0 }])
+                    }}
+                    className="w-full h-11 rounded-2xl border-dashed font-black uppercase tracking-widest text-[10px] gap-2"
+                >
+                    <Plus className="w-4 h-4" /> Añadir extra
+                </Button>
             </div>
         </Card>
     )

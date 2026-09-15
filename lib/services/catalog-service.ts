@@ -195,6 +195,13 @@ export interface OpcionesImpresion {
     corteObligatorio?: boolean
     /** Se puede pedir con corte de plóter, pero no obliga. */
     corteOpcional?: boolean
+    /**
+     * Los extras propios (ribete, doblez...) que NO se ofrecen con este material.
+     *
+     * Al revés que las casillas de arriba: un extra nuevo sale en todos los
+     * materiales sin tener que ir ficha por ficha, y aquí se quita donde sobra.
+     */
+    extrasOcultos?: string[]
 }
 
 export interface CatalogoProducto {
@@ -636,7 +643,7 @@ export const acabadosActivos = (producto?: CatalogoProducto): CatalogoAcabado[] 
  * Sin esto, al pasar el formulario a leer del catálogo, los materiales ya
  * dados de alta se quedarían de golpe sin ojales ni laminado.
  */
-export const opcionesDe = (producto?: CatalogoProducto): Required<OpcionesImpresion> => {
+export const opcionesDe = (producto?: CatalogoProducto): Required<Omit<OpcionesImpresion, "extrasOcultos">> => {
     const o = producto?.opcionesImpresion || {};
     return {
         ojales: o.ojales ?? false,

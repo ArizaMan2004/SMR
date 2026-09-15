@@ -1,6 +1,7 @@
 // @/components/orden/order-form-wizard.tsx
 "use client"
 
+import { costoExtrasPorPieza } from "@/lib/utils/extras-impresion";
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import {
     subscribeToBilleteras, cuentasActivas, nombreBilletera,
@@ -242,7 +243,9 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
 
         if (item.unidad === 'm2' && x > 0 && y > 0) {
             let costoBaseUnitario = (x / 100) * (y / 100) * precioEfectivo;
-            if (item.tipoServicio === 'IMPRESION') {
+            // Un tipo nuevo que cobra por medida puede contar en otra area:
+            // su laminado y su pegado se cobran igual.
+            if (item.tipoServicio === 'IMPRESION' || item.modoCobro === 'medida') {
                 if (item.impresionLaminado) {
                     const pLin = parseFloat(item.precioLaminadoLineal) || 0;
                     const pMan = parseFloat(item.precioLaminadoManual) || 0;
@@ -254,6 +257,8 @@ export const OrderFormWizardV2: React.FC<any> = ({ onCreate, onUpdate, onClose, 
                     costoBaseUnitario += parseFloat(item.precioPegado) || 0;
                 }
             }
+            // Los extras propios (ribete, doblez...) con el precio que se copio al item.
+            costoBaseUnitario += costoExtrasPorPieza(item);
             return (costoBaseUnitario + e) * c;
         }
         return (precioEfectivo + e) * c;

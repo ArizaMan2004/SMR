@@ -1,6 +1,7 @@
 // @/components/orden/order-detail-modal.tsx
 "use client";
 
+import { costoExtrasPorPieza } from "@/lib/utils/extras-impresion";
 import React, { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -57,7 +58,7 @@ const getItemSubtotal = (item: ItemOrden) => {
   if (item.unidad === 'm2' && x > 0 && y > 0) {
       let costoBaseUnitario = (x / 100) * (y / 100) * p;
 
-      if (item.tipoServicio === 'IMPRESION') {
+      if (item.tipoServicio === 'IMPRESION' || itemExtra.modoCobro === 'medida') {
           if (itemExtra.impresionLaminado) {
               const pLin = parseFloat(itemExtra.precioLaminadoLineal) || 0;
               const pMan = parseFloat(itemExtra.precioLaminadoManual) || 0;
@@ -69,6 +70,7 @@ const getItemSubtotal = (item: ItemOrden) => {
               costoBaseUnitario += parseFloat(itemExtra.precioPegado) || 0;
           }
       }
+      costoBaseUnitario += costoExtrasPorPieza(itemExtra);
       return (costoBaseUnitario + e) * c;
   } else {
       return (p + e) * c;

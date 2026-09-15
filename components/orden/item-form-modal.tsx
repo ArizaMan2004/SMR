@@ -1,6 +1,10 @@
 // @/components/orden/item-form-modal.tsx
 "use client"
 
+import {
+    extrasDe, esExtraDeFabrica, nombreExtra, montoExtra, costoExtrasPorPieza, comoSeCobra, copiaParaItem,
+    type ExtraImpresion,
+} from "@/lib/utils/extras-impresion";
 import { subscribeToEmpleados } from "@/lib/services/gastos-service"
 import type { Empleado } from "@/lib/types/gastos"
 import { PrecioEstimadoBoton } from "@/components/ui/precio-estimado-boton"
@@ -111,6 +115,8 @@ const getInitialState = () => ({
   impresionBolsillos: false,
   impresionTubos: false,
   impresionRefilado: false,
+  // Los extras propios que lleva, cada uno con su precio copiado.
+  extrasImpresion: [],
   
   // --- ESTADOS LAMINADO ---
   impresionLaminado: false,
@@ -383,6 +389,34 @@ export function ItemFormModal({
       }
   }, [modoMaterialManual, materialSeleccionado, state.materialImpresion])
 
+  /** Los extras con el nombre que les puso el negocio, ocultos incluidos. */
+  const listaExtras = useMemo(() => extrasDe(tiposCfg.extras), [tiposCfg])
+  const nombreDe = (id: string) => nombreExtra(listaExtras, id)
+  /** Uno de fabrica oculto no se ofrece, salvo que el item ya lo lleve marcado. */
+  const ofreceFabrica = (id: string, marcado: boolean) =>
+      marcado || listaExtras.find(e => e.id === id)?.activo !== false
+
+  /**
+   * Los extras propios que salen como casilla: los visibles que el material
+   * no quita, y los que el item ya lleva aunque luego se ocultaran o borraran.
+   */
+  const extrasPropios = useMemo(() => {
+      const ocultos: string[] = (!modoMaterialManual && (materialSeleccionado as any)?.opcionesImpresion?.extrasOcultos) || []
+      const llevados: ExtraImpresion[] = Array.isArray(state.extrasImpresion) ? state.extrasImpresion : []
+      const ofrecidos = listaExtras.filter(e => !esExtraDeFabrica(e.id) && e.activo !== false && !ocultos.includes(e.id))
+      return [...ofrecidos, ...llevados.filter(l => !ofrecidos.some(o => o.id === l.id))]
+  }, [listaExtras, modoMaterialManual, materialSeleccionado, state.extrasImpresion])
+
+  const marcarExtra = (e: ExtraImpresion, marcar: boolean) => setState((s: any) => {
+      const sin = (Array.isArray(s.extrasImpresion) ? s.extrasImpresion : []).filter((x: ExtraImpresion) => x.id !== e.id)
+      return { ...s, extrasImpresion: marcar ? [...sin, copiaParaItem(e)] : sin }
+  })
+
+  const precioExtra = (id: string, precio: number) => setState((s: any) => ({
+      ...s,
+      extrasImpresion: (s.extrasImpresion || []).map((x: ExtraImpresion) => x.id === id ? { ...x, precio } : x),
+  }))
+
   /**
    * Cuánto laminado consume esta pieza y qué habría que cobrar.
    *
@@ -492,6 +526,8 @@ export function ItemFormModal({
           impresionOjales: op.ojales ? s.impresionOjales : false,
           impresionBolsillos: op.bolsillos ? s.impresionBolsillos : false,
           impresionTubos: op.tubos ? s.impresionTubos : false,
+          extrasImpresion: (s.extrasImpresion || []).filter((x: ExtraImpresion) =>
+              !(prod.opcionesImpresion?.extrasOcultos || []).includes(x.id)),
           // Referencias al catálogo: con esto la orden ya nace sabiendo qué
           // material gastó y no hace falta auditarla después.
           //
@@ -608,6 +644,7 @@ export function ItemFormModal({
                 if (impresionPegado && proveedorPegado === 'taller' && precioPegado > 0) {
                     costoBaseUnitario += precioPegado;
                 }
+                costoBaseUnitario += costoExtrasPorPieza(state);
             }
         } else {
             costoBaseUnitario = precioEfectivo;
@@ -622,7 +659,8 @@ export function ItemFormModal({
       horas, minutos, segundos, state.suministrarMaterial, state.costoMaterialExtra,
       modo, state.modoCobroLaser, state.impresionLaminado,
       state.tipoCobroLaminado, state.precioLaminadoLineal, state.precioLaminadoManual,
-      state.impresionPegado, state.proveedorPegado, state.precioPegado, matTaller
+      state.impresionPegado, state.proveedorPegado, state.precioPegado, matTaller,
+      state.extrasImpresion
   ]);
 
   const handleSave = async () => {
@@ -731,7 +769,7 @@ export function ItemFormModal({
         
         // Corte detallado
         if ((state.impresionConCorte || opcionesActivas.corteObligatorio) && opcionesActivas.corteOpcional) {
-            detallesExtras.push("Corte");
+            detallesExtras.push(nombreDe('corte'));
         }
         
         // Pegado detallado
@@ -745,11 +783,12 @@ export function ItemFormModal({
             if (state.fondoBlancoPegado) detallesExtras.push("Fondo de vinil blanco");
         }
         
-        if (state.impresionOjales) detallesExtras.push("Ojales");
-        if (state.impresionBolsillos) detallesExtras.push("Bolsillos");
-        if (state.impresionTubos) detallesExtras.push("Tubos");
-        if (state.impresionRefilado) detallesExtras.push("Refilado");
-        if (state.impresionLaminado) detallesExtras.push("Laminado");
+        if (state.impresionOjales) detallesExtras.push(nombreDe('ojales'));
+        if (state.impresionBolsillos) detallesExtras.push(nombreDe('bolsillos'));
+        if (state.impresionTubos) detallesExtras.push(nombreDe('tubos'));
+        if (state.impresionRefilado) detallesExtras.push(nombreDe('refilado'));
+        if (state.impresionLaminado) detallesExtras.push(nombreDe('laminado'));
+        (state.extrasImpresion || []).forEach((x: ExtraImpresion) => detallesExtras.push(x.nombre));
     }
 
     // De donde sale el material que se apunta: del catalogo si se eligio ahi,
@@ -779,6 +818,8 @@ export function ItemFormModal({
         tipoTrabajoId: tipoActual.id,
         tipoTrabajoNombre: tipoActual.nombre,
         modoCobro: modo,
+        // Solo cobra por medida: si se cambio de tipo, no arrastra extras.
+        extrasImpresion: modo === 'medida' ? (state.extrasImpresion || []) : [],
         tiempoCorte: modo === 'laser' && state.modoCobroLaser === 'tiempo' ? tiempoString : "Servicio",
 
         // La orden nace sabiendo que material gasto.
@@ -1313,7 +1354,7 @@ export function ItemFormModal({
                                         una forma de imprimir nueva se da de alta y ya trae
                                         sus opciones sin tocar nada. */}
                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-2">
-                                        {(opcionesActivas.corteOpcional || opcionesActivas.corteObligatorio) && (
+                                        {(opcionesActivas.corteOpcional || opcionesActivas.corteObligatorio) && ofreceFabrica('corte', !!state.impresionConCorte || opcionesActivas.corteObligatorio) && (
                                             <div className={cn("flex items-center space-x-2 p-2.5 rounded-lg shadow-sm transition-opacity", opcionesActivas.corteObligatorio ? "bg-slate-200/50 dark:bg-slate-800/50 opacity-70 pointer-events-none" : "bg-white dark:bg-slate-800")}>
                                                 <Checkbox
                                                     id="chk-corte"
@@ -1322,53 +1363,87 @@ export function ItemFormModal({
                                                     onCheckedChange={c => setState({ ...state, impresionConCorte: !!c })}
                                                 />
                                                 <Label htmlFor="chk-corte" className="text-xs font-bold cursor-pointer">
-                                                    {opcionesActivas.corteObligatorio ? "Corte (Obligatorio)" : "Añadir Corte"}
+                                                    {opcionesActivas.corteObligatorio ? `${nombreDe('corte')} (Obligatorio)` : `Añadir ${nombreDe('corte')}`}
                                                 </Label>
                                             </div>
                                         )}
 
-                                        {opcionesActivas.pegado && (
+                                        {opcionesActivas.pegado && ofreceFabrica('pegado', !!state.impresionPegado) && (
                                             <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
                                                 <Checkbox id="chk-pegado" checked={state.impresionPegado} onCheckedChange={c => setState({ ...state, impresionPegado: !!c })} />
-                                                <Label htmlFor="chk-pegado" className="text-xs font-bold cursor-pointer">Pegado en Rígido</Label>
+                                                <Label htmlFor="chk-pegado" className="text-xs font-bold cursor-pointer">{nombreDe('pegado')}</Label>
                                             </div>
                                         )}
 
-                                        {opcionesActivas.ojales && (
+                                        {opcionesActivas.ojales && ofreceFabrica('ojales', !!state.impresionOjales) && (
                                             <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
                                                 <Checkbox id="chk-ojales" checked={state.impresionOjales} onCheckedChange={c => setState({ ...state, impresionOjales: !!c })} />
-                                                <Label htmlFor="chk-ojales" className="text-xs font-bold cursor-pointer">Ojales</Label>
+                                                <Label htmlFor="chk-ojales" className="text-xs font-bold cursor-pointer">{nombreDe('ojales')}</Label>
                                             </div>
                                         )}
 
-                                        {opcionesActivas.bolsillos && (
+                                        {opcionesActivas.bolsillos && ofreceFabrica('bolsillos', !!state.impresionBolsillos) && (
                                             <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
                                                 <Checkbox id="chk-bolsillos" checked={state.impresionBolsillos} onCheckedChange={c => setState({ ...state, impresionBolsillos: !!c })} />
-                                                <Label htmlFor="chk-bolsillos" className="text-xs font-bold cursor-pointer">Bolsillos</Label>
+                                                <Label htmlFor="chk-bolsillos" className="text-xs font-bold cursor-pointer">{nombreDe('bolsillos')}</Label>
                                             </div>
                                         )}
 
-                                        {opcionesActivas.tubos && (
+                                        {opcionesActivas.tubos && ofreceFabrica('tubos', !!state.impresionTubos) && (
                                             <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
                                                 <Checkbox id="chk-tubos" checked={state.impresionTubos} onCheckedChange={c => setState({ ...state, impresionTubos: !!c })} />
-                                                <Label htmlFor="chk-tubos" className="text-xs font-bold cursor-pointer">Tubos</Label>
+                                                <Label htmlFor="chk-tubos" className="text-xs font-bold cursor-pointer">{nombreDe('tubos')}</Label>
                                             </div>
                                         )}
 
-                                        {opcionesActivas.refilado && (
+                                        {opcionesActivas.refilado && ofreceFabrica('refilado', !!state.impresionRefilado) && (
                                             <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
                                                 <Checkbox id="chk-refilado" checked={state.impresionRefilado} onCheckedChange={c => setState({ ...state, impresionRefilado: !!c })} />
-                                                <Label htmlFor="chk-refilado" className="text-xs font-bold cursor-pointer">Refilado</Label>
+                                                <Label htmlFor="chk-refilado" className="text-xs font-bold cursor-pointer">{nombreDe('refilado')}</Label>
                                             </div>
                                         )}
 
-                                        {opcionesActivas.laminado && (
+                                        {opcionesActivas.laminado && ofreceFabrica('laminado', !!state.impresionLaminado) && (
                                             <div className="flex items-center space-x-2 bg-indigo-50 dark:bg-indigo-900/20 p-2.5 rounded-lg shadow-sm border border-indigo-100 dark:border-indigo-800">
                                                 <Checkbox id="chk-laminado" checked={state.impresionLaminado} onCheckedChange={c => setState({ ...state, impresionLaminado: !!c })} className="data-[state=checked]:bg-indigo-500 data-[state=checked]:border-indigo-500" />
-                                                <Label htmlFor="chk-laminado" className="text-xs font-black text-indigo-700 dark:text-indigo-300 cursor-pointer">Laminado Extra</Label>
+                                                <Label htmlFor="chk-laminado" className="text-xs font-black text-indigo-700 dark:text-indigo-300 cursor-pointer">{nombreDe('laminado')}</Label>
                                             </div>
                                         )}
+                                        {extrasPropios.map(x => {
+                                            const marcado = (state.extrasImpresion || []).some((e: ExtraImpresion) => e.id === x.id)
+                                            return (
+                                                <div key={x.id} className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
+                                                    <Checkbox id={`chk-${x.id}`} checked={marcado} onCheckedChange={c => marcarExtra(x, !!c)} />
+                                                    <Label htmlFor={`chk-${x.id}`} className="text-xs font-bold cursor-pointer">{x.nombre}</Label>
+                                                </div>
+                                            )
+                                        })}
                                     </div>
+
+                                    {/* EL PRECIO DE CADA EXTRA PROPIO.
+                                        Sale con el de la configuracion y se cambia para
+                                        este item: el item guarda el suyo. */}
+                                    {(state.extrasImpresion || []).length > 0 && (
+                                        <div className="space-y-2 mt-3">
+                                            {(state.extrasImpresion as ExtraImpresion[]).map(x => (
+                                                <div key={x.id} className="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-800 p-2.5 rounded-lg shadow-sm">
+                                                    <span className="text-xs font-bold flex-1 min-w-[7rem]">{x.nombre}</span>
+                                                    <Input
+                                                        type="number" min={0} step="0.01"
+                                                        value={x.precio || ''}
+                                                        placeholder="0"
+                                                        onChange={ev => precioExtra(x.id, Math.max(0, parseFloat(ev.target.value) || 0))}
+                                                        aria-label={`Precio de ${x.nombre}`}
+                                                        className="h-9 w-24 rounded-lg bg-slate-50 dark:bg-slate-900 border-none text-xs font-bold"
+                                                    />
+                                                    <span className="text-[10px] font-bold text-slate-400">{comoSeCobra(x)}</span>
+                                                    <span className="text-[10px] font-black text-slate-600 dark:text-slate-300 ml-auto">
+                                                        = {montoExtra(x, state.medidaXCm, state.medidaYCm).toFixed(2)} por pieza
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
 
                                     {/* PANELES DE CONFIGURACIÓN EXTRAS (Pegado y Laminado) */}
                                     <div className="space-y-3 mt-4">
