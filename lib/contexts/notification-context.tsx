@@ -12,6 +12,7 @@ import React, {
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-context";
+import { MARCA_CLAVE, MARCA_LOGO } from "@/lib/marca";
 import {
   subscribeToNotificaciones,
   marcarComoLeida,
@@ -64,10 +65,10 @@ async function mostrarAvisoDelSistema(n: Notificacion) {
   const titulo = `${TIPO_META[n.tipo]?.icono || '🔔'} ${n.titulo}`;
   const opciones: NotificationOptions = {
     body: n.cuerpo,
-    icon: '/smr-logo-dark.png',
-    badge: '/smr-logo-dark.png',
+    icon: MARCA_LOGO,
+    badge: MARCA_LOGO,
     // Agrupa por notificación concreta: si llega dos veces, no se apila duplicada.
-    tag: `smr-${n.id}`,
+    tag: `${MARCA_CLAVE}-${n.id}`,
     requireInteraction: n.tipo === 'error' || n.tipo === 'warning',
     data: { link: n.link, id: n.id },
   };

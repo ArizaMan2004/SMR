@@ -15,7 +15,9 @@ export const metadata: Metadata = {
   title: TITULO_APP,
   description: `${MARCA}: ${MARCA_DESCRIPCION}.`,
   generator: "Jesus Ariza",
-  manifest: "/manifest.json",
+  // El manifiesto lo genera `app/manifest.ts` y Next enlaza solo: apuntar
+  // aquí al archivo viejo dejaría dos, y ganaría el fijo con la marca escrita
+  // a mano dentro.
   icons: {
     icon: "/favicon.ico",
     apple: "/apple-icon.png",

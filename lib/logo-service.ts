@@ -1,5 +1,7 @@
 // logo-service.ts
 
+import { MARCA_LOGO_CLARO } from "@/lib/marca";
+
 const LOGO_STORAGE_KEY = "pdfLogoBase64";
 const FIRMA_STORAGE_KEY = "pdfFirmaBase64"; // Clave para la firma
 const SELLO_STORAGE_KEY = "pdfSelloBase64"; // Clave para el sello
@@ -8,7 +10,7 @@ const SELLO_STORAGE_KEY = "pdfSelloBase64"; // Clave para el sello
 
 /**
  * Obtiene el logo en Base64 desde localStorage o, si no existe,
- * lo carga desde /smr-logo-light.png y lo guarda automáticamente.
+ * lo carga del archivo de la marca y lo guarda automáticamente.
  */
 export async function getLogoBase64(): Promise<string | undefined> {
   if (typeof window === "undefined") return undefined;
@@ -20,8 +22,8 @@ export async function getLogoBase64(): Promise<string | undefined> {
   // 2️⃣ Si no existe, lo cargamos desde el archivo público
   // (versión "light" a color: es la que se ve bien sobre el fondo blanco de un PDF)
   try {
-    const response = await fetch("/smr-logo-light.png");
-    if (!response.ok) throw new Error("No se pudo cargar /smr-logo-light.png");
+    const response = await fetch(MARCA_LOGO_CLARO);
+    if (!response.ok) throw new Error(`No se pudo cargar ${MARCA_LOGO_CLARO}`);
 
     const blob = await response.blob();
 

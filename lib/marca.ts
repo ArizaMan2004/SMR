@@ -63,4 +63,14 @@ export const MARCA_CLAVE = (
  */
 export const MARCA_LOGO = process.env.NEXT_PUBLIC_MARCA_LOGO?.trim() ?? "/smr-logo-dark.png";
 
+/**
+ * EL LOGO, para fondos claros.
+ *
+ * El de arriba está pensado para la portada oscura y sobre el blanco de un
+ * PDF no se ve. Este es el que va en los documentos que se imprimen y se
+ * mandan al cliente, que es donde más se nota que el logo no es el tuyo.
+ */
+export const MARCA_LOGO_CLARO =
+    process.env.NEXT_PUBLIC_MARCA_LOGO_CLARO?.trim() || "/smr-logo-light.png";
+
 export const TITULO_APP = `${MARCA} - ${MARCA_DESCRIPCION}`;
