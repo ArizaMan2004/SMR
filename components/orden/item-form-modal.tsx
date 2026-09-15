@@ -1,6 +1,7 @@
 // @/components/orden/item-form-modal.tsx
 "use client"
 
+import { PrecioEstimadoBoton } from "@/components/ui/precio-estimado-boton"
 import { MuestraMaterial } from "@/components/taller/MuestraMaterial"
 import * as React from "react"
 import { useState, useEffect, useMemo } from "react" 
@@ -959,7 +960,10 @@ export function ItemFormModal({
                                     </div>
                                 ) : (
                                     <div className="space-y-1.5">
-                                        <Label className={cn("text-[9px] font-black uppercase", errors.precio ? "text-red-500" : "text-orange-400")}>Precio por Pieza (USD)</Label>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <Label className={cn("text-[9px] font-black uppercase", errors.precio ? "text-red-500" : "text-orange-400")}>Precio por Pieza (USD)</Label>
+                                            <PrecioEstimadoBoton formas={['lote', 'unidad']} moneda={state.monedaItem === 'EUR' ? '€' : '$'} onUsar={v => { setState((s: any) => ({ ...s, precioUnitario: v })); clearError('precio'); }} />
+                                        </div>
                                         <div className="relative">
                                             <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-orange-400"/>
                                             <Input type="number" step="0.01" value={state.precioUnitario === 0 ? '' : state.precioUnitario} onChange={e => { setState({...state, precioUnitario: parseFloat(e.target.value) || 0}); clearError('precio'); }} className={cn("h-14 pl-12 border-none font-black text-orange-600 text-xl rounded-2xl shadow-inner", errors.precio ? "bg-red-50 ring-2 ring-red-500/50" : "bg-white dark:bg-slate-800")} />
@@ -1013,7 +1017,10 @@ export function ItemFormModal({
                             <div className="grid grid-cols-2 gap-4">
                                 {/* Precio unitario */}
                                 <div className="space-y-2">
-                                    <Label className={cn("text-[9px] font-black uppercase ml-1", errors.precio ? "text-red-500" : "text-emerald-600")}>Precio por Unidad (USD)</Label>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <Label className={cn("text-[9px] font-black uppercase ml-1", errors.precio ? "text-red-500" : "text-emerald-600")}>Precio por Unidad (USD)</Label>
+                                        <PrecioEstimadoBoton formas={['lote', 'unidad']} moneda={state.monedaItem === 'EUR' ? '€' : '$'} onUsar={v => { setState((s: any) => ({ ...s, precioUnitario: v })); clearError('precio'); }} />
+                                    </div>
 
 
                                     <div className="relative">
@@ -1572,6 +1579,12 @@ export function ItemFormModal({
                         <div className="space-y-2">
                             <div className="flex items-center justify-between ml-1">
                                 <Label className={cn("text-[10px] font-black uppercase", errors.precio ? "text-red-500" : "text-slate-400")}>Precio Unitario Base (USD)</Label>
+                                <PrecioEstimadoBoton
+                                    className="ml-auto mr-3"
+                                    formas={modo === 'medida' ? ['rollo', 'lote', 'unidad'] : ['lote', 'unidad']}
+                                    moneda={state.monedaItem === 'EUR' ? '€' : '$'}
+                                    onUsar={v => { setState((s: any) => ({ ...s, precioUnitario: v })); clearError('precio'); }}
+                                />
                                 <button
                                     type="button"
                                     onClick={() => setShowCatalogPicker(v => !v)}

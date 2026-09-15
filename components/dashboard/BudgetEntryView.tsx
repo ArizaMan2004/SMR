@@ -1,6 +1,7 @@
 // @/components/dashboard/BudgetEntryView.tsx
 "use client"
 
+import { PrecioEstimadoBoton } from "@/components/ui/precio-estimado-boton"
 import { renglonDeDocumento } from "@/lib/services/documento-renglones";
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'; 
 import { motion, AnimatePresence } from "framer-motion"
@@ -1244,14 +1245,21 @@ export default function BudgetEntryView({
                                                 placeholder="Cant."
                                             />
                                         </div>
-                                        <div className="col-span-6 relative">
-                                            <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500" />
-                                            <Input
-                                                type="number"
-                                                value={newItem.precioUnitarioUSD === 0 ? '' : newItem.precioUnitarioUSD}
-                                                onChange={(e) => { setNewItem({...newItem, precioUnitarioUSD: Number(e.target.value) || 0}); clearError('precio'); }}
-                                                className="h-11 sm:h-14 rounded-xl bg-white dark:bg-slate-900 border-none pl-8 sm:pl-10 font-black text-blue-600 text-sm"
-                                                placeholder={newItem.unidad === 'm2' ? "Precio /m²" : "Precio Unit."}
+                                        <div className="col-span-6">
+                                            <div className="relative">
+                                                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500" />
+                                                <Input
+                                                    type="number"
+                                                    value={newItem.precioUnitarioUSD === 0 ? '' : newItem.precioUnitarioUSD}
+                                                    onChange={(e) => { setNewItem({...newItem, precioUnitarioUSD: Number(e.target.value) || 0}); clearError('precio'); }}
+                                                    className="h-11 sm:h-14 rounded-xl bg-white dark:bg-slate-900 border-none pl-8 sm:pl-10 font-black text-blue-600 text-sm"
+                                                    placeholder={newItem.unidad === 'm2' ? "Precio /m²" : "Precio Unit."}
+                                                />
+                                            </div>
+                                            <PrecioEstimadoBoton
+                                                className="mt-1 ml-1"
+                                                formas={newItem.unidad === 'm2' ? ['rollo', 'lote', 'unidad'] : ['lote', 'unidad']}
+                                                onUsar={v => { setNewItem((n: any) => ({ ...n, precioUnitarioUSD: v })); clearError('precio'); }}
                                             />
                                         </div>
                                         <div className="col-span-3">

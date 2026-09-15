@@ -13,6 +13,7 @@
 
 "use client"
 
+import { PrecioEstimadoBoton } from "@/components/ui/precio-estimado-boton"
 import { MuestraMaterial } from "@/components/taller/MuestraMaterial"
 import { uploadFileToCloudinary } from "@/lib/services/cloudinary-service"
 import { FAMILIAS_COLOR, tonoDeColor, type ColorMaterial, type FamiliaColor } from "@/lib/services/materiales-taller"
@@ -140,6 +141,8 @@ export function MaterialesTallerPanel() {
                         className="h-10 w-24 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black text-right"
                     />
                     <span className="text-[10px] font-black uppercase text-slate-400">/ m²</span>
+                    <PrecioEstimadoBoton soloIcono formas={['rollo']}
+                        onUsar={v => { setFondoBlanco(String(v)); setTocado(true) }} />
                 </div>
             </div>
 
@@ -317,6 +320,11 @@ function MaterialFila({ m, onEditar, onBorrar }: {
                                         inputMode="decimal"
                                         className="h-7 w-16 rounded-lg bg-white dark:bg-black/20 border-none text-[11px] font-black text-right px-2"
                                     />
+                                    {/* La plancha se compra entera: largo por ancho da el m². */}
+                                    <PrecioEstimadoBoton soloIcono formas={['rollo']} nombreRollo="lámina" className="px-1"
+                                        onUsar={v => onEditar(m.id, {
+                                            grosores: m.grosores.map(x => x.id === g.id ? { ...x, precioPegadoM2: v } : x),
+                                        })} />
                                 </>
                             )}
                             <button

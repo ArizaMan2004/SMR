@@ -1,6 +1,7 @@
 // @/components/dashboard/CatalogInventoryView.tsx
 "use client"
 
+import { PrecioEstimadoBoton } from "@/components/ui/precio-estimado-boton"
 import { TiposTrabajoPanel } from "@/components/dashboard/TiposTrabajoPanel"
 import { CompraLoteModal } from "@/components/dashboard/CompraLoteModal"
 import { renglonDeDocumento } from "@/lib/services/documento-renglones";
@@ -1640,9 +1641,12 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                         {/* Precio y etiqueta */}
                         <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-2">
-                                <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">
-                                    Precio General (USD) {prodForm.tipoVenta === 'metro_cuadrado' ? '/ m²' : '/ unidad'} *
-                                </Label>
+                                <div className="flex items-center justify-between gap-2">
+                                    <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">
+                                        Precio General (USD) {prodForm.tipoVenta === 'metro_cuadrado' ? '/ m²' : '/ unidad'} *
+                                    </Label>
+                                    <PrecioEstimadoBoton soloIcono formas={prodForm.tipoVenta === 'metro_cuadrado' ? ['rollo', 'lote', 'unidad'] : ['lote', 'unidad']} porMetroLineal={(prodForm as any).unidadVenta === 'metro_lineal'} onUsar={v => setProdForm(p => ({ ...p, precioBase: v }))} />
+                                </div>
                                 <div className="relative">
                                     <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
                                     <Input type="number" placeholder="0.00" value={prodForm.precioBase || ''}
@@ -1651,9 +1655,12 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                 </div>
                             </div>
                             <div className="space-y-2">
-                                <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">
-                                    Precio Publicista (EUR) {prodForm.tipoVenta === 'metro_cuadrado' ? '/ m²' : '/ unidad'}
-                                </Label>
+                                <div className="flex items-center justify-between gap-2">
+                                    <Label className="text-[9px] font-black uppercase text-slate-400 ml-2">
+                                        Precio Publicista (EUR) {prodForm.tipoVenta === 'metro_cuadrado' ? '/ m²' : '/ unidad'}
+                                    </Label>
+                                    <PrecioEstimadoBoton soloIcono moneda="€" formas={prodForm.tipoVenta === 'metro_cuadrado' ? ['rollo', 'lote', 'unidad'] : ['lote', 'unidad']} porMetroLineal={(prodForm as any).unidadVenta === 'metro_lineal'} onUsar={v => setProdForm(p => ({ ...p, precioPublicista: v }))} />
+                                </div>
                                 <div className="relative">
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-violet-400">€</span>
                                     <Input type="number" placeholder="0.00" value={prodForm.precioPublicista || ''}
@@ -1891,6 +1898,12 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                                             onChange={e => setProdVarianteInput(p => ({ ...p, precioAliado: parseFloat(e.target.value) || 0 }))}
                                             className="h-10 pl-6 rounded-xl bg-white dark:bg-black/20 border-none text-xs font-black" />
                                     </div>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <PrecioEstimadoBoton texto="Estimar regular" formas={esPorM2 ? ['rollo', 'lote', 'unidad'] : ['lote', 'unidad']}
+                                        onUsar={v => setProdVarianteInput(p => ({ ...p, precioGeneral: v }))} />
+                                    <PrecioEstimadoBoton texto="Estimar aliado" moneda="€" formas={esPorM2 ? ['rollo', 'lote', 'unidad'] : ['lote', 'unidad']}
+                                        onUsar={v => setProdVarianteInput(p => ({ ...p, precioAliado: v }))} />
                                 </div>
                                 <p className="text-[8px] text-slate-400">
                                     {esPorM2 ? 'Nombre · Precio regular ($) y de aliado (€) por m²' : 'Nombre · Stock inicial · Stock mínimo · Precio regular ($) y de aliado (€) por unidad'}
