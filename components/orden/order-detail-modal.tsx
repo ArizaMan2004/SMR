@@ -460,7 +460,7 @@ function ItemRow({ item, isMaster }: { item: ItemOrden, isMaster?: boolean }) {
                                 {item.nombre}
                             </h4>
                             <Badge variant="secondary" className="bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-none text-[9px] font-black uppercase px-2 py-0">
-                                {item.tipoServicio}
+                                {itemExtra.tipoTrabajoNombre || item.tipoServicio}
                             </Badge>
                             
                             {/* Ocultamos el badge individual si ya está agrupado por cabecera, pero lo mostramos si quieres extra claridad */}

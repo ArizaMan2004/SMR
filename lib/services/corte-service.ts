@@ -40,6 +40,8 @@
 /** Un ítem de orden, con lo poco que hace falta mirar de él. */
 interface ItemCorte {
     tipoServicio?: string;
+    /** "laser" en items de tipos nuevos con cobro de laser. */
+    modoCobro?: string;
     materialDeCorte?: string;
     grosorMaterial?: string;
     colorAcrilico?: string;
@@ -118,7 +120,7 @@ export const consumoDeCorte = (ordenes: OrdenConItems[]): ConsumoCorte[] => {
 
     for (const orden of ordenes || []) {
         for (const item of orden?.items || []) {
-            if (item?.tipoServicio !== "CORTE") continue;
+            if (item?.tipoServicio !== "CORTE" && item?.modoCobro !== "laser") continue;
 
             const material = String(item.materialDeCorte || "").trim() || SIN_DECIR;
             const grosor = String(item.grosorMaterial || "").trim();

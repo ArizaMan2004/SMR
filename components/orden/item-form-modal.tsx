@@ -28,9 +28,14 @@ import {
     precioDeServicio, acabadosActivos, opcionesDe,
     consumoMetroLineal, unidadDe, tipoEntradaDe,
     type CatalogoCategoria,
+    type TipoEntrada,
     materialesDelArea,
 } from "@/lib/services/catalog-service"
 import { SelectorCatalogo } from "@/components/orden/SelectorCatalogo"
+import {
+    subscribeToTiposTrabajo, tiposDe, resolverTipo, tipoServicioDe, unidadInicialDe,
+    type ConfigTiposTrabajo,
+} from "@/lib/services/tipos-trabajo-service"
 import {
     subscribeToMaterialesTaller, materialesDePegado, materialesDeCorte,
     buscarMaterial, grosoresDe, coloresDe, costoPegado, precioFondoBlancoM2,
@@ -70,6 +75,10 @@ const COLORES_PREDEFINIDOS = [
 const getInitialState = () => ({
   nombre: "",
   tipoServicio: "OTROS",
+  // El tipo elegido en el desplegable. Null en items de antes, que se
+  // traducen desde `tipoServicio`.
+  tipoTrabajoId: null,
+  tipoTrabajoNombre: null,
   cantidad: 1,
   unidad: "und",
   precioUnitario: 0,
@@ -138,6 +147,35 @@ export function ItemFormModal({
   /** Los materiales del taller: que se corta, que se pega y a como. */
   const [matTaller, setMatTaller] = useState<ConfigMaterialesTaller>({})
   const [catalogCategorias, setCatalogCategorias] = useState<CatalogoCategoria[]>([])
+
+  /**
+   * EL TIPO DE TRABAJO MANDA SOBRE EL PANEL QUE SE VE.
+   *
+   * Antes lo decidia `tipoServicio`, que ademas usan las estadisticas. Al elegir
+   * del catalogo un producto con area Impresion, ese campo pasaba a IMPRESION
+   * para contarlo bien... y con eso desaparecia el panel de venta en mitad de
+   * la eleccion. Ahora el panel sale del modo del tipo elegido, y
+   * `tipoServicio` queda solo para contar.
+   */
+  const [tiposCfg, setTiposCfg] = useState<ConfigTiposTrabajo>({})
+  useEffect(() => subscribeToTiposTrabajo(setTiposCfg), [])
+  const todosLosTipos = useMemo(() => tiposDe(tiposCfg), [tiposCfg])
+  const tipoActual = useMemo(
+      () => resolverTipo(todosLosTipos, state,
+          id => tipoEntradaDe(catalogProductos.find((p: any) => p.id === id)) === 'servicio'),
+      [todosLosTipos, state.tipoTrabajoId, state.tipoServicio, state.catalogoProductoId, state.unidad, catalogProductos]
+  )
+  const modo = tipoActual.modo
+  // Los visibles, mas el del item si esta oculto: abrir un item viejo no puede
+  // dejar el desplegable sin nada elegido.
+  const opcionesTipo = useMemo(() => {
+      const visibles = todosLosTipos.filter(t => t.activo !== false)
+      return visibles.some(t => t.id === tipoActual.id) ? visibles : [...visibles, tipoActual]
+  }, [todosLosTipos, tipoActual])
+  const tiposCatalogo: TipoEntrada[] =
+      tipoActual.catalogo === 'producto' ? ['producto']
+          : tipoActual.catalogo === 'servicio' ? ['servicio']
+              : ['producto', 'servicio']
   const [showCatalogPicker, setShowCatalogPicker] = useState(false)
   const [catalogSearch, setCatalogSearch] = useState('')
 
@@ -203,21 +241,21 @@ export function ItemFormModal({
    * inventarse una.
    */
   const productosOfrecidos = useMemo(() => {
-      if (state.tipoServicio === 'CORTE') return materialesDelArea(catalogProductos, catalogCategorias, 'CORTE')
-      if (state.tipoServicio === 'IMPRESION') return materialesDelArea(catalogProductos, catalogCategorias, 'IMPRESION')
+      if (modo === 'laser') return materialesDelArea(catalogProductos, catalogCategorias, 'CORTE')
+      if (modo === 'medida') return materialesDelArea(catalogProductos, catalogCategorias, tipoActual.area === 'CORTE' ? 'CORTE' : 'IMPRESION')
       return catalogProductos
-  }, [catalogProductos, catalogCategorias, state.tipoServicio])
+  }, [catalogProductos, catalogCategorias, modo, tipoActual.area])
 
   // El desplegable compara textos tal cual, asi que "Acrilico" y "Acrilico"
   // con tilde son dos cosas distintas y el campo sale vacio aunque el material
   // exista. `buscarMaterial` si los reconoce como el mismo, asi que en cuanto
   // carga la configuracion se escribe el nombre bueno.
   useEffect(() => {
-      if (state.tipoServicio !== 'CORTE') return
+      if (modo !== 'laser') return
       if (materialCorte && materialCorte.nombre !== state.materialDeCorte) {
           setState((prev: any) => ({ ...prev, materialDeCorte: materialCorte.nombre }))
       }
-  }, [materialCorte, state.materialDeCorte, state.tipoServicio])
+  }, [materialCorte, state.materialDeCorte, modo])
   const grosoresPegado = useMemo(
       () => grosoresDe(buscarMaterial(matTaller, state.tipoPegado)),
       [matTaller, state.tipoPegado]
@@ -248,7 +286,7 @@ export function ItemFormModal({
       setCatalogMaterialId(null)
       setCatalogVarianteId(null)
       setModoMaterialManual(false)
-  }, [state.tipoServicio])
+  }, [tipoActual.id])
 
   const catalogM2 = useMemo(() =>
       catalogProductos.filter(p => p.activo !== false && p.tipoVenta === 'metro_cuadrado'),
@@ -493,8 +531,8 @@ export function ItemFormModal({
     const usaMayor = cantidadMayor > 0 && cantidadCalculo >= cantidadMayor && precioMayor > 0;
     const precioEfectivo = usaMayor ? precioMayor : precioUnitario;
 
-    if (cantidadCalculo > 0 || (modoCobroLaser === 'tiempo' && tipoServicio === 'CORTE')) {
-        if (tipoServicio === 'CORTE' && modoCobroLaser === 'tiempo') {
+    if (cantidadCalculo > 0 || (modoCobroLaser === 'tiempo' && modo === 'laser')) {
+        if (modo === 'laser' && modoCobroLaser === 'tiempo') {
             const h = parseFloat(horas) || 0;
             const m = parseFloat(minutos) || 0;
             const s = parseFloat(segundos) || 0;
@@ -503,7 +541,7 @@ export function ItemFormModal({
         } else if (unidad === 'm2' && medidaXCm > 0 && medidaYCm > 0) {
             costoBaseUnitario = (medidaXCm / 100) * (medidaYCm / 100) * precioEfectivo;
 
-            if (tipoServicio === 'IMPRESION') {
+            if (modo === 'medida') {
                 if (impresionLaminado) {
                     // Modo automatico: el largo real que se lleva del rollo, ya
                     // con la pieza girada y con las pasadas que hagan falta.
@@ -534,7 +572,7 @@ export function ItemFormModal({
       state.cantidad, state.precioUnitario, state.precioMayor, state.cantidadMayor,
       state.unidad, state.medidaXCm, state.medidaYCm,
       horas, minutos, segundos, state.suministrarMaterial, state.costoMaterialExtra,
-      state.tipoServicio, state.modoCobroLaser, state.impresionLaminado,
+      modo, state.modoCobroLaser, state.impresionLaminado,
       state.tipoCobroLaminado, state.precioLaminadoLineal, state.precioLaminadoManual,
       state.impresionPegado, state.proveedorPegado, state.precioPegado
   ]);
@@ -550,7 +588,7 @@ export function ItemFormModal({
         if (state.medidaYCm <= 0) { newErrors.medidaYCm = true; hasError = true; }
     }
 
-    if (state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo') {
+    if (modo === 'laser' && state.modoCobroLaser === 'tiempo') {
         const tH = parseFloat(horas) || 0;
         const tMin = parseFloat(minutos) || 0;
         const tSec = parseFloat(segundos) || 0;
@@ -587,7 +625,7 @@ export function ItemFormModal({
         : `${mVal}:${sVal}`;
 
     let detallesExtras = [];
-    if (state.tipoServicio === 'IMPRESION') {
+    if (modo === 'medida') {
         detallesExtras.push(`Mat: ${state.materialImpresion}`);
         
         // Corte detallado
@@ -616,7 +654,7 @@ export function ItemFormModal({
     // De donde sale el material que se apunta: del catalogo si se eligio ahi,
     // del selector de respaldo si se escribio a mano. Si no hay ninguno no se
     // inventa: el renglon sale en la lista de pendientes, que es lo honesto.
-    const materialParaAuditoria = state.tipoServicio === 'VENTA'
+    const materialParaAuditoria = modo === 'catalogo'
         ? catalogProductos.find((p: any) => p.id === ventaProductoId)
         : modoMaterialManual
             ? catalogProductos.find((p: any) => p.id === manualMaterialId)
@@ -628,13 +666,19 @@ export function ItemFormModal({
         colorAcrilico: colorFinal,
         grosorPegado: state.impresionPegado ? (state.grosorPegado || null) : null,
         fondoBlancoPegado: state.impresionPegado ? !!state.fondoBlancoPegado : false,
-        materialDetalleCorte: state.tipoServicio === 'CORTE' 
+        materialDetalleCorte: modo === 'laser' 
             ? `${state.materialDeCorte} ${state.materialDeCorte === 'Cartulina' ? 'N/A' : state.grosorMaterial} ${colorFinal}`
-            : state.tipoServicio === 'IMPRESION' 
+            : modo === 'medida' 
             ? detallesExtras.join(" | ")
             : null,
         precioUnitario: finalUnitPrice,
-        tiempoCorte: state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo' ? tiempoString : "Servicio",
+        // El tipo elegido, con su nombre copiado: si luego se renombra o se
+        // borra, la orden sigue diciendo que fue. Y el modo, para las
+        // pantallas que reconocen un trabajo de laser.
+        tipoTrabajoId: tipoActual.id,
+        tipoTrabajoNombre: tipoActual.nombre,
+        modoCobro: modo,
+        tiempoCorte: modo === 'laser' && state.modoCobroLaser === 'tiempo' ? tiempoString : "Servicio",
 
         // La orden nace sabiendo que material gasto.
         //
@@ -647,7 +691,7 @@ export function ItemFormModal({
             materialAuditado: {
                 nombre: materialParaAuditoria.nombre,
                 productoId: materialParaAuditoria.id,
-                m2: state.tipoServicio === 'IMPRESION'
+                m2: modo === 'medida'
                     ? Math.round((state.medidaXCm / 100) * (state.medidaYCm / 100) * (state.cantidad || 1) * 10000) / 10000
                     : 0,
                 laminado: !!state.impresionLaminado,
@@ -714,29 +758,30 @@ export function ItemFormModal({
                     </div>
                     <div className="md:col-span-4 space-y-1.5">
                         <Label className="text-[10px] font-black uppercase text-slate-400 ml-1">Servicio</Label>
-                        <Select value={state.tipoServicio} onValueChange={v => {
-                            const updates: any = { tipoServicio: v };
-                            if (v === 'IMPRESION') updates.unidad = 'm2';
-                            else if (v === 'CORTE') updates.unidad = 'tiempo';
-                            else updates.unidad = 'und';
-                            setState({...state, ...updates});
+                        <Select value={tipoActual.id} onValueChange={id => {
+                            const t = todosLosTipos.find(x => x.id === id)
+                            if (!t) return
+                            setState({
+                                ...state,
+                                tipoTrabajoId: t.id,
+                                tipoTrabajoNombre: t.nombre,
+                                tipoServicio: tipoServicioDe(t),
+                                unidad: unidadInicialDe(t.modo),
+                            });
                             setErrors({});
                         }}>
                             <SelectTrigger className="h-12 rounded-xl border-none bg-blue-50 dark:bg-blue-900/30 text-blue-600 font-black uppercase"><SelectValue /></SelectTrigger>
                             <SelectContent className="rounded-2xl border-none shadow-2xl">
-                                <SelectItem value="IMPRESION">🖨️ Impresión</SelectItem>
-                                <SelectItem value="CORTE">✂️ Corte Láser</SelectItem>
-                                <SelectItem value="VENTA">🛍️ Venta / Producto</SelectItem>
-                                <SelectItem value="DISENO">🎨 Diseño</SelectItem>
-                                <SelectItem value="ROTULACION">🚗 Rotulación</SelectItem>
-                                <SelectItem value="OTROS">📦 Otros</SelectItem>
+                                {opcionesTipo.map(t => (
+                                    <SelectItem key={t.id} value={t.id}>{t.emoji} {t.nombre}</SelectItem>
+                                ))}
                             </SelectContent>
                         </Select>
                     </div>
                 </div>
 
                 <AnimatePresence>
-                    {state.tipoServicio === 'CORTE' && (
+                    {modo === 'laser' && (
                         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="p-6 bg-orange-50 dark:bg-orange-900/10 rounded-[2rem] border border-orange-100 dark:border-orange-800 space-y-6">
                             <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                                 <h4 className="text-[10px] font-black uppercase text-orange-600 flex items-center gap-2 tracking-[0.2em]"><Scissors className="w-4 h-4"/> Parámetros de Láser</h4>
@@ -878,7 +923,7 @@ export function ItemFormModal({
 
                 {/* PANEL DE VENTA POR UNIDAD */}
                 <AnimatePresence>
-                    {state.tipoServicio === 'VENTA' && (
+                    {modo === 'catalogo' && (
                         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
                             className="p-6 bg-emerald-50 dark:bg-emerald-900/10 rounded-[2rem] border border-emerald-100 dark:border-emerald-800 space-y-5">
                             <div className="flex items-center gap-2">
@@ -887,29 +932,28 @@ export function ItemFormModal({
                                 <p className="text-[8px] text-emerald-600/60 font-bold">Precio fijo × cantidad</p>
                             </div>
 
+                            {/* Lo que se vende sale del catalogo, y a todo el ancho: en
+                                media columna, en el movil, las pestanas salian cortadas y
+                                los productos se veian de uno en uno. El tipo elegido
+                                arriba decide si se ofrecen productos, servicios o ambos. */}
+                            {productosOfrecidos.some((p: any) => p.activo !== false && tiposCatalogo.includes(tipoEntradaDe(p))) && (
+                                <SelectorCatalogo
+                                    key={tipoActual.id}
+                                    productos={productosOfrecidos}
+                                    categorias={catalogCategorias}
+                                    seleccionadoId={ventaProductoId}
+                                    onElegir={seleccionarProductoVenta}
+                                    esAliado={esAliado}
+                                    pestanaInicial={tiposCatalogo[0]}
+                                    soloTipos={tiposCatalogo}
+                                />
+                            )}
+
                             <div className="grid grid-cols-2 gap-4">
                                 {/* Precio unitario */}
                                 <div className="space-y-2">
                                     <Label className="text-[9px] font-black uppercase text-emerald-600 ml-1">Precio por Unidad (USD)</Label>
 
-                                    {/* Antes esto era una caja de búsqueda que no enseñaba
-                                        nada hasta acertar las primeras letras, y que al
-                                        elegir solo copiaba el precio: la orden no guardaba
-                                        qué se había vendido, así que no descontaba stock ni
-                                        salía en las estadísticas. */}
-                                    {productosOfrecidos.some((p: any) => p.activo !== false && tipoEntradaDe(p) !== 'material') && (
-                                        <div className="mb-3">
-                                            <SelectorCatalogo
-                                                productos={productosOfrecidos}
-                                                categorias={catalogCategorias}
-                                                seleccionadoId={ventaProductoId}
-                                                onElegir={seleccionarProductoVenta}
-                                                esAliado={esAliado}
-                                                pestanaInicial="producto"
-                                                soloTipos={['producto', 'servicio']}
-                                            />
-                                        </div>
-                                    )}
 
                                     <div className="relative">
                                         <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
@@ -960,7 +1004,7 @@ export function ItemFormModal({
                         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="p-6 bg-blue-50 dark:bg-blue-900/10 rounded-[2rem] border border-blue-100 dark:border-blue-900/30 space-y-6">
                             
                             {/* SECCIÓN: OPCIONES DE IMPRESIÓN */}
-                            {state.tipoServicio === 'IMPRESION' && (
+                            {modo === 'medida' && (
                                 <div className="space-y-4 pb-4 border-b border-blue-200 dark:border-blue-900/50">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
@@ -1456,7 +1500,7 @@ export function ItemFormModal({
                     )}
                 </AnimatePresence>
 
-                {!(state.tipoServicio === 'CORTE' && state.modoCobroLaser === 'tiempo') && state.tipoServicio !== 'VENTA' && (
+                {!(modo === 'laser' && state.modoCobroLaser === 'tiempo') && modo !== 'catalogo' && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div className="space-y-2">
                             <div className="flex items-center justify-between ml-1">
@@ -1559,7 +1603,7 @@ export function ItemFormModal({
                         se cobra solo el tiempo. Dos interruptores para el mismo
                         dato en la misma pantalla es una invitacion a que uno de
                         los dos se quede sin tocar. */}
-                    <div className={cn("p-4 rounded-2xl border items-center justify-between transition-all", state.tipoServicio === 'CORTE' ? "hidden" : "flex", state.suministrarMaterial ? "bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200" : "bg-slate-50 dark:bg-slate-900 border-slate-100")}>
+                    <div className={cn("p-4 rounded-2xl border items-center justify-between transition-all", modo === 'laser' ? "hidden" : "flex", state.suministrarMaterial ? "bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200" : "bg-slate-50 dark:bg-slate-900 border-slate-100")}>
                         <div className="flex items-center gap-3">
                             <div className={cn("p-2 rounded-lg", state.suministrarMaterial ? "bg-emerald-500 text-white" : "bg-slate-200 text-slate-400")}>
                                 <Box className="w-5 h-5" />

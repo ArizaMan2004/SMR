@@ -1,6 +1,7 @@
 // @/components/dashboard/CatalogInventoryView.tsx
 "use client"
 
+import { TiposTrabajoPanel } from "@/components/dashboard/TiposTrabajoPanel"
 import { CompraLoteModal } from "@/components/dashboard/CompraLoteModal"
 import { renglonDeDocumento } from "@/lib/services/documento-renglones";
 import React, { useState, useEffect, useMemo, useCallback, useRef} from 'react'
@@ -18,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
 import {
-    Package, Plus, Search, Trash2, Pencil, Tag, Layers, ShoppingCart, History, DollarSign, Ruler, Box, X, ChevronRight, AlertTriangle, CheckCircle2, Banknote, Receipt, Percent, BarChart3, Palette, Grid3X3, ArrowUpCircle, ArrowDownCircle, RefreshCw, Settings2, CircleDollarSign, TrendingUp, FileText, Eye, FileDown, User, Phone, Image as ImageIcon, PackagePlus,
+    Package, Plus, Search, Trash2, Pencil, Tag, Layers, ShoppingCart, History, DollarSign, Ruler, Box, X, ChevronRight, AlertTriangle, CheckCircle2, Banknote, Receipt, Percent, BarChart3, Palette, Grid3X3, ArrowUpCircle, ArrowDownCircle, RefreshCw, Settings2, CircleDollarSign, TrendingUp, FileText, Eye, FileDown, User, Phone, Image as ImageIcon, PackagePlus, ListChecks,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { uploadFileToCloudinary } from '@/lib/services/cloudinary-service'
@@ -181,6 +182,7 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
     const [isCartItemModalOpen, setIsCartItemModalOpen] = useState(false)
     const [isReceiptOpen, setIsReceiptOpen] = useState(false)
     const [isMaterialesOpen, setIsMaterialesOpen] = useState(false)
+    const [isTiposOpen, setIsTiposOpen] = useState(false)
 
     /** La venta que se esta preparando para entregar. */
     const [pdfEnEdicion, setPdfEnEdicion] = useState<DatosDocumento | null>(null)
@@ -696,6 +698,12 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                         {/* Los materiales del taller viven aquí, al lado de las
                             categorías: es donde ya se configura qué se vende y a
                             cómo. Buscarlos en otra pantalla sería una adivinanza. */}
+                        {/* Lo que se ofrece en "Servicio" al facturar vive junto a
+                            lo que se vende: aqui se decide que existe y a como. */}
+                        <Button variant="outline" onClick={() => setIsTiposOpen(true)}
+                            className="h-12 rounded-2xl border-black/10 dark:border-white/10 font-black uppercase text-xs px-4">
+                            <ListChecks className="w-4 h-4 mr-2" /> Tipos de trabajo
+                        </Button>
                         <Button variant="outline" onClick={() => setIsMaterialesOpen(true)}
                             className="h-12 rounded-2xl border-black/10 dark:border-white/10 font-black uppercase text-xs px-4">
                             <Layers className="w-4 h-4 mr-2" /> Materiales de taller
@@ -2107,6 +2115,12 @@ export function CatalogInventoryView({ currentUser, rates, pdfLogoBase64, firmaB
                 firmaBase64={firmaBase64}
                 selloBase64={selloBase64}
             />
+
+            <DlgMat open={isTiposOpen} onOpenChange={setIsTiposOpen}>
+                <DlgMatContent className="max-w-3xl p-0 border-none bg-transparent shadow-none max-h-[90vh] overflow-y-auto custom-scrollbar">
+                    <TiposTrabajoPanel />
+                </DlgMatContent>
+            </DlgMat>
 
             <DlgMat open={isMaterialesOpen} onOpenChange={setIsMaterialesOpen}>
                 <DlgMatContent className="max-w-3xl p-0 border-none bg-transparent shadow-none max-h-[90vh] overflow-y-auto custom-scrollbar">

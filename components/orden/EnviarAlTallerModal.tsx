@@ -113,7 +113,7 @@ const adicionalesDeItems = (items: any[]): string[] => {
  */
 const areaInicial = (items: any[]): string => {
     const hayCorte = items.some(i =>
-        String(i?.tipoServicio || '').toUpperCase().startsWith('CORTE') || i?.unidad === 'tiempo')
+        String(i?.tipoServicio || '').toUpperCase().startsWith('CORTE') || i?.unidad === 'tiempo' || i?.modoCobro === 'laser')
     return hayCorte ? 'CORTE_LASER' : 'IMPRESION'
 }
 
